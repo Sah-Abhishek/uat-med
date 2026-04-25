@@ -1,0 +1,199 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────
+   LIGHT THEME TOKENS
+   ─────────────────────────────────────────────────────── */
+:root {
+  --bg: 245 246 248;           /* #F5F6F8 — app canvas */
+  --surface: 255 255 255;      /* #FFFFFF — cards */
+  --surface-2: 249 250 252;    /* hover, nested */
+  --surface-sunken: 240 242 246;
+
+  --ink: 24 27 32;             /* near-black text */
+  --ink-muted: 96 102 112;
+  --ink-subtle: 148 152 160;
+
+  --line: 229 231 236;
+  --line-strong: 212 216 224;
+
+  --primary-soft: 255 246 215;   /* #FFF6D7 */
+  --danger-soft: 253 224 230;    /* #FDE0E6 */
+  --success-soft: 223 247 233;
+  --warn-soft: 255 237 213;
+  --info-soft: 219 237 250;
+
+  /* Milestone / status tile backgrounds — soft pastels for light mode */
+  --tile-taupe: 244 234 222;
+  --tile-indigo: 232 230 252;
+  --tile-teal: 218 240 236;
+  --tile-mint: 220 243 228;
+  --tile-sky: 219 237 250;
+  --tile-butter: 254 241 198;
+  --tile-coral: 253 224 230;
+}
+
+/* ─────────────────────────────────────────────────────────
+   DARK THEME TOKENS
+   ─────────────────────────────────────────────────────── */
+.dark {
+  --bg: 14 17 22;              /* #0E1116 — deep charcoal */
+  --surface: 28 32 40;         /* #1C2028 — cards */
+  --surface-2: 38 42 51;       /* elevated */
+  --surface-sunken: 20 23 29;
+
+  --ink: 232 234 237;
+  --ink-muted: 155 160 168;
+  --ink-subtle: 110 115 122;
+
+  --line: 47 51 61;
+  --line-strong: 60 65 76;
+
+  --primary-soft: 64 50 10;
+  --danger-soft: 73 28 43;
+  --success-soft: 21 62 39;
+  --warn-soft: 75 48 10;
+  --info-soft: 21 50 76;
+
+  /* Milestone / status tile backgrounds — saturated dark-mode versions */
+  --tile-taupe: 73 58 44;
+  --tile-indigo: 60 48 95;
+  --tile-teal: 30 74 72;
+  --tile-mint: 25 66 45;
+  --tile-sky: 22 56 84;
+  --tile-butter: 84 63 18;
+  --tile-coral: 91 38 54;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-bg text-ink font-sans transition-colors;
+  }
+
+  *:focus-visible {
+    outline: 2px solid #FFC72C;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: #FFC72C;
+    color: #1E1A06;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--line-strong));
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--ink-subtle));
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* ── Buttons ────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-semibold transition
+           text-sm h-10 px-4 rounded-pill whitespace-nowrap
+           disabled:opacity-50 disabled:cursor-not-allowed
+           active:scale-[0.98];
+  }
+  .btn-sm {
+    @apply h-8 px-3 text-xs;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-primary-ink hover:bg-primary-hover shadow-sm;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-white hover:bg-danger-hover;
+  }
+  .btn-soft {
+    @apply btn bg-primary-soft text-ink hover:bg-primary/30;
+  }
+  .btn-soft-danger {
+    @apply btn bg-danger-soft text-danger hover:bg-danger/20;
+  }
+  .btn-ghost {
+    @apply btn text-ink-muted hover:bg-surface-sunken hover:text-ink;
+  }
+  .btn-outline {
+    @apply btn bg-surface border border-line text-ink hover:bg-surface-2;
+  }
+
+  /* ── Inputs ─────────────────────────────────── */
+  .input {
+    @apply w-full h-10 px-3.5 bg-surface border border-line rounded-pill text-sm
+           text-ink placeholder:text-ink-subtle
+           focus:border-primary focus:ring-0 focus:outline-none
+           disabled:bg-surface-sunken disabled:text-ink-muted
+           transition-colors;
+  }
+  .input-sharp {
+    /* some places want rounded-lg instead of pill */
+    @apply input rounded-lg;
+  }
+  .textarea {
+    @apply w-full min-h-[88px] px-3.5 py-2.5 bg-surface border border-line rounded-lg text-sm
+           text-ink placeholder:text-ink-subtle
+           focus:border-primary focus:ring-0 focus:outline-none
+           resize-y transition-colors;
+  }
+
+  /* ── Label ──────────────────────────────────── */
+  .label {
+    @apply block text-[13px] font-medium text-ink-muted mb-1.5;
+  }
+  .label-required::after {
+    content: ' *';
+    color: #E8436E;
+    font-weight: 600;
+  }
+
+  /* ── Card ───────────────────────────────────── */
+  .card {
+    @apply bg-surface border border-line rounded-card;
+  }
+
+  /* ── Chip (status pill) ─────────────────────── */
+  .chip {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-pill text-xs font-semibold;
+  }
+
+  /* ── Table ──────────────────────────────────── */
+  .table-head {
+    @apply text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-muted
+           px-4 py-3 text-left bg-surface-sunken/60 border-b border-line;
+  }
+  .table-cell {
+    @apply px-4 py-3.5 text-sm text-ink border-b border-line/60 align-middle;
+  }
+
+  /* ── Decorative arrow next to page titles ───── */
+  .page-arrow {
+    @apply inline-flex items-center justify-center w-11 h-11 rounded-full
+           text-primary text-xl;
+  }
+
+  /* ── Soft ring for focus on interactive pills ─ */
+  .ring-soft {
+    @apply focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2;
+  }
+}

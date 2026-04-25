@@ -1,0 +1,614 @@
+import { useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm, useFieldArray, Controller } from 'react-hook-form';
+import {
+  getWorklist,
+  updateWorklist,
+  deleteWorklist,
+  allocateWorklist,
+  type AllocationRange,
+  type CreateWorklistDto,
+} from '@/api/worklists';
+import { listUsers } from '@/api/users';
+import type { ApiErrorShape } from '@/api/types';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Input, Label, Select } from '@/components/ui/Field';
+import { Modal, ModalFooter, Tabs, PillBadge } from '@/components/ui/Primitives';
+import { WorklistStatusChip } from '@/components/ui/Chip';
+import { cn, formatDate, formatNumber } from '@/lib/utils';
+import {
+  ArrowLeft,
+  Building2,
+  MapPin,
+  Stethoscope,
+  Cog,
+  Pencil,
+  Trash2,
+  Plus,
+  ShieldCheck,
+  X as XIcon,
+  Loader2,
+} from 'lucide-react';
+
+export function WorklistDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'details' | 'activity'>('details');
+
+  const { data, isPending } = useQuery({
+    queryKey: ['worklist', id],
+    queryFn: () => getWorklist(id!),
+    enabled: !!id,
+  });
+
+  if (isPending) {
+    return (
+      <div className="p-8 flex items-center gap-2 text-ink-muted">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading worklist…
+      </div>
+    );
+  }
+  if (!data) return <div className="p-8 text-ink-muted">Not found.</div>;
+
+  const s = data.chartSummary;
+  const progressPct = s.total ? (s.closed / s.total) * 100 : 0;
+
+  return (
+    <div className="p-8 max-w-[1600px] space-y-6">
+      <Link
+        to="/worklists"
+        className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-ink transition mb-2"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" />
+        Back to worklists
+      </Link>
+
+      <PageHeader title="Worklist details" subtitle="Worklist details" />
+
+      {/* Top row: info / donut / counts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Info card */}
+        <Card padding="default" className="lg:col-span-1">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-bold text-ink">
+              Worklist #: {data.worklistNumber}
+            </h3>
+            <WorklistStatusChip status={data.status} />
+          </div>
+
+          <div className="space-y-2 text-sm mb-5">
+            <MetaRow icon={Building2} label="Client" value={`#${data.clientId}`} />
+            <MetaRow icon={MapPin} label="Location" value={`#${data.locationId}`} />
+            <MetaRow icon={Stethoscope} label="Speciality" value={`#${data.primarySpecialityId}`} />
+            <MetaRow icon={Cog} label="Process" value={`#${data.processId}`} />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 pt-4 border-t border-line">
+            <StatMini label="Received date" value={formatDate(data.receivedDate)} />
+            <StatMini label="Date of service" value={formatDate(data.dateOfService)} />
+            <StatMini label="Total charts" value={formatNumber(data.totalCharts)} />
+          </div>
+
+          <div className="flex gap-2 mt-5">
+            <Button onClick={() => setEditOpen(true)} leftIcon={<Pencil className="w-3.5 h-3.5" />}>
+              Edit Worklist
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => setDeleteOpen(true)}
+              leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+            >
+              Delete Worklist
+            </Button>
+          </div>
+        </Card>
+
+        {/* Donut */}
+        <Card padding="default" className="lg:col-span-1">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-2xl font-bold text-ink tracking-tightish">
+              {progressPct.toFixed(2)}%
+            </p>
+          </div>
+          <p className="text-xs text-ink-muted mb-4">Worklist progress</p>
+
+          <div className="flex items-center gap-5">
+            <ProgressDonut
+              segments={[
+                { value: s.unallocated, color: '#9CA3AF' },
+                { value: s.notStarted, color: '#F87171' },
+                { value: s.inProgress, color: '#FFC72C' },
+                { value: s.closed, color: '#22C55E' },
+              ]}
+            />
+            <div className="text-sm space-y-1.5">
+              <LegendRow color="#9CA3AF" label="Unallocated" value={s.unallocated} />
+              <LegendRow color="#F87171" label="Not Started" value={s.notStarted} />
+              <LegendRow color="#FFC72C" label="In Progress" value={s.inProgress} />
+              <LegendRow color="#22C55E" label="Closed" value={s.closed} />
+            </div>
+          </div>
+        </Card>
+
+        {/* Counts */}
+        <Card padding="default" className="lg:col-span-1">
+          <h3 className="text-[15px] font-bold text-ink mb-1">Charts</h3>
+          <p className="text-xs text-ink-muted mb-5">
+            Overall status of charts in this worklist
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <BigNum label="Total Charts" value={s.total} tone="success" />
+            <BigNum label="Allocated" value={s.allocated} tone="primary" />
+            <BigNum label="Unallocated" value={s.unallocated} tone="info" />
+          </div>
+        </Card>
+      </div>
+
+      {/* Bottom row: Details table + Allocate Fresh Volume */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card padding="none">
+          <div className="px-6 pt-5">
+            <Tabs
+              tabs={[
+                { key: 'details', label: 'Details' },
+                { key: 'activity', label: 'Activity' },
+              ]}
+              value={activeTab}
+              onChange={(v) => setActiveTab(v as 'details' | 'activity')}
+            />
+          </div>
+          {activeTab === 'details' ? (
+            <DetailsTable summary={s} />
+          ) : (
+            <div className="p-10 text-center text-sm text-ink-muted">
+              Activity log coming soon.
+            </div>
+          )}
+        </Card>
+
+        <AllocateFreshVolume worklistId={id!} unallocatedCount={s.unallocated} />
+      </div>
+
+      <EditWorklistModal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        current={data}
+      />
+      <DeleteWorklistModal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        worklistId={id!}
+        expectedNumber={data.worklistNumber}
+      />
+    </div>
+  );
+}
+
+/* ── Tiny subcomponents ──────────────────────────────────── */
+
+function MetaRow({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+      <span className="text-ink-muted">{label}:</span>
+      <span className="text-ink font-semibold">{value}</span>
+    </div>
+  );
+}
+
+function StatMini({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div>
+      <p className="text-sm font-semibold text-ink">{value}</p>
+      <p className="text-[11px] text-ink-muted mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+function BigNum({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'success' | 'primary' | 'info';
+}) {
+  const textColor = {
+    success: 'text-success',
+    primary: 'text-primary-ink',
+    info: 'text-info',
+  }[tone];
+  return (
+    <div className="rounded-xl border border-line p-3 text-center">
+      <p className={cn('text-3xl font-bold tracking-tightish', textColor)}>
+        {formatNumber(value)}
+      </p>
+      <p className={cn('text-xs font-semibold mt-1', textColor)}>{label}</p>
+    </div>
+  );
+}
+
+function LegendRow({ color, label, value }: { color: string; label: string; value: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+      <span className="text-ink-muted text-[13px] flex-1">{label}</span>
+      <span className="font-mono text-ink text-[13px] tabular-nums ml-6">
+        {formatNumber(value)}
+      </span>
+    </div>
+  );
+}
+
+function ProgressDonut({ segments }: { segments: Array<{ value: number; color: string }> }) {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const r = 38;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  return (
+    <svg viewBox="0 0 100 100" className="w-28 h-28 -rotate-90">
+      <circle cx="50" cy="50" r={r} fill="none" stroke="rgb(var(--surface-sunken))" strokeWidth="14" />
+      {segments.map((s, i) => {
+        const len = (s.value / total) * c;
+        const circle = (
+          <circle
+            key={i}
+            cx="50"
+            cy="50"
+            r={r}
+            fill="none"
+            stroke={s.color}
+            strokeWidth="14"
+            strokeDasharray={`${len} ${c}`}
+            strokeDashoffset={-offset}
+          />
+        );
+        offset += len;
+        return circle;
+      })}
+    </svg>
+  );
+}
+
+/* ── Details table (progress grid) ───────────────────────── */
+function DetailsTable({ summary }: { summary: NonNullable<Awaited<ReturnType<typeof getWorklist>>>['chartSummary'] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[800px]">
+        <thead>
+          <tr>
+            <th className="table-head">Progress</th>
+            <th className="table-head">Ready to code</th>
+            <th className="table-head">Coding in progress</th>
+            <th className="table-head">Coding done</th>
+            <th className="table-head">Ready to audit</th>
+            <th className="table-head">Audit in progress</th>
+            <th className="table-head">Audit done</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td className="table-cell">
+              <PillBadge tone="mint">
+                Allocated ({formatNumber(summary.allocated)})
+              </PillBadge>
+            </td>
+            <td className="table-cell text-sm">{formatNumber(summary.notStarted)}</td>
+            <td className="table-cell text-sm">{formatNumber(summary.inProgress)}</td>
+            <td className="table-cell text-sm">—</td>
+            <td className="table-cell text-sm">—</td>
+            <td className="table-cell text-sm">—</td>
+            <td className="table-cell text-sm">{formatNumber(summary.closed)}</td>
+          </tr>
+          <tr>
+            <td className="table-cell">
+              <PillBadge tone="sky">
+                Unallocated ({formatNumber(summary.unallocated)})
+              </PillBadge>
+            </td>
+            <td className="table-cell text-sm">—</td>
+            <td className="table-cell text-sm">—</td>
+            <td className="table-cell text-sm">—</td>
+            <td className="table-cell text-sm">—</td>
+            <td className="table-cell text-sm">—</td>
+            <td className="table-cell text-sm">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ── Allocate Fresh Volume panel ─────────────────────────── */
+interface AllocationForm {
+  ranges: Array<{ from: number; to: number; assigneeId: number }>;
+}
+
+function AllocateFreshVolume({
+  worklistId,
+  unallocatedCount,
+}: {
+  worklistId: string;
+  unallocatedCount: number;
+}) {
+  const qc = useQueryClient();
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const users = useQuery({
+    queryKey: ['users', 'coders-list'],
+    queryFn: () => listUsers({ pageSize: 100 }),
+  });
+
+  const { control, register, handleSubmit, reset } = useForm<AllocationForm>({
+    defaultValues: { ranges: [{ from: 1, to: 1, assigneeId: 0 }] },
+  });
+  const { fields, append, remove } = useFieldArray({ control, name: 'ranges' });
+
+  const allocateMutation = useMutation({
+    mutationFn: (ranges: AllocationRange[]) => allocateWorklist(worklistId, ranges),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId] });
+      reset();
+    },
+    onError: (err) => setServerError((err as unknown as ApiErrorShape).message),
+  });
+
+  return (
+    <Card padding="default">
+      <h3 className="text-[15px] font-bold text-ink mb-1">Allocate Fresh Volume</h3>
+      <p className="text-xs text-ink-muted mb-4">
+        Select serial numbers &amp; user to assign volume
+      </p>
+
+      <div className="rounded-xl bg-danger-soft/60 border border-dashed border-danger/40 p-4 mb-5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-danger" />
+          <span className="text-sm font-semibold text-ink">
+            Volume available for allocation
+          </span>
+        </div>
+        <div className="text-right">
+          <p className="text-2xl font-bold text-danger">
+            {formatNumber(unallocatedCount)}
+          </p>
+          <p className="text-[11px] text-danger font-semibold">Remaining</p>
+        </div>
+      </div>
+
+      <form
+        onSubmit={handleSubmit((d) => {
+          setServerError(null);
+          allocateMutation.mutate(
+            d.ranges.map((r) => ({
+              from: Number(r.from),
+              to: Number(r.to),
+              assigneeId: Number(r.assigneeId),
+              role: 'CODER' as const,
+            })),
+          );
+        })}
+        className="space-y-3"
+      >
+        {serverError && (
+          <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger border border-danger/30">
+            {serverError}
+          </div>
+        )}
+
+        {fields.map((f, i) => (
+          <div key={f.id} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
+            <div>
+              {i === 0 && <Label className="text-[11px]">From</Label>}
+              <Input type="number" placeholder="From" {...register(`ranges.${i}.from`, { valueAsNumber: true, required: true })} />
+            </div>
+            <div>
+              {i === 0 && <Label className="text-[11px]">To</Label>}
+              <Input type="number" placeholder="To" {...register(`ranges.${i}.to`, { valueAsNumber: true, required: true })} />
+            </div>
+            <div>
+              {i === 0 && <Label className="text-[11px]">Assign to</Label>}
+              <Controller
+                control={control}
+                name={`ranges.${i}.assigneeId`}
+                render={({ field }) => (
+                  <Select
+                    placeholder="Select..."
+                    value={String(field.value || '')}
+                    onChange={(e) => field.onChange(Number(e.target.value))}
+                  >
+                    <option value="">Select...</option>
+                    {users.data?.items.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              disabled={fields.length === 1}
+              className="w-10 h-10 rounded-full bg-danger-soft text-danger hover:bg-danger/20 transition flex items-center justify-center disabled:opacity-30"
+            >
+              <XIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+
+        <div className="flex items-center justify-between pt-2">
+          <Button
+            type="button"
+            variant="soft"
+            leftIcon={<Plus className="w-3.5 h-3.5" />}
+            onClick={() => append({ from: 1, to: 1, assigneeId: 0 })}
+          >
+            Add another
+          </Button>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => reset({ ranges: [{ from: 1, to: 1, assigneeId: 0 }] })}
+            >
+              Clear
+            </Button>
+            <Button type="submit" loading={allocateMutation.isPending}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+/* ── Edit Worklist modal ────────────────────────────── */
+function EditWorklistModal({
+  open,
+  onClose,
+  current,
+}: {
+  open: boolean;
+  onClose: () => void;
+  current: NonNullable<Awaited<ReturnType<typeof getWorklist>>>;
+}) {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+
+  const { register, handleSubmit } = useForm<Partial<CreateWorklistDto>>({
+    defaultValues: {
+      worklistNumber: current.worklistNumber,
+      primarySpecialityId: current.primarySpecialityId,
+      receivedDate: current.receivedDate,
+      numberOfCharts: current.totalCharts,
+    },
+  });
+
+  const mutation = useMutation({
+    mutationFn: (dto: Partial<CreateWorklistDto>) => updateWorklist(current.id, dto),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['worklist', current.id] });
+      qc.invalidateQueries({ queryKey: ['worklists'] });
+      onClose();
+    },
+    onError: (err) => setError((err as unknown as ApiErrorShape).message),
+  });
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit Worklist" size="lg">
+      <form
+        onSubmit={handleSubmit((d) =>
+          mutation.mutate({
+            ...d,
+            primarySpecialityId: d.primarySpecialityId ? Number(d.primarySpecialityId) : undefined,
+            numberOfCharts: d.numberOfCharts ? Number(d.numberOfCharts) : undefined,
+          }),
+        )}
+        className="space-y-4"
+      >
+        {error && (
+          <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger border border-danger/30">
+            {error}
+          </div>
+        )}
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <Label>Worklist #</Label>
+            <Input {...register('worklistNumber')} />
+          </div>
+          <div>
+            <Label>Primary Speciality ID</Label>
+            <Input
+              type="number"
+              {...register('primarySpecialityId', { valueAsNumber: true })}
+            />
+          </div>
+          <div>
+            <Label>Received Date</Label>
+            <Input type="date" {...register('receivedDate')} />
+          </div>
+        </div>
+        <div>
+          <Label>No. of Charts</Label>
+          <Input type="number" {...register('numberOfCharts', { valueAsNumber: true })} />
+        </div>
+        <p className="text-[11px] text-ink-muted">
+          To add a worklist without a file, please populate all fields. To add a worklist with a file,
+          please populate all fields except date of service and no. of charts as they will not be
+          considered.
+        </p>
+        <ModalFooter>
+          <Button variant="ghost" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={mutation.isPending}>
+            Save
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  );
+}
+
+/* ── Delete Worklist modal — type-to-confirm ──────────── */
+function DeleteWorklistModal({
+  open,
+  onClose,
+  worklistId,
+  expectedNumber,
+}: {
+  open: boolean;
+  onClose: () => void;
+  worklistId: string;
+  expectedNumber: string;
+}) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [input, setInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () => deleteWorklist(worklistId, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['worklists'] });
+      navigate('/worklists');
+    },
+    onError: (err) => setError((err as unknown as ApiErrorShape).message),
+  });
+
+  return (
+    <Modal open={open} onClose={onClose} title="Delete Worklist" size="sm">
+      <div className="space-y-4">
+        <p className="text-sm text-ink-muted">
+          Type the Worklist ID to confirm. This action cannot be undone.
+        </p>
+        <div>
+          <Label required>Worklist Id</Label>
+          <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder={expectedNumber} />
+        </div>
+        {error && <p className="text-xs text-danger">{error}</p>}
+        <ModalFooter>
+          <Button variant="ghost" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            disabled={input !== expectedNumber}
+            loading={mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            Delete Worklist
+          </Button>
+        </ModalFooter>
+      </div>
+    </Modal>
+  );
+}
