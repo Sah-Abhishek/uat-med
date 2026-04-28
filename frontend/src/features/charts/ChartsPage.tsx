@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
@@ -7,6 +7,7 @@ import {
   getChartsSummary,
   bulkModifyCharts,
   selfAllocateCharts,
+  getActiveTimer,
   type AllocationAction,
   type BulkModifyDto,
   type ChartListParams,
@@ -16,7 +17,7 @@ import type { ApiErrorShape, Priority } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, Select, SearchInput } from '@/components/ui/Field';
+import { Input, Label, Select, SearchInput, Radio } from '@/components/ui/Field';
 import {
   Modal,
   ModalFooter,
@@ -41,6 +42,8 @@ import {
   ChevronsUpDown,
   Loader2,
   UserPlus,
+  Clock,
+  ChevronRight,
 } from 'lucide-react';
 
 const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
@@ -122,6 +125,8 @@ export function ChartsPage() {
   return (
     <div className="p-8 max-w-[1600px] space-y-5">
       <PageHeader title="Charts" subtitle="Charts" />
+
+      {isCoderOrAuditor && <ActiveTimerCard />}
 
       {/* Summary tiles */}
       {summary.data && (
@@ -444,7 +449,11 @@ function ModifyChartsModal({
 }) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const users = useQuery({ queryKey: ['users', 'all'], queryFn: () => listUsers({ pageSize: 100 }) });
+  const users = useQuery({
+    queryKey: ['users', 'all'],
+    queryFn: () => listUsers({ pageSize: 100 }),
+    enabled: open,
+  });
 
   const { register, handleSubmit, watch } = useForm<{
     priority?: Priority | '';
@@ -506,10 +515,13 @@ function ModifyChartsModal({
           <Label>Allocation action</Label>
           <div className="space-y-2">
             {(['NONE', 'ALLOCATE_CODING', 'ALLOCATE_AUDITING', 'REALLOCATE_TO_ORIGINAL_CODER'] as AllocationAction[]).map((a) => (
-              <label key={a} className="flex items-center gap-2 text-sm">
-                <input type="radio" value={a} {...register('action')} className="accent-primary" />
-                <span>{a.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase())}</span>
-              </label>
+              <Radio
+                key={a}
+                value={a}
+                {...register('action')}
+                label={a.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase())}
+                className="flex"
+              />
             ))}
           </div>
         </div>
@@ -568,5 +580,92 @@ function SelfAllocateConfirm({
       cancelLabel="Cancel"
       loading={mutation.isPending}
     />
+  );
+}
+
+/* ── Currently running chart card — coder/auditor only ────── */
+
+function formatHMS(s: number) {
+  const hh = Math.floor(s / 3600).toString().padStart(2, '0');
+  const mm = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+  const ss = Math.floor(s % 60).toString().padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+function ActiveTimerCard() {
+  const { data: active, isPending } = useQuery({
+    queryKey: ['active-timer'],
+    queryFn: getActiveTimer,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000,
+  });
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, [active]);
+
+  if (isPending) {
+    return (
+      <div className="rounded-card border border-line bg-surface px-5 py-4 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-surface-sunken animate-pulse shrink-0" />
+        <div className="flex-1 space-y-2">
+          <div className="h-3 w-32 bg-surface-sunken rounded animate-pulse" />
+          <div className="h-4 w-48 bg-surface-sunken rounded animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!active) {
+    return (
+      <div className="rounded-card border border-dashed border-line bg-surface-sunken/40 px-5 py-4 flex items-center gap-4">
+        <div className="w-10 h-10 rounded-full bg-surface-sunken flex items-center justify-center shrink-0">
+          <Clock className="w-4 h-4 text-ink-subtle" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.1em] text-ink-subtle font-bold">
+            No chart in progress
+          </p>
+          <p className="text-sm text-ink-muted">
+            Start the timer on a chart to begin working. Only one chart can be active at a time.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const elapsed = Math.max(0, Math.floor((now - Date.parse(active.startedAt)) / 1000));
+
+  return (
+    <Link
+      to={`/charts/${active.chartId}`}
+      className="block group"
+    >
+      <div className="rounded-card border border-primary/40 bg-gradient-to-r from-primary-soft/60 to-warn-soft/40 px-5 py-4 flex items-center gap-4 hover:shadow-card transition">
+        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+          <Clock className="w-4 h-4 text-primary-ink dark:text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.1em] text-primary-ink dark:text-primary font-bold">
+            Currently working on
+          </p>
+          <p className="text-base font-bold text-ink truncate">
+            Chart {active.chartNo ? `#${active.chartNo}` : `${active.chartId}`}
+            <span className="ml-2 text-xs font-normal text-ink-muted">
+              · {active.milestone.replace(/_/g, ' ').toLowerCase()}
+            </span>
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-2xl font-bold font-mono tabular-nums text-ink">
+            {formatHMS(elapsed)}
+          </p>
+          <p className="text-[11px] text-ink-muted">elapsed</p>
+        </div>
+        <ChevronRight className="w-4 h-4 text-ink-muted group-hover:text-ink transition shrink-0" />
+      </div>
+    </Link>
   );
 }

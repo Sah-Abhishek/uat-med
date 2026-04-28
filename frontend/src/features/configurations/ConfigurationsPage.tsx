@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import {
   getGeneralConfig,
   updateGeneralConfig,
@@ -12,6 +12,8 @@ import {
   updateSpecialitiesGeneral,
   getFeedbackCategories,
   updateFeedbackCategories,
+  createAuditArea,
+  deleteAuditArea,
   getAuditingConfig,
   updateAuditingConfig,
   getCodingConfig,
@@ -19,6 +21,7 @@ import {
   getChartFieldsConfig,
   updateChartFieldsConfig,
   createCustomChartField,
+  listPrimarySpecialities,
   updateCustomChartField,
   deleteCustomChartField,
   listHccFieldConfig,
@@ -30,7 +33,8 @@ import {
   type PrimarySpecialityEntry,
   type SubSpecialityEntry,
   type NamedEntry,
-  type FeedbackCategoryGroup,
+  type FeedbackArea,
+  type FeedbackReason,
   type AuditingConfig,
   type CodingConfig,
   type ChartFieldsConfig,
@@ -41,7 +45,7 @@ import type { ApiErrorShape, HccFieldDef, ValidationRule } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, Select } from '@/components/ui/Field';
+import { Input, Label, Select, FancySelect, Radio, Switch, OptionsBuilder } from '@/components/ui/Field';
 import { Modal, ModalFooter, Tabs, ConfirmModal } from '@/components/ui/Primitives';
 import { useAuth } from '@/auth/store';
 import { can } from '@/permissions';
@@ -53,21 +57,14 @@ import {
   CheckCircle2,
   Pencil,
   AlertTriangle,
+  X,
+  Check,
+  Minus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type MainTab = 'general' | 'clients' | 'specialities';
-type SpecTab = 'general' | 'feedback' | 'auditing' | 'coding' | 'chart-fields' | 'hcc-fields';
-
-const AUDIT_AREAS: FeedbackCategoryGroup['area'][] = [
-  'Primary Diagnosis',
-  'Secondary Diagnosis',
-  'Procedures',
-  'ED/EM Level',
-  'Modifier',
-  'POA Indicator',
-  'Drug Value',
-];
+type MainTab = 'general' | 'specialities' | 'hcc';
+type SpecTab = 'general' | 'feedback' | 'auditing' | 'coding' | 'chart-fields';
 
 const STANDARD_CHART_FIELDS: Array<{ key: string; label: string }> = [
   { key: 'chartNo', label: 'Chart No.' },
@@ -106,8 +103,8 @@ export function ConfigurationsPage() {
           <Tabs
             tabs={[
               { key: 'general', label: 'General' },
-              { key: 'clients', label: 'Clients & Locations' },
               { key: 'specialities', label: 'Specialities' },
+              { key: 'hcc', label: 'HCC' },
             ]}
             value={tab}
             onChange={(k) => setTab(k as MainTab)}
@@ -116,8 +113,8 @@ export function ConfigurationsPage() {
 
         <div className="p-6">
           {tab === 'general' && <GeneralTab canEdit={canEdit} />}
-          {tab === 'clients' && <ClientsTab canEdit={canEdit} />}
           {tab === 'specialities' && <SpecialitiesTab canEdit={canEdit} />}
+          {tab === 'hcc' && <HccFieldsEditor canEdit={canEdit} />}
         </div>
       </Card>
     </div>
@@ -219,10 +216,21 @@ function GeneralTab({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-/* ═════════════════ Clients tab ═════════════════ */
-function ClientsTab({ canEdit }: { canEdit: boolean }) {
+/* ═════════════════ Client + Location left rail ═════════════════ */
+function ConfigScopeRail({
+  canEdit,
+  selectedClient,
+  selectedLocation,
+  onClientChange,
+  onLocationChange,
+}: {
+  canEdit: boolean;
+  selectedClient: number | null;
+  selectedLocation: number | null;
+  onClientChange: (id: number | null) => void;
+  onLocationChange: (id: number | null) => void;
+}) {
   const qc = useQueryClient();
-  const [selectedClient, setSelectedClient] = useState<number | null>(null);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [addLocationOpen, setAddLocationOpen] = useState(false);
 
@@ -230,11 +238,9 @@ function ClientsTab({ canEdit }: { canEdit: boolean }) {
 
   useEffect(() => {
     if (!selectedClient && clients.data?.items.length) {
-      setSelectedClient(clients.data.items[0].id);
+      onClientChange(clients.data.items[0].id);
     }
-  }, [clients.data, selectedClient]);
-
-  const selectedClientObj = clients.data?.items.find((c) => c.id === selectedClient);
+  }, [clients.data, selectedClient, onClientChange]);
 
   const locations = useQuery({
     queryKey: ['configurations', 'locations', selectedClient],
@@ -242,23 +248,29 @@ function ClientsTab({ canEdit }: { canEdit: boolean }) {
     enabled: !!selectedClient,
   });
 
+  useEffect(() => {
+    const items = locations.data?.items;
+    if (!items) return;
+    if (selectedLocation && items.some((l) => l.id === selectedLocation)) return;
+    onLocationChange(items[0]?.id ?? null);
+  }, [locations.data, selectedLocation, onLocationChange]);
+
   return (
-    <div className="grid grid-cols-2 gap-6">
-      <div>
+    <aside className="w-[260px] shrink-0 space-y-4">
+      <Card>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-ink">Clients</h3>
+          <h3 className="text-sm font-bold text-ink">Client</h3>
           {canEdit && (
-            <Button size="sm" leftIcon={<Plus className="w-3 h-3" />} onClick={() => setAddClientOpen(true)}>
+            <Button size="sm" variant="ghost" leftIcon={<Plus className="w-3 h-3" />} onClick={() => setAddClientOpen(true)}>
               Add
             </Button>
           )}
         </div>
-        <p className="text-[11px] text-ink-muted mb-2">Click a client to manage its locations →</p>
         {clients.isPending ? (
           <Loader2 className="w-4 h-4 animate-spin text-ink-muted" />
         ) : clients.data?.items.length === 0 ? (
-          <div className="border border-dashed border-line rounded-lg p-6 text-center">
-            <p className="text-xs text-ink-muted mb-3">No clients yet.</p>
+          <div className="border border-dashed border-line rounded-lg p-4 text-center">
+            <p className="text-xs text-ink-muted mb-2">No clients yet.</p>
             {canEdit && (
               <Button size="sm" onClick={() => setAddClientOpen(true)} leftIcon={<Plus className="w-3 h-3" />}>
                 Add first client
@@ -266,62 +278,44 @@ function ClientsTab({ canEdit }: { canEdit: boolean }) {
             )}
           </div>
         ) : (
-          <div className="border border-line rounded-lg divide-y divide-line overflow-hidden">
-            {clients.data?.items.map((c) => {
-              const isSelected = selectedClient === c.id;
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedClient(c.id)}
-                  className={cn(
-                    'w-full flex items-center justify-between p-3 text-left transition relative',
-                    isSelected
-                      ? 'bg-primary-soft border-l-4 border-primary pl-2'
-                      : 'hover:bg-surface-sunken/50 border-l-4 border-transparent',
-                  )}
-                >
-                  <div>
-                    <p className={cn('text-sm font-semibold', isSelected ? 'text-primary-ink' : 'text-ink')}>
-                      {c.name}
-                    </p>
-                    <p className="text-[11px] text-ink-muted">{c.code ?? '—'}</p>
-                  </div>
-                  <span
-                    className={cn(
-                      'chip',
-                      c.isActive ? 'bg-success-soft text-success' : 'bg-surface-sunken text-ink-muted',
-                    )}
-                  >
-                    {c.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <Select
+            value={selectedClient ?? ''}
+            onChange={(e) => {
+              const v = e.target.value ? Number(e.target.value) : null;
+              onClientChange(v);
+              onLocationChange(null);
+            }}
+          >
+            {clients.data?.items.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
         )}
-      </div>
+      </Card>
 
-      <div>
+      <Card>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-ink">
-            Locations
-            {selectedClientObj && (
-              <span className="text-ink-muted font-medium"> · {selectedClientObj.name}</span>
-            )}
-          </h3>
+          <h3 className="text-sm font-bold text-ink">Location</h3>
           {canEdit && selectedClient && (
-            <Button size="sm" leftIcon={<Plus className="w-3 h-3" />} onClick={() => setAddLocationOpen(true)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              leftIcon={<Plus className="w-3 h-3" />}
+              onClick={() => setAddLocationOpen(true)}
+            >
               Add
             </Button>
           )}
         </div>
         {!selectedClient ? (
-          <p className="text-xs text-ink-muted">Select a client to view locations.</p>
+          <p className="text-xs text-ink-muted">Select a client first.</p>
         ) : locations.isPending ? (
           <Loader2 className="w-4 h-4 animate-spin text-ink-muted" />
         ) : locations.data?.items.length === 0 ? (
-          <div className="border border-dashed border-line rounded-lg p-6 text-center">
-            <p className="text-xs text-ink-muted mb-3">No locations for this client yet.</p>
+          <div className="border border-dashed border-line rounded-lg p-4 text-center">
+            <p className="text-xs text-ink-muted mb-2">No locations yet.</p>
             {canEdit && (
               <Button size="sm" onClick={() => setAddLocationOpen(true)} leftIcon={<Plus className="w-3 h-3" />}>
                 Add first location
@@ -329,26 +323,28 @@ function ClientsTab({ canEdit }: { canEdit: boolean }) {
             )}
           </div>
         ) : (
-          <div className="border border-line rounded-lg divide-y divide-line overflow-hidden">
-            {locations.data?.items.map((l) => (
-              <div key={l.id} className="flex items-center justify-between p-3">
-                <div>
-                  <p className="text-sm font-semibold text-ink">{l.name}</p>
-                  <p className="text-[11px] text-ink-muted">{l.code ?? '—'}</p>
-                </div>
-                <span
+          <div className="space-y-1">
+            {locations.data?.items.map((l) => {
+              const isSelected = selectedLocation === l.id;
+              return (
+                <button
+                  key={l.id}
+                  onClick={() => onLocationChange(l.id)}
                   className={cn(
-                    'chip',
-                    l.isActive ? 'bg-success-soft text-success' : 'bg-surface-sunken text-ink-muted',
+                    'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition text-sm',
+                    isSelected
+                      ? 'bg-primary-soft text-primary-ink dark:text-primary font-semibold'
+                      : 'text-ink hover:bg-surface-sunken font-medium',
                   )}
                 >
-                  {l.isActive ? 'Active' : 'Inactive'}
-                </span>
-              </div>
-            ))}
+                  <span className="truncate">{l.name}</span>
+                  <span className="text-ink-muted">›</span>
+                </button>
+              );
+            })}
           </div>
         )}
-      </div>
+      </Card>
 
       {addClientOpen && (
         <AddClientModal
@@ -365,17 +361,15 @@ function ClientsTab({ canEdit }: { canEdit: boolean }) {
           }
         />
       )}
-    </div>
+    </aside>
   );
 }
 
 function AddClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const { register, handleSubmit } = useForm<{ name: string; code: string; isActive: boolean }>({
-    defaultValues: { name: '', code: '', isActive: true },
-  });
+  const { register, handleSubmit } = useForm<{ name: string }>({ defaultValues: { name: '' } });
   const [err, setErr] = useState<string | null>(null);
   const m = useMutation({
-    mutationFn: (d: { name: string; code: string; isActive: boolean }) => createClient(d),
+    mutationFn: (d: { name: string }) => createClient({ ...d, isActive: true }),
     onSuccess: () => {
       onSaved();
       onClose();
@@ -388,16 +382,8 @@ function AddClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
         <div>
           <Label required>Name</Label>
-          <Input {...register('name', { required: true })} />
+          <Input {...register('name', { required: true })} autoFocus />
         </div>
-        <div>
-          <Label>Code</Label>
-          <Input placeholder="e.g. CLI01" {...register('code')} />
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" {...register('isActive')} className="accent-primary" />
-          Active
-        </label>
         <ModalFooter>
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={m.isPending}>Create</Button>
@@ -416,13 +402,10 @@ function AddLocationModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { register, handleSubmit } = useForm<{ name: string; code: string; isActive: boolean }>({
-    defaultValues: { name: '', code: '', isActive: true },
-  });
+  const { register, handleSubmit } = useForm<{ name: string }>({ defaultValues: { name: '' } });
   const [err, setErr] = useState<string | null>(null);
   const m = useMutation({
-    mutationFn: (d: { name: string; code: string; isActive: boolean }) =>
-      createLocation({ ...d, clientId }),
+    mutationFn: (d: { name: string }) => createLocation({ ...d, clientId, isActive: true }),
     onSuccess: () => {
       onSaved();
       onClose();
@@ -430,21 +413,13 @@ function AddLocationModal({
     onError: (e) => setErr((e as unknown as ApiErrorShape).message),
   });
   return (
-    <Modal open onClose={onClose} title="Add Location" subtitle={`Client #${clientId}`} size="sm">
+    <Modal open onClose={onClose} title="Add Location" size="sm">
       <form onSubmit={handleSubmit((d) => m.mutate(d))} className="space-y-3">
         {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
         <div>
           <Label required>Name</Label>
-          <Input {...register('name', { required: true })} />
+          <Input {...register('name', { required: true })} autoFocus />
         </div>
-        <div>
-          <Label>Code</Label>
-          <Input {...register('code')} />
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" {...register('isActive')} className="accent-primary" />
-          Active
-        </label>
         <ModalFooter>
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={m.isPending}>Create</Button>
@@ -457,42 +432,80 @@ function AddLocationModal({
 /* ═════════════════ Specialities tab ═════════════════ */
 function SpecialitiesTab({ canEdit }: { canEdit: boolean }) {
   const [sub, setSub] = useState<SpecTab>('general');
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [locationId, setLocationId] = useState<number | null>(null);
 
   return (
-    <div>
-      <Tabs
-        tabs={[
-          { key: 'general', label: 'General' },
-          { key: 'feedback', label: 'Feedback Categories' },
-          { key: 'auditing', label: 'Auditing' },
-          { key: 'coding', label: 'Coding' },
-          { key: 'chart-fields', label: 'Chart Fields' },
-          { key: 'hcc-fields', label: 'HCC Fields' },
-        ]}
-        value={sub}
-        onChange={(k) => setSub(k as SpecTab)}
-        className="mb-5"
+    <div className="flex gap-6">
+      <ConfigScopeRail
+        canEdit={canEdit}
+        selectedClient={clientId}
+        selectedLocation={locationId}
+        onClientChange={setClientId}
+        onLocationChange={setLocationId}
       />
 
-      {sub === 'general' && <SpecialitiesGeneralEditor canEdit={canEdit} />}
-      {sub === 'feedback' && <FeedbackCategoriesEditor canEdit={canEdit} />}
-      {sub === 'auditing' && <AuditingEditor canEdit={canEdit} />}
-      {sub === 'coding' && <CodingEditor canEdit={canEdit} />}
-      {sub === 'chart-fields' && <ChartFieldsEditor canEdit={canEdit} />}
-      {sub === 'hcc-fields' && <HccFieldsEditor canEdit={canEdit} />}
+      <div className="flex-1 min-w-0">
+        <Tabs
+          tabs={[
+            { key: 'general', label: 'General' },
+            { key: 'feedback', label: 'Feedback Categories' },
+            { key: 'auditing', label: 'Auditing' },
+            { key: 'coding', label: 'Coding' },
+            { key: 'chart-fields', label: 'Chart Field Configuration' },
+          ]}
+          value={sub}
+          onChange={(k) => setSub(k as SpecTab)}
+          className="mb-5"
+        />
+
+        {!clientId || !locationId ? (
+          <div className="border border-dashed border-line rounded-lg p-12 text-center">
+            <p className="text-sm text-ink-muted">
+              Select a client and location from the left to configure its settings.
+            </p>
+          </div>
+        ) : (
+          <>
+            {sub === 'general' && (
+              <SpecialitiesGeneralEditor canEdit={canEdit} clientId={clientId} locationId={locationId} />
+            )}
+            {sub === 'feedback' && (
+              <FeedbackCategoriesEditor canEdit={canEdit} clientId={clientId} locationId={locationId} />
+            )}
+            {sub === 'auditing' && (
+              <AuditingEditor canEdit={canEdit} clientId={clientId} locationId={locationId} />
+            )}
+            {sub === 'coding' && (
+              <CodingEditor canEdit={canEdit} clientId={clientId} locationId={locationId} />
+            )}
+            {sub === 'chart-fields' && (
+              <ChartFieldsEditor canEdit={canEdit} clientId={clientId} locationId={locationId} />
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
 /* ═════════════════ Specialities → General editor ═════════════════ */
-function SpecialitiesGeneralEditor({ canEdit }: { canEdit: boolean }) {
+function SpecialitiesGeneralEditor({
+  canEdit,
+  clientId,
+  locationId,
+}: {
+  canEdit: boolean;
+  clientId: number;
+  locationId: number;
+}) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   const { data, isPending } = useQuery({
-    queryKey: ['configurations', 'spec-general'],
-    queryFn: () => getSpecialitiesGeneral(),
+    queryKey: ['configurations', 'spec-general', clientId, locationId],
+    queryFn: () => getSpecialitiesGeneral({ clientId, locationId }),
   });
 
   const [state, setState] = useState<SpecialitiesGeneralDto | null>(null);
@@ -505,14 +518,16 @@ function SpecialitiesGeneralEditor({ canEdit }: { canEdit: boolean }) {
         processes: data.processes ?? [],
         facilities: data.facilities ?? [],
         designations: data.designations ?? [],
+        doesSupportProcessWiseCoding: data.doesSupportProcessWiseCoding ?? false,
       });
     }
   }, [data]);
 
   const m = useMutation({
-    mutationFn: updateSpecialitiesGeneral,
+    mutationFn: (dto: SpecialitiesGeneralDto) =>
+      updateSpecialitiesGeneral({ ...dto, clientId, locationId }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['configurations', 'spec-general'] });
+      qc.invalidateQueries({ queryKey: ['configurations', 'spec-general', clientId, locationId] });
       setSavedAt(new Date());
     },
     onError: (e) => setError((e as unknown as ApiErrorShape).message),
@@ -571,282 +586,307 @@ function SpecialitiesGeneralEditor({ canEdit }: { canEdit: boolean }) {
     setState((s) => (s ? { ...s, [key]: s[key].filter((_, idx) => idx !== i) } : s));
   }
 
+  function setProcessWiseCoding(v: boolean) {
+    setState((s) => (s ? { ...s, doesSupportProcessWiseCoding: v } : s));
+  }
+
   return (
     <div className="space-y-6">
       {error && <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger">{error}</div>}
 
-      <PrimarySpecialitiesSection
-        items={state.primarySpecialities}
-        canEdit={canEdit}
-        onAdd={addPrimary}
-        onUpdate={updatePrimary}
-        onRemove={removePrimary}
-      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <GridSection title="Processes">
+          <BrandCheckbox
+            checked={state.doesSupportProcessWiseCoding ?? false}
+            disabled={!canEdit}
+            onChange={setProcessWiseCoding}
+            label="Does location supports process wise coding?"
+          />
+          {!state.doesSupportProcessWiseCoding && state.processes.length === 0 && (
+            <p className="mt-3 text-[11px] text-ink-muted italic">
+              Enable the checkbox above to define per-process coding queues.
+            </p>
+          )}
+          <div
+            className={cn(
+              'mt-4 space-y-2 transition',
+              !state.doesSupportProcessWiseCoding && 'opacity-50 pointer-events-none',
+            )}
+          >
+            {state.processes.map((it, i) => (
+              <NameRow
+                key={it.id ?? `new-${i}`}
+                value={it.name}
+                disabled={!canEdit}
+                placeholder="Process name"
+                onChange={(v) => updateNamed('processes', i, { name: v })}
+                onRemove={() => removeNamed('processes', i)}
+              />
+            ))}
+            {canEdit && <AddAnotherButton onClick={() => addNamed('processes')} />}
+          </div>
+        </GridSection>
 
-      <SubSpecialitiesSection
-        items={state.subSpecialities}
-        parents={state.primarySpecialities}
-        canEdit={canEdit}
-        onAdd={addSub}
-        onUpdate={updateSub}
-        onRemove={removeSub}
-      />
+        <GridSection title="Primary Specialities">
+          <div className="space-y-2">
+            {state.primarySpecialities.map((it, i) => (
+              <NameRow
+                key={it.id ?? `new-${i}`}
+                value={it.name}
+                disabled={!canEdit}
+                placeholder="Speciality name"
+                onChange={(v) => updatePrimary(i, { name: v })}
+                onRemove={() => removePrimary(i)}
+              />
+            ))}
+            {canEdit && <AddAnotherButton onClick={addPrimary} />}
+          </div>
+        </GridSection>
 
-      <NamedSection
-        title="Processes"
-        description="Workflow categories (Coding, Auditing, QC...)"
-        items={state.processes}
-        canEdit={canEdit}
-        onAdd={() => addNamed('processes')}
-        onUpdate={(i, p) => updateNamed('processes', i, p)}
-        onRemove={(i) => removeNamed('processes', i)}
-      />
+        <GridSection title="Facility">
+          <div className="space-y-2">
+            {state.facilities.map((it, i) => (
+              <NameRow
+                key={it.id ?? `new-${i}`}
+                value={it.name}
+                disabled={!canEdit}
+                placeholder="Facility name"
+                onChange={(v) => updateNamed('facilities', i, { name: v })}
+                onRemove={() => removeNamed('facilities', i)}
+              />
+            ))}
+            {canEdit && <AddAnotherButton onClick={() => addNamed('facilities')} />}
+          </div>
+        </GridSection>
 
-      <NamedSection
-        title="Facilities"
-        description="Physical sites or hospitals"
-        items={state.facilities}
-        canEdit={canEdit}
-        onAdd={() => addNamed('facilities')}
-        onUpdate={(i, p) => updateNamed('facilities', i, p)}
-        onRemove={(i) => removeNamed('facilities', i)}
-      />
-
-      <NamedSection
-        title="Designations"
-        description="Job titles (Sr. Coder, Team Lead, etc.)"
-        items={state.designations}
-        canEdit={canEdit}
-        onAdd={() => addNamed('designations')}
-        onUpdate={(i, p) => updateNamed('designations', i, p)}
-        onRemove={(i) => removeNamed('designations', i)}
-      />
+        <GridSection title="Sub Speciality">
+          <div className="space-y-2">
+            {state.subSpecialities.map((it, i) => (
+              <NameRow
+                key={it.id ?? `new-${i}`}
+                value={it.name}
+                disabled={!canEdit}
+                placeholder="Sub speciality name"
+                onChange={(v) => updateSub(i, { name: v })}
+                onRemove={() => removeSub(i)}
+              />
+            ))}
+            {canEdit && <AddAnotherButton onClick={addSub} />}
+          </div>
+        </GridSection>
+      </div>
 
       {canEdit && (
-        <SaveBar
-          onRevert={() =>
-            data &&
-            setState({
-              primarySpecialities: data.primarySpecialities ?? [],
-              subSpecialities: data.subSpecialities ?? [],
-              processes: data.processes ?? [],
-              facilities: data.facilities ?? [],
-              designations: data.designations ?? [],
-            })
-          }
-          onSave={() => {
-            setError(null);
-            m.mutate(state);
-          }}
-          saving={m.isPending}
-          savedAt={savedAt}
-          saveLabel="Save all changes"
-        />
+        <div className="flex items-center justify-end gap-3 pt-2">
+          {savedAt && (
+            <span className="text-[11px] text-success inline-flex items-center gap-1 mr-2">
+              <CheckCircle2 className="w-3 h-3" /> Saved
+            </span>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() =>
+              data &&
+              setState({
+                primarySpecialities: data.primarySpecialities ?? [],
+                subSpecialities: data.subSpecialities ?? [],
+                processes: data.processes ?? [],
+                facilities: data.facilities ?? [],
+                designations: data.designations ?? [],
+                doesSupportProcessWiseCoding: data.doesSupportProcessWiseCoding ?? false,
+              })
+            }
+          >
+            Cancel
+          </Button>
+          <Button
+            loading={m.isPending}
+            onClick={() => {
+              setError(null);
+              m.mutate(state);
+            }}
+          >
+            Save
+          </Button>
+        </div>
       )}
     </div>
   );
 }
 
-function PrimarySpecialitiesSection({
-  items,
-  canEdit,
-  onAdd,
-  onUpdate,
-  onRemove,
-}: {
-  items: PrimarySpecialityEntry[];
-  canEdit: boolean;
-  onAdd: () => void;
-  onUpdate: (i: number, patch: Partial<PrimarySpecialityEntry>) => void;
-  onRemove: (i: number) => void;
-}) {
+/* ── Grid section card (collapsible) ──────────────── */
+function GridSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false);
   return (
-    <SectionCard
-      title="Primary Specialities"
-      description="Top-level medical specialities (ED, IP, OP, etc.)"
-      onAdd={canEdit ? onAdd : undefined}
-    >
-      {items.length === 0 ? (
-        <EmptyRow message="No primary specialities yet." />
-      ) : (
-        <div className="divide-y divide-line">
-          {items.map((it, i) => (
-            <div key={it.id ?? `new-${i}`} className="py-2 flex items-center gap-3">
-              <span className="text-[11px] text-ink-subtle font-mono w-10 shrink-0">{it.id ?? 'new'}</span>
-              <Input
-                className="flex-1"
-                value={it.name}
-                disabled={!canEdit}
-                placeholder="Name"
-                onChange={(e) => onUpdate(i, { name: e.target.value })}
-              />
-              <ActiveToggle
-                value={it.isActive ?? true}
-                disabled={!canEdit}
-                onChange={(v) => onUpdate(i, { isActive: v })}
-              />
-              {canEdit && <DeleteRowButton onClick={() => onRemove(i)} />}
-            </div>
-          ))}
-        </div>
-      )}
-    </SectionCard>
+    <Card>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-bold text-ink">{title}</h3>
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="w-6 h-6 rounded hover:bg-surface-sunken flex items-center justify-center text-ink-muted transition"
+          title={collapsed ? 'Expand' : 'Collapse'}
+        >
+          {collapsed ? <Plus className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
+        </button>
+      </div>
+      {!collapsed && children}
+    </Card>
   );
 }
 
-function SubSpecialitiesSection({
-  items,
-  parents,
-  canEdit,
-  onAdd,
-  onUpdate,
+/* ── Editable name row with × delete ──────────────── */
+function NameRow({
+  value,
+  onChange,
   onRemove,
+  placeholder,
+  disabled,
 }: {
-  items: SubSpecialityEntry[];
-  parents: PrimarySpecialityEntry[];
-  canEdit: boolean;
-  onAdd: () => void;
-  onUpdate: (i: number, patch: Partial<SubSpecialityEntry>) => void;
-  onRemove: (i: number) => void;
+  value: string;
+  onChange: (v: string) => void;
+  onRemove: () => void;
+  placeholder?: string;
+  disabled?: boolean;
 }) {
   return (
-    <SectionCard
-      title="Sub Specialities"
-      description="Nested under a primary speciality (e.g. Trauma under ED)"
-      onAdd={canEdit ? onAdd : undefined}
-    >
-      {items.length === 0 ? (
-        <EmptyRow message="No sub specialities yet." />
-      ) : (
-        <div className="divide-y divide-line">
-          {items.map((it, i) => (
-            <div key={it.id ?? `new-${i}`} className="py-2 flex items-center gap-3">
-              <span className="text-[11px] text-ink-subtle font-mono w-10 shrink-0">{it.id ?? 'new'}</span>
-              <Input
-                className="flex-1"
-                value={it.name}
-                disabled={!canEdit}
-                placeholder="Name"
-                onChange={(e) => onUpdate(i, { name: e.target.value })}
-              />
-              <Select
-                className="w-44"
-                value={it.primarySpecialityId ?? ''}
-                disabled={!canEdit}
-                onChange={(e) =>
-                  onUpdate(i, {
-                    primarySpecialityId: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Parent…</option>
-                {parents.filter((p) => p.id).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
-              <ActiveToggle
-                value={it.isActive ?? true}
-                disabled={!canEdit}
-                onChange={(v) => onUpdate(i, { isActive: v })}
-              />
-              {canEdit && <DeleteRowButton onClick={() => onRemove(i)} />}
-            </div>
-          ))}
-        </div>
+    <div className="flex items-center gap-3">
+      <Input
+        className="flex-1"
+        value={value}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {!disabled && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="w-8 h-8 rounded-full bg-danger-soft text-danger hover:bg-danger/15 transition flex items-center justify-center shrink-0"
+          title="Remove"
+        >
+          <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+        </button>
       )}
-    </SectionCard>
+    </div>
   );
 }
 
-function NamedSection({
-  title,
-  description,
-  items,
-  canEdit,
-  onAdd,
-  onUpdate,
-  onRemove,
-}: {
-  title: string;
-  description: string;
-  items: NamedEntry[];
-  canEdit: boolean;
-  onAdd: () => void;
-  onUpdate: (i: number, patch: Partial<NamedEntry>) => void;
-  onRemove: (i: number) => void;
-}) {
+/* ── "+ Add another" pill ─────────────────────────── */
+function AddAnotherButton({ onClick }: { onClick: () => void }) {
   return (
-    <SectionCard title={title} description={description} onAdd={canEdit ? onAdd : undefined}>
-      {items.length === 0 ? (
-        <EmptyRow message={`No ${title.toLowerCase()} yet.`} />
-      ) : (
-        <div className="divide-y divide-line">
-          {items.map((it, i) => (
-            <div key={it.id ?? `new-${i}`} className="py-2 flex items-center gap-3">
-              <span className="text-[11px] text-ink-subtle font-mono w-10 shrink-0">{it.id ?? 'new'}</span>
-              <Input
-                className="flex-1"
-                value={it.name}
-                disabled={!canEdit}
-                placeholder="Name"
-                onChange={(e) => onUpdate(i, { name: e.target.value })}
-              />
-              <ActiveToggle
-                value={it.isActive ?? true}
-                disabled={!canEdit}
-                onChange={(v) => onUpdate(i, { isActive: v })}
-              />
-              {canEdit && <DeleteRowButton onClick={() => onRemove(i)} />}
-            </div>
-          ))}
-        </div>
-      )}
-    </SectionCard>
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-pill bg-surface-sunken text-ink-muted hover:bg-surface-2 hover:text-ink text-xs font-semibold transition"
+    >
+      <Plus className="w-3.5 h-3.5" />
+      Add another
+    </button>
   );
 }
+
+/* ── Brand-styled checkbox ────────────────────────── */
+function BrandCheckbox({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label
+      className={cn(
+        'inline-flex items-center gap-2.5 group select-none',
+        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="sr-only peer"
+      />
+      <span
+        className={cn(
+          'w-[18px] h-[18px] rounded-md border-2 transition flex items-center justify-center shrink-0',
+          'peer-focus-visible:ring-2 peer-focus-visible:ring-primary/50 peer-focus-visible:ring-offset-2',
+          checked
+            ? 'bg-primary border-primary'
+            : 'bg-surface border-line-strong group-hover:border-primary/60',
+        )}
+      >
+        {checked && <Check className="w-3 h-3 text-primary-ink" strokeWidth={3.5} />}
+      </span>
+      <span className="text-sm text-ink font-medium">{label}</span>
+    </label>
+  );
+}
+
 
 /* ═════════════════ Feedback Categories editor ═════════════════ */
-function FeedbackCategoriesEditor({ canEdit }: { canEdit: boolean }) {
+function FeedbackCategoriesEditor({
+  canEdit,
+  clientId,
+  locationId,
+}: {
+  canEdit: boolean;
+  clientId: number;
+  locationId: number;
+}) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [addAreaOpen, setAddAreaOpen] = useState(false);
 
   const { data, isPending } = useQuery({
-    queryKey: ['configurations', 'feedback-categories'],
-    queryFn: () => getFeedbackCategories(),
+    queryKey: ['configurations', 'feedback-categories', clientId, locationId],
+    queryFn: () => getFeedbackCategories({ clientId, locationId }),
   });
 
-  const [groups, setGroups] = useState<FeedbackCategoryGroup[] | null>(null);
+  const [areas, setAreas] = useState<FeedbackArea[] | null>(null);
 
   useEffect(() => {
-    if (data) {
-      // Ensure every standard audit area has a group entry, even if empty
-      const existing = data.groups ?? [];
-      const complete = AUDIT_AREAS.map(
-        (area) => existing.find((g) => g.area === area) ?? { area, categories: [] },
-      );
-      setGroups(structuredClone(complete));
-    }
+    if (data) setAreas(structuredClone(data.areas));
   }, [data]);
 
   const m = useMutation({
-    mutationFn: updateFeedbackCategories,
+    mutationFn: (payload: { areas: Array<{ id: number; reasons: FeedbackReason[] }> }) =>
+      updateFeedbackCategories({ clientId, locationId, ...payload }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['configurations', 'feedback-categories'] });
+      qc.invalidateQueries({ queryKey: ['configurations', 'feedback-categories', clientId, locationId] });
       setSavedAt(new Date());
     },
     onError: (e) => setError((e as unknown as ApiErrorShape).message),
   });
 
-  if (isPending || !groups) return <Loader2 className="w-5 h-5 animate-spin text-ink-muted" />;
+  const addArea = useMutation({
+    mutationFn: (name: string) => createAuditArea({ clientId, locationId, name }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['configurations', 'feedback-categories', clientId, locationId] }),
+    onError: (e) => setError((e as unknown as ApiErrorShape).message),
+  });
 
-  function updateGroup(areaIdx: number, patch: (g: FeedbackCategoryGroup) => FeedbackCategoryGroup) {
-    setGroups((gs) => {
-      if (!gs) return gs;
-      const next = [...gs];
-      next[areaIdx] = patch(next[areaIdx]);
+  const removeArea = useMutation({
+    mutationFn: (id: number) => deleteAuditArea(id, { clientId, locationId }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['configurations', 'feedback-categories', clientId, locationId] }),
+    onError: (e) => setError((e as unknown as ApiErrorShape).message),
+  });
+
+  if (isPending || !areas) return <Loader2 className="w-5 h-5 animate-spin text-ink-muted" />;
+
+  function updateArea(idx: number, patch: (a: FeedbackArea) => FeedbackArea) {
+    setAreas((as) => {
+      if (!as) return as;
+      const next = [...as];
+      next[idx] = patch(next[idx]);
       return next;
     });
   }
@@ -861,44 +901,70 @@ function FeedbackCategoriesEditor({ canEdit }: { canEdit: boolean }) {
       {error && <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger">{error}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {groups.map((group, i) => (
+        {areas.map((area, i) => (
           <FeedbackAreaCard
-            key={group.area}
-            group={group}
+            key={area.id}
+            area={area}
             canEdit={canEdit}
-            onChange={(newGroup) => updateGroup(i, () => newGroup)}
+            onChange={(updated) => updateArea(i, () => updated)}
+            onDelete={
+              canEdit && !area.isBuiltin && !area.isSystem
+                ? () => {
+                    if (confirm(`Delete audit area "${area.name}"?`)) removeArea.mutate(area.id);
+                  }
+                : undefined
+            }
           />
         ))}
       </div>
 
       {canEdit && (
-        <SaveBar
-          onRevert={() => {
-            if (data) {
-              const existing = data.groups ?? [];
-              const complete = AUDIT_AREAS.map(
-                (area) => existing.find((g) => g.area === area) ?? { area, categories: [] },
-              );
-              setGroups(structuredClone(complete));
-            }
-          }}
-          onSave={() => {
-            setError(null);
-            // Strip empty-name rows before saving
-            const cleaned = groups.map((g) => ({
-              ...g,
-              categories: g.categories
-                .filter((c) => c.name.trim())
-                .map((c) => ({
-                  ...c,
-                  types: c.types.filter((t) => t.name.trim()),
-                })),
-            }));
-            m.mutate(cleaned);
-          }}
-          saving={m.isPending}
-          savedAt={savedAt}
-          saveLabel="Save categories"
+        <div className="flex items-center justify-between gap-3 pt-2">
+          <Button
+            type="button"
+            variant="soft"
+            leftIcon={<Plus className="w-3.5 h-3.5" />}
+            onClick={() => setAddAreaOpen(true)}
+          >
+            Add Audit Area
+          </Button>
+          <div className="flex items-center gap-3">
+            {savedAt && (
+              <span className="text-[11px] text-success inline-flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> Saved
+              </span>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => data && setAreas(structuredClone(data.areas))}
+            >
+              Cancel
+            </Button>
+            <Button
+              loading={m.isPending}
+              onClick={() => {
+                setError(null);
+                m.mutate({
+                  areas: areas.map((a) => ({
+                    id: a.id,
+                    reasons: a.reasons.filter((r) => r.name.trim()),
+                  })),
+                });
+              }}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {addAreaOpen && (
+        <AddAuditAreaModal
+          existingNames={areas.map((a) => a.name)}
+          onClose={() => setAddAreaOpen(false)}
+          onSubmit={(name) => addArea.mutate(name, { onSuccess: () => setAddAreaOpen(false) })}
+          submitting={addArea.isPending}
         />
       )}
     </div>
@@ -906,112 +972,136 @@ function FeedbackCategoriesEditor({ canEdit }: { canEdit: boolean }) {
 }
 
 function FeedbackAreaCard({
-  group,
+  area,
   canEdit,
   onChange,
+  onDelete,
 }: {
-  group: FeedbackCategoryGroup;
+  area: FeedbackArea;
   canEdit: boolean;
-  onChange: (g: FeedbackCategoryGroup) => void;
+  onChange: (a: FeedbackArea) => void;
+  onDelete?: () => void;
 }) {
-  function addCategory() {
-    onChange({
-      ...group,
-      categories: [...group.categories, { name: '', types: [] }],
-    });
+  function addReason() {
+    onChange({ ...area, reasons: [...area.reasons, { name: '' }] });
   }
-  function updateCategory(i: number, patch: { name?: string }) {
-    const next = [...group.categories];
-    next[i] = { ...next[i], ...patch };
-    onChange({ ...group, categories: next });
+  function updateReason(i: number, name: string) {
+    const next = [...area.reasons];
+    next[i] = { ...next[i], name };
+    onChange({ ...area, reasons: next });
   }
-  function removeCategory(i: number) {
-    onChange({ ...group, categories: group.categories.filter((_, idx) => idx !== i) });
-  }
-  function addType(catIdx: number) {
-    const next = [...group.categories];
-    next[catIdx] = { ...next[catIdx], types: [...next[catIdx].types, { name: '' }] };
-    onChange({ ...group, categories: next });
-  }
-  function updateType(catIdx: number, tIdx: number, name: string) {
-    const next = [...group.categories];
-    const types = [...next[catIdx].types];
-    types[tIdx] = { ...types[tIdx], name };
-    next[catIdx] = { ...next[catIdx], types };
-    onChange({ ...group, categories: next });
-  }
-  function removeType(catIdx: number, tIdx: number) {
-    const next = [...group.categories];
-    next[catIdx] = { ...next[catIdx], types: next[catIdx].types.filter((_, idx) => idx !== tIdx) };
-    onChange({ ...group, categories: next });
+  function removeReason(i: number) {
+    onChange({ ...area, reasons: area.reasons.filter((_, idx) => idx !== i) });
   }
 
   return (
-    <div className="rounded-xl border border-line p-4 bg-surface">
-      <h4 className="text-sm font-bold text-ink mb-3">{group.area}</h4>
-      {group.categories.length === 0 ? (
-        <p className="text-xs text-ink-muted mb-3">No categories yet.</p>
-      ) : (
-        <div className="space-y-3 mb-3">
-          {group.categories.map((cat, i) => (
-            <div key={i} className="border border-line rounded-lg p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  className="flex-1 font-semibold"
-                  value={cat.name}
-                  disabled={!canEdit}
-                  placeholder="Category name"
-                  onChange={(e) => updateCategory(i, { name: e.target.value })}
-                />
-                {canEdit && <DeleteRowButton onClick={() => removeCategory(i)} />}
-              </div>
-              {cat.types.length > 0 && (
-                <div className="pl-3 border-l-2 border-line space-y-1.5">
-                  {cat.types.map((t, tIdx) => (
-                    <div key={tIdx} className="flex items-center gap-2">
-                      <Input
-                        className="flex-1 text-xs"
-                        value={t.name}
-                        disabled={!canEdit}
-                        placeholder="Feedback type"
-                        onChange={(e) => updateType(i, tIdx, e.target.value)}
-                      />
-                      {canEdit && <DeleteRowButton small onClick={() => removeType(i, tIdx)} />}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => addType(i)}
-                  className="text-[11px] text-primary-ink hover:underline pl-3"
-                >
-                  + Add feedback type
-                </button>
-              )}
-            </div>
-          ))}
+    <Card>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-bold text-ink">{area.name}</h3>
+          {!area.isBuiltin && (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-ink-muted bg-surface-sunken px-1.5 py-0.5 rounded">
+              Custom
+            </span>
+          )}
         </div>
-      )}
-      {canEdit && (
-        <Button size="sm" variant="soft" leftIcon={<Plus className="w-3 h-3" />} onClick={addCategory}>
-          Add category
-        </Button>
-      )}
-    </div>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="w-7 h-7 rounded-full bg-danger-soft text-danger hover:bg-danger/15 transition flex items-center justify-center"
+            title="Delete custom audit area"
+          >
+            <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+          </button>
+        )}
+      </div>
+      <div className="space-y-2">
+        {area.reasons.map((r, i) => (
+          <NameRow
+            key={r.id ?? `new-${i}`}
+            value={r.name}
+            disabled={!canEdit}
+            placeholder="Feedback reason"
+            onChange={(v) => updateReason(i, v)}
+            onRemove={() => removeReason(i)}
+          />
+        ))}
+        {canEdit && <AddAnotherButton onClick={addReason} />}
+      </div>
+    </Card>
+  );
+}
+
+function AddAuditAreaModal({
+  existingNames,
+  onClose,
+  onSubmit,
+  submitting,
+}: {
+  existingNames: string[];
+  onClose: () => void;
+  onSubmit: (name: string) => void;
+  submitting: boolean;
+}) {
+  const { register, handleSubmit, formState } = useForm<{ name: string }>({ defaultValues: { name: '' } });
+  return (
+    <Modal open onClose={onClose} title="Add Audit Area" size="sm">
+      <form
+        onSubmit={handleSubmit((d) => {
+          const name = d.name.trim();
+          if (!name) return;
+          if (existingNames.some((n) => n.toLowerCase() === name.toLowerCase())) return;
+          onSubmit(name);
+        })}
+        className="space-y-3"
+      >
+        <div>
+          <Label required>Name</Label>
+          <Input
+            autoFocus
+            placeholder="e.g. Deep Analysis"
+            {...register('name', {
+              required: true,
+              validate: (v) =>
+                !existingNames.some((n) => n.toLowerCase() === v.trim().toLowerCase()) ||
+                'An audit area with this name already exists.',
+            })}
+          />
+          {formState.errors.name && (
+            <p className="mt-1 text-xs text-danger">{formState.errors.name.message ?? 'Required'}</p>
+          )}
+        </div>
+        <ModalFooter>
+          <Button variant="ghost" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={submitting}>
+            Create
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
   );
 }
 
 /* ═════════════════ Auditing editor ═════════════════ */
-function AuditingEditor({ canEdit }: { canEdit: boolean }) {
+function AuditingEditor({
+  canEdit,
+  clientId,
+  locationId,
+}: {
+  canEdit: boolean;
+  clientId: number;
+  locationId: number;
+}) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   const { data, isPending } = useQuery({
-    queryKey: ['configurations', 'auditing'],
-    queryFn: () => getAuditingConfig(),
+    queryKey: ['configurations', 'auditing', clientId, locationId],
+    queryFn: () => getAuditingConfig({ clientId, locationId }),
   });
 
   const [state, setState] = useState<AuditingConfig | null>(null);
@@ -1026,9 +1116,9 @@ function AuditingEditor({ canEdit }: { canEdit: boolean }) {
   }, [data]);
 
   const m = useMutation({
-    mutationFn: updateAuditingConfig,
+    mutationFn: (dto: AuditingConfig) => updateAuditingConfig({ ...dto, clientId, locationId }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['configurations', 'auditing'] });
+      qc.invalidateQueries({ queryKey: ['configurations', 'auditing', clientId, locationId] });
       setSavedAt(new Date());
     },
     onError: (e) => setError((e as unknown as ApiErrorShape).message),
@@ -1083,14 +1173,22 @@ function AuditingEditor({ canEdit }: { canEdit: boolean }) {
 }
 
 /* ═════════════════ Coding editor ═════════════════ */
-function CodingEditor({ canEdit }: { canEdit: boolean }) {
+function CodingEditor({
+  canEdit,
+  clientId,
+  locationId,
+}: {
+  canEdit: boolean;
+  clientId: number;
+  locationId: number;
+}) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   const { data, isPending } = useQuery({
-    queryKey: ['configurations', 'coding'],
-    queryFn: () => getCodingConfig(),
+    queryKey: ['configurations', 'coding', clientId, locationId],
+    queryFn: () => getCodingConfig({ clientId, locationId }),
   });
 
   const [state, setState] = useState<CodingConfig | null>(null);
@@ -1107,9 +1205,9 @@ function CodingEditor({ canEdit }: { canEdit: boolean }) {
   }, [data]);
 
   const m = useMutation({
-    mutationFn: updateCodingConfig,
+    mutationFn: (dto: CodingConfig) => updateCodingConfig({ ...dto, clientId, locationId }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['configurations', 'coding'] });
+      qc.invalidateQueries({ queryKey: ['configurations', 'coding', clientId, locationId] });
       setSavedAt(new Date());
     },
     onError: (e) => setError((e as unknown as ApiErrorShape).message),
@@ -1234,17 +1332,31 @@ function FlatListCard({
 }
 
 /* ═════════════════ Chart Fields editor ═════════════════ */
-function ChartFieldsEditor({ canEdit }: { canEdit: boolean }) {
+function ChartFieldsEditor({
+  canEdit,
+  clientId,
+  locationId,
+}: {
+  canEdit: boolean;
+  clientId: number;
+  locationId: number;
+}) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [customModalOpen, setCustomModalOpen] = useState(false);
   const [editingField, setEditingField] = useState<CustomChartField | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [specialityId, setSpecialityId] = useState<number | null>(null);
+
+  const specs = useQuery({
+    queryKey: ['configurations', 'primary-specialities', clientId],
+    queryFn: () => listPrimarySpecialities(clientId),
+  });
 
   const { data, isPending } = useQuery({
-    queryKey: ['configurations', 'chart-fields'],
-    queryFn: () => getChartFieldsConfig({}),
+    queryKey: ['configurations', 'chart-fields', clientId, locationId, specialityId],
+    queryFn: () => getChartFieldsConfig({ clientId, locationId, specialityId }),
   });
 
   const [standardState, setStandardState] = useState<Record<string, ValidationRule>>({});
@@ -1259,10 +1371,14 @@ function ChartFieldsEditor({ canEdit }: { canEdit: boolean }) {
     }
   }, [data]);
 
+  const invalidateChartFields = () =>
+    qc.invalidateQueries({ queryKey: ['configurations', 'chart-fields', clientId, locationId] });
+
   const saveStandard = useMutation({
-    mutationFn: (dto: ChartFieldsConfig) => updateChartFieldsConfig(dto),
+    mutationFn: (dto: ChartFieldsConfig) =>
+      updateChartFieldsConfig({ ...dto, clientId, locationId, specialityId }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['configurations', 'chart-fields'] });
+      invalidateChartFields();
       setSavedAt(new Date());
     },
     onError: (e) => setError((e as unknown as ApiErrorShape).message),
@@ -1271,7 +1387,7 @@ function ChartFieldsEditor({ canEdit }: { canEdit: boolean }) {
   const deleteCustom = useMutation({
     mutationFn: (id: number) => deleteCustomChartField(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['configurations', 'chart-fields'] });
+      invalidateChartFields();
       setDeletingId(null);
     },
     onError: (e) => setError((e as unknown as ApiErrorShape).message),
@@ -1290,6 +1406,28 @@ function ChartFieldsEditor({ canEdit }: { canEdit: boolean }) {
   return (
     <div className="space-y-6">
       {error && <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger">{error}</div>}
+
+      {/* Primary Speciality scope picker */}
+      <Card>
+        <div className="flex items-center gap-3">
+          <Label className="!mb-0 shrink-0">Primary Speciality</Label>
+          <div className="w-72">
+            <FancySelect
+              value={specialityId == null ? 'all' : String(specialityId)}
+              onChange={(v) => setSpecialityId(v === 'all' ? null : Number(v))}
+              options={[
+                { value: 'all', label: 'All (baseline)' },
+                ...(specs.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name })),
+              ]}
+            />
+          </div>
+          <p className="text-[11px] text-ink-muted ml-auto">
+            {specialityId == null
+              ? 'Editing the All-specialities baseline.'
+              : 'Editing speciality override (only changes from baseline are saved).'}
+          </p>
+        </div>
+      </Card>
 
       {/* Standard Fields Matrix */}
       <SectionCard
@@ -1340,13 +1478,11 @@ function ChartFieldsEditor({ canEdit }: { canEdit: boolean }) {
                     <td className="py-2 text-sm text-ink">{f.label}</td>
                     {(['MANDATORY', 'NON_MANDATORY', 'NOT_APPLICABLE'] as ValidationRule[]).map((v) => (
                       <td key={v} className="text-center py-2">
-                        <input
-                          type="radio"
+                        <Radio
                           name={`chart-field-${f.key}`}
                           checked={current === v}
                           disabled={!canEdit}
                           onChange={() => setStandardState((s) => ({ ...s, [f.key]: v }))}
-                          className="accent-primary w-4 h-4"
                         />
                       </td>
                     ))}
@@ -1457,12 +1593,15 @@ function ChartFieldsEditor({ canEdit }: { canEdit: boolean }) {
       {customModalOpen && (
         <CustomChartFieldModal
           field={editingField}
+          clientId={clientId}
+          locationId={locationId}
+          specialityId={specialityId}
           onClose={() => {
             setCustomModalOpen(false);
             setEditingField(null);
           }}
           onSaved={() => {
-            qc.invalidateQueries({ queryKey: ['configurations', 'chart-fields'] });
+            invalidateChartFields();
             setCustomModalOpen(false);
             setEditingField(null);
           }}
@@ -1486,15 +1625,21 @@ function ChartFieldsEditor({ canEdit }: { canEdit: boolean }) {
 
 function CustomChartFieldModal({
   field,
+  clientId,
+  locationId,
+  specialityId,
   onClose,
   onSaved,
 }: {
   field: CustomChartField | null;
+  clientId: number;
+  locationId: number;
+  specialityId: number | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const { register, handleSubmit, watch } = useForm<CreateCustomChartFieldDto>({
+  const { register, handleSubmit, watch, setValue, control } = useForm<Omit<CreateCustomChartFieldDto, 'clientId' | 'locationId' | 'specialityId'>>({
     defaultValues: field ?? {
       name: '',
       type: 'text',
@@ -1505,10 +1650,14 @@ function CustomChartFieldModal({
     },
   });
   const type = watch('type');
+  const placement = watch('placement');
+  const validation = watch('validation');
 
   const m = useMutation({
-    mutationFn: (d: CreateCustomChartFieldDto) =>
-      field ? updateCustomChartField(field.id, d) : createCustomChartField(d),
+    mutationFn: (d: Omit<CreateCustomChartFieldDto, 'clientId' | 'locationId' | 'specialityId'>) =>
+      field
+        ? updateCustomChartField(field.id, d)
+        : createCustomChartField({ ...d, clientId, locationId, specialityId }),
     onSuccess: () => onSaved(),
     onError: (e) => setError((e as unknown as ApiErrorShape).message),
   });
@@ -1517,16 +1666,7 @@ function CustomChartFieldModal({
     <Modal open onClose={onClose} title={field ? 'Edit custom field' : 'Add custom field'} size="md">
       <form
         onSubmit={handleSubmit((d) => {
-          // Convert comma-separated options string back to array when applicable
-          const options =
-            d.type === 'dropdown'
-              ? typeof (d as unknown as { options: string | string[] }).options === 'string'
-                ? ((d as unknown as { options: string }).options as string)
-                    .split(',')
-                    .map((x) => x.trim())
-                    .filter(Boolean)
-                : d.options
-              : undefined;
+          const options = d.type === 'dropdown' ? d.options ?? [] : undefined;
           m.mutate({ ...d, options });
         })}
         className="space-y-4"
@@ -1541,36 +1681,62 @@ function CustomChartFieldModal({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label required>Type</Label>
-            <Select {...register('type', { required: true })}>
-              <option value="text">Text</option>
-              <option value="dropdown">Dropdown</option>
-              <option value="date">Date</option>
-              <option value="number">Number</option>
-              <option value="multiline">Multiline</option>
-            </Select>
+            <FancySelect
+              value={type ?? 'text'}
+              onChange={(v) =>
+                setValue('type', v as CreateCustomChartFieldDto['type'], { shouldDirty: true })
+              }
+              options={[
+                { value: 'text', label: 'Text' },
+                { value: 'dropdown', label: 'Dropdown' },
+                { value: 'date', label: 'Date' },
+                { value: 'number', label: 'Number' },
+                { value: 'multiline', label: 'Multiline' },
+              ]}
+            />
           </div>
           <div>
             <Label required>Validation</Label>
-            <Select {...register('validation', { required: true })}>
-              <option value="NON_MANDATORY">Non-Mandatory</option>
-              <option value="MANDATORY">Mandatory</option>
-              <option value="NOT_APPLICABLE">Not-Applicable</option>
-            </Select>
+            <FancySelect
+              value={validation ?? 'NON_MANDATORY'}
+              onChange={(v) =>
+                setValue('validation', v as ValidationRule, { shouldDirty: true })
+              }
+              options={[
+                { value: 'NON_MANDATORY', label: 'Non-Mandatory' },
+                { value: 'MANDATORY', label: 'Mandatory' },
+                { value: 'NOT_APPLICABLE', label: 'Not-Applicable' },
+              ]}
+            />
           </div>
         </div>
 
         {type === 'dropdown' && (
           <>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" {...register('isMultiSelect')} className="accent-primary" />
-              Allow multiple selections
-            </label>
+            <Controller
+              control={control}
+              name="isMultiSelect"
+              render={({ field: f }) => (
+                <Switch
+                  checked={!!f.value}
+                  onChange={f.onChange}
+                  label="Allow multiple selections"
+                  description="Users can pick more than one option from this dropdown."
+                />
+              )}
+            />
             <div>
-              <Label>Options (comma separated)</Label>
-              <Input
-                placeholder="e.g. Smoker, Non Smoker, Quit Smoking"
-                defaultValue={field?.options?.join(', ') ?? ''}
-                {...register('options' as 'options')}
+              <Label>Options</Label>
+              <Controller
+                control={control}
+                name="options"
+                render={({ field: f }) => (
+                  <OptionsBuilder
+                    value={Array.isArray(f.value) ? f.value : []}
+                    onChange={f.onChange}
+                    placeholder="e.g. Smoker"
+                  />
+                )}
               />
             </div>
           </>
@@ -1578,11 +1744,18 @@ function CustomChartFieldModal({
 
         <div>
           <Label>Placement</Label>
-          <Select {...register('placement')}>
-            <option value="Chart Info">Chart Info</option>
-            <option value="Processing Info">Processing Info</option>
-            <option value="Audit Info">Audit Info</option>
-          </Select>
+          <FancySelect
+            value={placement ?? 'Chart Info'}
+            onChange={(v) =>
+              setValue('placement', v as CreateCustomChartFieldDto['placement'], {
+                shouldDirty: true,
+              })
+            }
+            options={[
+              { value: 'Chart Info', label: 'Chart Info' },
+              { value: 'Processing Info', label: 'Processing Info' },
+            ]}
+          />
         </div>
 
         <ModalFooter>
@@ -1737,7 +1910,7 @@ function HccFieldModal({
   onSaved: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const { register, handleSubmit, watch } = useForm<Omit<HccFieldDef, 'id'>>({
+  const { register, handleSubmit, watch, setValue, control } = useForm<Omit<HccFieldDef, 'id'>>({
     defaultValues: field ?? {
       name: '',
       type: 'text',
@@ -1748,6 +1921,7 @@ function HccFieldModal({
     },
   });
   const type = watch('type');
+  const validation = watch('validation');
 
   const m = useMutation({
     mutationFn: (d: Omit<HccFieldDef, 'id'>) =>
@@ -1760,15 +1934,7 @@ function HccFieldModal({
     <Modal open onClose={onClose} title={field ? 'Edit HCC field' : 'Add HCC field'} size="md">
       <form
         onSubmit={handleSubmit((d) => {
-          const options: string[] =
-            d.type === 'dropdown'
-              ? typeof (d as unknown as { options: string | string[] }).options === 'string'
-                ? ((d as unknown as { options: string }).options as string)
-                    .split(',')
-                    .map((x) => x.trim())
-                    .filter(Boolean)
-                : (d.options ?? [])
-              : [];
+          const options: string[] = d.type === 'dropdown' ? d.options ?? [] : [];
           m.mutate({ ...d, options });
         })}
         className="space-y-4"
@@ -1783,47 +1949,79 @@ function HccFieldModal({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label required>Type</Label>
-            <Select {...register('type', { required: true })}>
-              <option value="text">Text</option>
-              <option value="dropdown">Dropdown</option>
-              <option value="date">Date</option>
-              <option value="number">Number</option>
-              <option value="multiline">Multiline</option>
-            </Select>
+            <FancySelect
+              value={type ?? 'text'}
+              onChange={(v) =>
+                setValue('type', v as HccFieldDef['type'], { shouldDirty: true })
+              }
+              options={[
+                { value: 'text', label: 'Text' },
+                { value: 'dropdown', label: 'Dropdown' },
+                { value: 'date', label: 'Date' },
+                { value: 'number', label: 'Number' },
+                { value: 'multiline', label: 'Multiline' },
+              ]}
+            />
           </div>
           <div>
             <Label required>Validation</Label>
-            <Select {...register('validation', { required: true })}>
-              <option value="NON_MANDATORY">Non-Mandatory</option>
-              <option value="MANDATORY">Mandatory</option>
-              <option value="NOT_APPLICABLE">Not-Applicable</option>
-            </Select>
+            <FancySelect
+              value={validation ?? 'NON_MANDATORY'}
+              onChange={(v) =>
+                setValue('validation', v as ValidationRule, { shouldDirty: true })
+              }
+              options={[
+                { value: 'NON_MANDATORY', label: 'Non-Mandatory' },
+                { value: 'MANDATORY', label: 'Mandatory' },
+                { value: 'NOT_APPLICABLE', label: 'Not-Applicable' },
+              ]}
+            />
           </div>
         </div>
 
         {type === 'dropdown' && (
           <>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" {...register('isMultiSelect')} className="accent-primary" />
-              Allow multiple selections
-            </label>
+            <Controller
+              control={control}
+              name="isMultiSelect"
+              render={({ field: f }) => (
+                <Switch
+                  checked={!!f.value}
+                  onChange={f.onChange}
+                  label="Allow multiple selections"
+                  description="Users can pick more than one option from this dropdown."
+                />
+              )}
+            />
             <div>
-              <Label>Options (comma separated)</Label>
-              <Input
-                placeholder="e.g. Smoker, Non Smoker, Quit Smoking"
-                defaultValue={field?.options?.join(', ') ?? ''}
-                {...register('options' as 'options')}
+              <Label>Options</Label>
+              <Controller
+                control={control}
+                name="options"
+                render={({ field: f }) => (
+                  <OptionsBuilder
+                    value={Array.isArray(f.value) ? f.value : []}
+                    onChange={f.onChange}
+                    placeholder="e.g. Smoker"
+                  />
+                )}
               />
             </div>
           </>
         )}
 
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" {...register('preserveNext')} className="accent-primary" />
-          <span>
-            <strong>Preserve next</strong> — keep this value when the user clicks "Save &amp; Next"
-          </span>
-        </label>
+        <Controller
+          control={control}
+          name="preserveNext"
+          render={({ field: f }) => (
+            <Switch
+              checked={!!f.value}
+              onChange={f.onChange}
+              label="Preserve next"
+              description='Keep this value when the user clicks "Save & Next".'
+            />
+          )}
+        />
 
         <ModalFooter>
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
@@ -1869,31 +2067,6 @@ function SectionCard({
 
 function EmptyRow({ message }: { message: string }) {
   return <p className="py-3 text-xs text-ink-muted text-center">{message}</p>;
-}
-
-function ActiveToggle({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <label className="inline-flex items-center gap-2 text-xs cursor-pointer shrink-0">
-      <input
-        type="checkbox"
-        checked={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-        className="accent-primary w-4 h-4"
-      />
-      <span className={cn('font-semibold', value ? 'text-success' : 'text-ink-muted')}>
-        {value ? 'Active' : 'Inactive'}
-      </span>
-    </label>
-  );
 }
 
 function DeleteRowButton({ onClick, small }: { onClick: () => void; small?: boolean }) {

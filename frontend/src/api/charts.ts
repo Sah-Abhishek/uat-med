@@ -1,5 +1,8 @@
 import { get, post, patch, put, del } from './client';
+import { api } from './client';
 import type {
+  AiEncounterResult,
+  AiReportType,
   Chart,
   ChartFeedback,
   ChartMilestone,
@@ -80,6 +83,17 @@ export const startChart = (id: string) =>
 export const stopChart = (id: string) =>
   post<{ chartId: string; elapsedMs: number }>(`/charts/${id}/stop`);
 
+export interface ActiveTimer {
+  chartId: string;
+  chartNo: string | null;
+  worklistId: string;
+  milestone: ChartMilestone;
+  startedAt: string;
+  elapsedMs: number;
+}
+
+export const getActiveTimer = () => get<ActiveTimer | null>('/charts/active-timer');
+
 export const transitionChart = (
   id: string,
   dto: { milestone: ChartMilestone; chartStatus: ChartStatus },
@@ -145,3 +159,39 @@ export interface UpdateFeedbackDto {
 
 export const updateChartFeedback = (feedbackId: string, dto: UpdateFeedbackDto) =>
   patch<ChartFeedback>(`/charts/feedback/${feedbackId}`, dto);
+
+/* ── AI: ICD Predictor (encounter flow) ──────────────────── */
+
+export interface ProcessDocumentsInput {
+  files: File[];
+  /** Same length as files; one report_type per file. Defaults to CLINIC_NOTE on the server. */
+  reportTypes?: AiReportType[];
+  documentType?: string;
+}
+
+/**
+ * Upload medical documents and run the ICD Predictor encounter flow.
+ * The request blocks until the gateway pipeline finishes — typically
+ * 30–90s — so callers should disable the form and show a progress UI.
+ */
+export async function processChartDocuments(
+  chartId: string,
+  input: ProcessDocumentsInput,
+  onUploadProgress?: (pct: number) => void,
+): Promise<AiEncounterResult> {
+  const fd = new FormData();
+  input.files.forEach((f) => fd.append('files', f, f.name));
+  if (input.reportTypes?.length) fd.append('reportTypes', input.reportTypes.join(','));
+  if (input.documentType) fd.append('documentType', input.documentType);
+
+  const { data } = await api.post<AiEncounterResult>(`/charts/${chartId}/process-documents`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    // Pipeline polls up to 10 min on the server side — give axios room.
+    timeout: 15 * 60 * 1000,
+    onUploadProgress: (e) => {
+      if (!onUploadProgress || !e.total) return;
+      onUploadProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  });
+  return data;
+}

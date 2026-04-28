@@ -82,13 +82,23 @@ api.interceptors.response.use(
 
 export function normalizeError(err: AxiosError): ApiErrorShape {
   const body = err.response?.data as
-    | { error?: { code?: string; message?: string; details?: Record<string, string[]> } }
+    | {
+        error?: { code?: string; message?: string; details?: Record<string, string[]> } & Record<string, unknown>;
+      }
     | undefined;
+  // Pull any extra keys the server set alongside code/message/details into `meta`,
+  // so callers can use them (e.g. timer_conflict carries activeChartId / activeChartNo).
+  let meta: Record<string, unknown> | undefined;
+  if (body?.error) {
+    const { code: _c, message: _m, details: _d, ...rest } = body.error;
+    if (Object.keys(rest).length) meta = rest;
+  }
   return {
     code: body?.error?.code ?? 'network_error',
     message: body?.error?.message ?? err.message ?? 'Request failed',
     status: err.response?.status ?? 0,
     details: body?.error?.details,
+    meta,
   };
 }
 

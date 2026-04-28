@@ -70,8 +70,9 @@ export function PriorityChip({ priority }: { priority: Priority }) {
   );
 }
 
-/* ── Milestone (7 values including CLOSED) ────────────────── */
+/* ── Milestone (8 values including READY_TO_ALLOCATE + CLOSED) ────────────────── */
 const MILESTONE_STYLES: Record<ChartMilestone, string> = {
+  READY_TO_ALLOCATE: 'bg-surface-sunken text-ink-muted',
   READY_TO_CODE: 'bg-info-soft text-info',
   CODING_IN_PROGRESS: 'bg-warn-soft text-warn',
   CODING_DONE: 'bg-success-soft text-success',
@@ -81,6 +82,7 @@ const MILESTONE_STYLES: Record<ChartMilestone, string> = {
   CLOSED: 'bg-surface-sunken text-ink-muted',
 };
 const MILESTONE_LABEL: Record<ChartMilestone, string> = {
+  READY_TO_ALLOCATE: 'Ready to Allocate',
   READY_TO_CODE: 'Ready to Code',
   CODING_IN_PROGRESS: 'Coding',
   CODING_DONE: 'Coding Done',

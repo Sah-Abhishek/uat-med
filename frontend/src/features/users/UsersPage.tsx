@@ -17,7 +17,7 @@ import {
 import {
   listClients,
   listLocations,
-  getSpecialitiesGeneral,
+  listPrimarySpecialities,
 } from '@/api/configurations';
 import type { ApiErrorShape, Role, User, UserStatus } from '@/api/types';
 import { PageHeader, SectionLabel } from '@/components/layout/PageHeader';
@@ -51,7 +51,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-const ROLES: Role[] = ['ADMIN', 'MANAGER', 'AUDITOR', 'CODER'];
+const ROLES: Role[] = ['TEAMLEAD', 'MANAGER', 'AUDITOR', 'CODER'];
 
 /** Expanded filter state — superset of UserListParams with a few client-side fields. */
 interface UserFilters extends UserListParams {
@@ -105,8 +105,8 @@ export function UsersPage() {
     staleTime: 60_000,
   });
   const specialitiesLookup = useQuery({
-    queryKey: ['configurations', 'spec-general'],
-    queryFn: () => getSpecialitiesGeneral(),
+    queryKey: ['configurations', 'primary-specialities', 'all'],
+    queryFn: () => listPrimarySpecialities(),
     staleTime: 60_000,
   });
 
@@ -114,8 +114,8 @@ export function UsersPage() {
   clientsLookup.data?.items.forEach((c) => clientNameById.set(c.id, c.name));
 
   const specialityNameById = new Map<number, string>();
-  specialitiesLookup.data?.primarySpecialities.forEach((s) => {
-    if (s.id != null) specialityNameById.set(s.id, s.name);
+  specialitiesLookup.data?.items.forEach((s) => {
+    specialityNameById.set(s.id, s.name);
   });
 
   const list = useQuery({
@@ -618,13 +618,13 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
     queryFn: listClients,
     enabled: open,
   });
+  const selectedClientId = watch('clientId');
   const specialitiesQuery = useQuery({
-    queryKey: ['configurations', 'spec-general'],
-    queryFn: () => getSpecialitiesGeneral(),
+    queryKey: ['configurations', 'primary-specialities', selectedClientId ?? 'all'],
+    queryFn: () => listPrimarySpecialities(selectedClientId ? Number(selectedClientId) : undefined),
     enabled: open,
   });
 
-  const selectedClientId = watch('clientId');
   const locationsQuery = useQuery({
     queryKey: ['configurations', 'locations', selectedClientId],
     queryFn: () => listLocations(Number(selectedClientId)),
@@ -733,11 +733,9 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
               <option value="">
                 {specialitiesQuery.isPending ? 'Loading…' : 'Select…'}
               </option>
-              {specialitiesQuery.data?.primarySpecialities
-                .filter((s) => s.id != null && (s.isActive ?? true))
-                .map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
+              {specialitiesQuery.data?.items.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
             </Select>
           </div>
         </div>
@@ -782,10 +780,6 @@ function ApproveModal({
     queryKey: ['configurations', 'clients'],
     queryFn: listClients,
   });
-  const specialitiesQuery = useQuery({
-    queryKey: ['configurations', 'spec-general'],
-    queryFn: () => getSpecialitiesGeneral(),
-  });
   const { register, handleSubmit, watch, setValue } = useForm<CreateUserDto>({
     defaultValues: {
       email,
@@ -796,6 +790,10 @@ function ApproveModal({
   });
 
   const selectedClientId = watch('clientId');
+  const specialitiesQuery = useQuery({
+    queryKey: ['configurations', 'primary-specialities', selectedClientId ?? 'all'],
+    queryFn: () => listPrimarySpecialities(selectedClientId ? Number(selectedClientId) : undefined),
+  });
   const locationsQuery = useQuery({
     queryKey: ['configurations', 'locations', selectedClientId],
     queryFn: () => listLocations(Number(selectedClientId)),
@@ -924,11 +922,9 @@ function ApproveModal({
               <option value="">
                 {specialitiesQuery.isPending ? 'Loading…' : 'Select…'}
               </option>
-              {specialitiesQuery.data?.primarySpecialities
-                .filter((s) => s.id != null && (s.isActive ?? true))
-                .map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
+              {specialitiesQuery.data?.items.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
             </Select>
           </div>
         </div>

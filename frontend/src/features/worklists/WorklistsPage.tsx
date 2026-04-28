@@ -14,7 +14,13 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { IllustrationStatCard } from '@/components/ui/StatCards';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label } from '@/components/ui/Field';
+import { Input, Label, FancySelect, DatePicker } from '@/components/ui/Field';
+import {
+  listClients,
+  listLocations,
+  listPrimarySpecialities,
+  listProcessesByLocation,
+} from '@/api/configurations';
 import { Modal, ModalFooter, Pagination, Avatar, DualProgressBar } from '@/components/ui/Primitives';
 import { WorklistStatusChip } from '@/components/ui/Chip';
 import { useCan } from '@/hooks/useCan';
@@ -125,7 +131,10 @@ export function WorklistsPage() {
               ) : (
                 list.data?.items.map((wl) => {
                   const allocPct = wl.totalCharts > 0
-                    ? 0 // placeholder: real allocation % comes from detail endpoint
+                    ? (wl.allocatedCharts / wl.totalCharts) * 100
+                    : 0;
+                  const progressPct = wl.totalCharts > 0
+                    ? (wl.closedCharts / wl.totalCharts) * 100
                     : 0;
                   return (
                     <tr key={wl.id} className="group hover:bg-surface-sunken/40 transition">
@@ -145,7 +154,7 @@ export function WorklistsPage() {
                         <DualProgressBar percent={allocPct} />
                       </td>
                       <td className="table-cell">
-                        <DualProgressBar percent={allocPct} />
+                        <DualProgressBar percent={progressPct} tone="success" />
                       </td>
                       <td className="table-cell">
                         <Avatar name="—" size="sm" />
@@ -202,16 +211,40 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm<CreateWorklistDto>({
     defaultValues: {
       worklistNumber: '',
-      clientId: 1,
-      locationId: 1,
-      primarySpecialityId: 1,
-      processId: 1,
       receivedDate: new Date().toISOString().slice(0, 10),
     },
+  });
+
+  const clientId = watch('clientId');
+  const locationId = watch('locationId');
+  const primarySpecialityId = watch('primarySpecialityId');
+  const processId = watch('processId');
+
+  const clients = useQuery({
+    queryKey: ['configurations', 'clients'],
+    queryFn: listClients,
+    enabled: open,
+  });
+  const locations = useQuery({
+    queryKey: ['configurations', 'locations', clientId],
+    queryFn: () => listLocations(Number(clientId)),
+    enabled: open && !!clientId,
+  });
+  const specialities = useQuery({
+    queryKey: ['configurations', 'primary-specialities', clientId],
+    queryFn: () => listPrimarySpecialities(Number(clientId)),
+    enabled: open && !!clientId,
+  });
+  const processes = useQuery({
+    queryKey: ['configurations', 'processes', locationId],
+    queryFn: () => listProcessesByLocation(Number(locationId)),
+    enabled: open && !!locationId,
   });
 
   const mutation = useMutation({
@@ -244,7 +277,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
             locationId: Number(d.locationId),
             primarySpecialityId: Number(d.primarySpecialityId),
             processId: Number(d.processId),
-            numberOfCharts: d.numberOfCharts ? Number(d.numberOfCharts) : undefined,
+            numberOfCharts: Number(d.numberOfCharts),
           });
         })}
         className="space-y-4"
@@ -266,50 +299,122 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
           </div>
           <div>
             <Label required>Received Date</Label>
-            <Input
-              type="date"
-              error={errors.receivedDate?.message}
-              {...register('receivedDate', { required: 'Required' })}
+            <input type="hidden" {...register('receivedDate', { required: 'Required' })} />
+            <DatePicker
+              value={watch('receivedDate')}
+              onChange={(v) => setValue('receivedDate', v, { shouldValidate: true })}
+              placeholder="Select received date"
             />
+            {errors.receivedDate && (
+              <p className="mt-1 text-xs text-danger">{errors.receivedDate.message}</p>
+            )}
+          </div>
+        </div>
+
+        <input type="hidden" {...register('clientId', { required: 'Required', valueAsNumber: true })} />
+        <input type="hidden" {...register('locationId', { required: 'Required', valueAsNumber: true })} />
+        <input type="hidden" {...register('primarySpecialityId', { required: 'Required', valueAsNumber: true })} />
+        <input type="hidden" {...register('processId', { required: 'Required', valueAsNumber: true })} />
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label required>Client</Label>
+            <FancySelect
+              value={clientId ? String(clientId) : ''}
+              placeholder={clients.isPending ? 'Loading…' : 'Select client'}
+              options={(clients.data?.items ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
+              onChange={(v) => {
+                setValue('clientId', Number(v), { shouldValidate: true });
+                setValue('locationId', undefined as unknown as number);
+                setValue('primarySpecialityId', undefined as unknown as number);
+                setValue('processId', undefined as unknown as number);
+              }}
+            />
+            {errors.clientId && <p className="mt-1 text-xs text-danger">{errors.clientId.message}</p>}
+          </div>
+          <div>
+            <Label required>Location</Label>
+            <FancySelect
+              value={locationId ? String(locationId) : ''}
+              disabled={!clientId}
+              placeholder={
+                !clientId ? 'Pick client first' : locations.isPending ? 'Loading…' : 'Select location'
+              }
+              options={(locations.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name }))}
+              onChange={(v) => {
+                setValue('locationId', Number(v), { shouldValidate: true });
+                setValue('processId', undefined as unknown as number);
+              }}
+            />
+            {errors.locationId && <p className="mt-1 text-xs text-danger">{errors.locationId.message}</p>}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label required>Client ID</Label>
-            <Input type="number" {...register('clientId', { required: true, valueAsNumber: true })} />
-          </div>
-          <div>
-            <Label required>Location ID</Label>
-            <Input type="number" {...register('locationId', { required: true, valueAsNumber: true })} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label required>Primary Speciality ID</Label>
-            <Input
-              type="number"
-              {...register('primarySpecialityId', { required: true, valueAsNumber: true })}
+            <Label required>Primary Speciality</Label>
+            <FancySelect
+              value={primarySpecialityId ? String(primarySpecialityId) : ''}
+              disabled={!clientId}
+              placeholder={
+                !clientId
+                  ? 'Pick client first'
+                  : specialities.isPending
+                  ? 'Loading…'
+                  : (specialities.data?.items.length ?? 0) === 0
+                  ? 'No specialities for this client'
+                  : 'Select speciality'
+              }
+              options={(specialities.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name }))}
+              onChange={(v) => setValue('primarySpecialityId', Number(v), { shouldValidate: true })}
             />
+            {errors.primarySpecialityId && (
+              <p className="mt-1 text-xs text-danger">{errors.primarySpecialityId.message}</p>
+            )}
           </div>
           <div>
-            <Label required>Process ID</Label>
-            <Input type="number" {...register('processId', { required: true, valueAsNumber: true })} />
+            <Label required>Process</Label>
+            <FancySelect
+              value={processId ? String(processId) : ''}
+              disabled={!locationId}
+              placeholder={
+                !locationId
+                  ? 'Pick location first'
+                  : processes.isPending
+                  ? 'Loading…'
+                  : (processes.data?.items.length ?? 0) === 0
+                  ? 'No processes for this location'
+                  : 'Select process'
+              }
+              options={(processes.data?.items ?? []).map((p) => ({ value: String(p.id), label: p.name }))}
+              onChange={(v) => setValue('processId', Number(v), { shouldValidate: true })}
+            />
+            {errors.processId && <p className="mt-1 text-xs text-danger">{errors.processId.message}</p>}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label>Date of service</Label>
-            <Input type="date" {...register('dateOfService')} />
+            <input type="hidden" {...register('dateOfService')} />
+            <DatePicker
+              value={watch('dateOfService')}
+              onChange={(v) => setValue('dateOfService', v)}
+              placeholder="Optional"
+            />
           </div>
           <div>
-            <Label>No. of Charts</Label>
+            <Label required>No. of Charts</Label>
             <Input
               type="number"
-              placeholder="Optional"
-              {...register('numberOfCharts', { valueAsNumber: true })}
+              min={1}
+              placeholder="e.g. 50"
+              error={errors.numberOfCharts?.message}
+              {...register('numberOfCharts', {
+                required: 'Required',
+                valueAsNumber: true,
+                min: { value: 1, message: 'Must be at least 1' },
+              })}
             />
           </div>
         </div>

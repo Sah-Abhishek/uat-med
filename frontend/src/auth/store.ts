@@ -63,8 +63,19 @@ export const useAuth = create<AuthState>()(
     {
       name: 'valerion-auth',
       storage: createJSONStorage(() => sessionStorage),
-      // Access token stays in memory only; survives page reload via refresh bootstrap.
-      partialize: (s) => ({ refreshToken: s.refreshToken, user: s.user }),
+      // Persist the access token alongside the refresh token. Both are in
+      // sessionStorage (tab-scoped, cleared on tab close), so storing the
+      // shorter-lived access token next to the long-lived refresh token does
+      // not meaningfully change the threat model: an XSS attacker on the same
+      // origin already has the refresh token, which is strictly more powerful.
+      // Persisting it lets page reloads skip the /auth/refresh round-trip
+      // — the lazy 401 → refresh → retry path in api/client.ts still kicks in
+      // when the token actually expires.
+      partialize: (s) => ({
+        accessToken: s.accessToken,
+        refreshToken: s.refreshToken,
+        user: s.user,
+      }),
     },
   ),
 );

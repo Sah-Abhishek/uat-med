@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from './store';
 import { refresh } from '@/api/auth';
+import type { LoginResponse } from '@/api/types';
 import { Loader2 } from 'lucide-react';
+
+/**
+ * Module-level single-flight guard. Survives React StrictMode's mount→unmount→mount
+ * cycle so the refresh token (which the backend rotates on every use) is never sent
+ * twice — a second send would trip the backend's reuse-detection and revoke all
+ * sessions for the user.
+ */
+let bootstrapInFlight: Promise<LoginResponse> | null = null;
 
 /**
  * Wraps protected routes:
@@ -21,7 +30,8 @@ export function ProtectedRoute() {
     let cancelled = false;
     if (!accessToken && refreshToken && user) {
       setBootstrapping(true);
-      refresh(refreshToken)
+      const p = bootstrapInFlight ?? (bootstrapInFlight = refresh(refreshToken));
+      p
         .then((res) => {
           if (cancelled) return;
           setTokens(res.accessToken, res.refreshToken, {
@@ -37,6 +47,7 @@ export function ProtectedRoute() {
           if (!cancelled) clear();
         })
         .finally(() => {
+          bootstrapInFlight = null;
           if (!cancelled) setBootstrapping(false);
         });
     }

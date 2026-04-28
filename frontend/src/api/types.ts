@@ -3,7 +3,7 @@
 
 /* ── Auth ─────────────────────────────────────────────────── */
 
-export type Role = 'ADMIN' | 'MANAGER' | 'AUDITOR' | 'CODER';
+export type Role = 'TEAMLEAD' | 'MANAGER' | 'AUDITOR' | 'CODER';
 export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'PENDING';
 
 export interface User {
@@ -50,6 +50,8 @@ export interface ApiErrorShape {
   message: string;
   status: number;
   details?: Record<string, string[]>;
+  /** Extra keys the server attached to the error envelope (besides code/message/details). */
+  meta?: Record<string, unknown>;
 }
 
 export type SortDir = 'asc' | 'desc';
@@ -75,12 +77,19 @@ export interface Worklist {
   receivedDate: string;
   dateOfService: string | null;
   totalCharts: number;
+  allocatedCharts: number;
+  closedCharts: number;
   importTaskId: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface WorklistDetail extends Worklist {
+  client: { id: number; name: string } | null;
+  location: { id: number; name: string } | null;
+  primarySpeciality: { id: number; name: string } | null;
+  process: { id: number; name: string } | null;
+  netChange: number;
   chartSummary: {
     total: number;
     allocated: number;
@@ -102,6 +111,7 @@ export interface WorklistStatusSummary {
 // milestone adds CLOSED; priority adds FINALIZED.
 
 export type ChartMilestone =
+  | 'READY_TO_ALLOCATE'
   | 'READY_TO_CODE'
   | 'CODING_IN_PROGRESS'
   | 'CODING_DONE'
@@ -140,6 +150,82 @@ export interface Chart {
   customFields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export type AiReportType =
+  | 'HP'
+  | 'DISCHARGE_SUMMARY'
+  | 'OPERATIVE_NOTE'
+  | 'LAB'
+  | 'RADIOLOGY'
+  | 'ED_NOTE'
+  | 'CLINIC_NOTE'
+  | 'PATHOLOGY';
+
+export interface AiPredictedCode {
+  code: string;
+  description: string;
+  confidence?: number;
+  codeType?: string;
+  sequencePos?: number;
+  justification?: string;
+}
+
+export interface UploadedDocument {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  reportType: AiReportType;
+  reportId?: string;
+}
+
+export interface AiCodingTip {
+  tip: string;
+  relatedCode?: string;
+  potentialImpact?: string;
+}
+
+export interface AiComplianceAlert {
+  alert: string;
+  severity?: string;
+  regulation?: string;
+  recommendedAction?: string;
+}
+
+export interface AiDocumentationGap {
+  gap: string;
+  impact?: string;
+  priority?: string;
+  suggestion?: string;
+}
+
+export interface AiPhysicianQuery {
+  query: string;
+  reason?: string;
+  priority?: string;
+  impactOnCoding?: string;
+}
+
+export interface AiEncounterResult {
+  encounterId: string;
+  reportIds: string[];
+  status: string;
+  reportCount: number;
+  codes: AiPredictedCode[];
+  primary: AiPredictedCode[];
+  secondary: AiPredictedCode[];
+  procedures: AiPredictedCode[];
+  clinicalSummary?: Record<string, unknown>;
+  auditNotes?: string;
+  pipelineTiming?: Record<string, unknown>;
+  uploadedDocs: UploadedDocument[];
+  // Surfaced from final_codes_json.agent4_full.feedback by the backend.
+  codingTips?: AiCodingTip[];
+  complianceAlerts?: AiComplianceAlert[];
+  documentationGaps?: AiDocumentationGap[];
+  physicianQueries?: AiPhysicianQuery[];
 }
 
 export interface ChartSummary {

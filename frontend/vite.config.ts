@@ -19,9 +19,9 @@ export default defineConfig({
     ],
     proxy: {
       '/api/v1': {
-        target: 'https://apiuatnextcode.icdcore.com',
+        target: 'http://localhost:2500',
         changeOrigin: true,
-        secure: true,
+        secure: false,
       },
     },
   },

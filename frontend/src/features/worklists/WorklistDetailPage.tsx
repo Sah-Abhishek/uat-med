@@ -11,12 +11,14 @@ import {
   type CreateWorklistDto,
 } from '@/api/worklists';
 import { listUsers } from '@/api/users';
+import { listCharts } from '@/api/charts';
 import type { ApiErrorShape } from '@/api/types';
+import { useCan } from '@/hooks/useCan';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, Select } from '@/components/ui/Field';
-import { Modal, ModalFooter, Tabs, PillBadge } from '@/components/ui/Primitives';
+import { Input, Label, FancySelect } from '@/components/ui/Field';
+import { Modal, ModalFooter, Tabs, PillBadge, Avatar } from '@/components/ui/Primitives';
 import { WorklistStatusChip } from '@/components/ui/Chip';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
@@ -38,6 +40,7 @@ export function WorklistDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'details' | 'activity'>('details');
+  const canAllocate = useCan('worklist.allocate');
 
   const { data, isPending } = useQuery({
     queryKey: ['worklist', id],
@@ -82,10 +85,26 @@ export function WorklistDetailPage() {
           </div>
 
           <div className="space-y-2 text-sm mb-5">
-            <MetaRow icon={Building2} label="Client" value={`#${data.clientId}`} />
-            <MetaRow icon={MapPin} label="Location" value={`#${data.locationId}`} />
-            <MetaRow icon={Stethoscope} label="Speciality" value={`#${data.primarySpecialityId}`} />
-            <MetaRow icon={Cog} label="Process" value={`#${data.processId}`} />
+            <MetaRow
+              icon={Building2}
+              label="Client"
+              value={data.client?.name ?? `#${data.clientId}`}
+            />
+            <MetaRow
+              icon={MapPin}
+              label="Location"
+              value={data.location?.name ?? `#${data.locationId}`}
+            />
+            <MetaRow
+              icon={Stethoscope}
+              label="Speciality"
+              value={data.primarySpeciality?.name ?? `#${data.primarySpecialityId}`}
+            />
+            <MetaRow
+              icon={Cog}
+              label="Process"
+              value={data.process?.name ?? `#${data.processId}`}
+            />
           </div>
 
           <div className="grid grid-cols-3 gap-3 pt-4 border-t border-line">
@@ -163,7 +182,10 @@ export function WorklistDetailPage() {
             />
           </div>
           {activeTab === 'details' ? (
-            <DetailsTable summary={s} />
+            <>
+              <DetailsTable summary={s} />
+              <AllocationsBreakdown worklistId={id!} />
+            </>
           ) : (
             <div className="p-10 text-center text-sm text-ink-muted">
               Activity log coming soon.
@@ -171,7 +193,7 @@ export function WorklistDetailPage() {
           )}
         </Card>
 
-        <AllocateFreshVolume worklistId={id!} unallocatedCount={s.unallocated} />
+        {canAllocate && <AllocateFreshVolume worklistId={id!} unallocatedCount={s.unallocated} />}
       </div>
 
       <EditWorklistModal
@@ -221,7 +243,7 @@ function BigNum({
 }) {
   const textColor = {
     success: 'text-success',
-    primary: 'text-primary-ink',
+    primary: 'text-primary-ink dark:text-primary',
     info: 'text-info',
   }[tone];
   return (
@@ -417,18 +439,15 @@ function AllocateFreshVolume({
                 control={control}
                 name={`ranges.${i}.assigneeId`}
                 render={({ field }) => (
-                  <Select
-                    placeholder="Select..."
-                    value={String(field.value || '')}
-                    onChange={(e) => field.onChange(Number(e.target.value))}
-                  >
-                    <option value="">Select...</option>
-                    {users.data?.items.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.fullName}
-                      </option>
-                    ))}
-                  </Select>
+                  <FancySelect
+                    placeholder={users.isPending ? 'Loading…' : 'Select coder'}
+                    value={field.value ? String(field.value) : ''}
+                    onChange={(v) => field.onChange(Number(v))}
+                    options={(users.data?.items ?? []).map((u) => ({
+                      value: String(u.id),
+                      label: u.fullName,
+                    }))}
+                  />
                 )}
               />
             </div>
@@ -610,5 +629,161 @@ function DeleteWorklistModal({
         </ModalFooter>
       </div>
     </Modal>
+  );
+}
+
+/* ── Allocations breakdown — per-user serial-number list ─── */
+
+/**
+ * Compresses [1,2,3,5,7,8] → "1–3, 5, 7–8" so we don't dump 200 numbers verbatim.
+ */
+function formatRanges(serials: number[]): string {
+  if (serials.length === 0) return '—';
+  const sorted = [...serials].sort((a, b) => a - b);
+  const out: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    const n = sorted[i];
+    if (n === prev + 1) {
+      prev = n;
+      continue;
+    }
+    out.push(start === prev ? `${start}` : `${start}–${prev}`);
+    start = n;
+    prev = n;
+  }
+  return out.join(', ');
+}
+
+/**
+ * Fetch every chart in the worklist, paginating in chunks of 200 (the backend
+ * cap). This is fine for worklists up to a few thousand charts.
+ */
+async function fetchAllCharts(worklistId: string) {
+  const PAGE_SIZE = 200;
+  type Item = Awaited<ReturnType<typeof listCharts>>['items'][number];
+  const all: Item[] = [];
+  let page = 1;
+  while (true) {
+    const res = await listCharts({
+      worklistId,
+      page,
+      pageSize: PAGE_SIZE,
+      sortBy: 'serialNo',
+      sortDir: 'asc',
+    });
+    all.push(...res.items);
+    if (res.items.length < PAGE_SIZE || all.length >= res.total) break;
+    page += 1;
+  }
+  return all;
+}
+
+async function fetchAllActiveUsers() {
+  const PAGE_SIZE = 200;
+  type Item = Awaited<ReturnType<typeof listUsers>>['items'][number];
+  const all: Item[] = [];
+  let page = 1;
+  while (true) {
+    const res = await listUsers({ page, pageSize: PAGE_SIZE, status: 'ACTIVE' });
+    all.push(...res.items);
+    if (res.items.length < PAGE_SIZE || all.length >= res.total) break;
+    page += 1;
+  }
+  return all;
+}
+
+function AllocationsBreakdown({ worklistId }: { worklistId: string }) {
+  const charts = useQuery({
+    queryKey: ['worklist', worklistId, 'charts-allocations'],
+    queryFn: () => fetchAllCharts(worklistId),
+    enabled: !!worklistId,
+  });
+
+  // Map allocated user IDs → fullName so we can label rows.
+  const users = useQuery({
+    queryKey: ['users', 'all-active'],
+    queryFn: fetchAllActiveUsers,
+  });
+  const userMap = new Map<string, string>();
+  for (const u of users.data ?? []) userMap.set(u.id, u.fullName);
+
+  // Group by allocated coder. Charts assigned to neither a coder nor an auditor
+  // are unallocated. (If you allocate auditors directly, extend this grouping.)
+  const groups = new Map<string, number[]>();
+  const unallocated: number[] = [];
+  for (const c of charts.data ?? []) {
+    if (c.allocatedCoderId) {
+      const k = String(c.allocatedCoderId);
+      const arr = groups.get(k) ?? [];
+      arr.push(c.serialNo);
+      groups.set(k, arr);
+    } else {
+      unallocated.push(c.serialNo);
+    }
+  }
+
+  return (
+    <div className="px-6 py-5 border-t border-line">
+      <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-3">
+        Chart allocations
+      </p>
+      {charts.isPending ? (
+        <div className="h-10 rounded bg-surface-sunken animate-pulse" />
+      ) : charts.error ? (
+        <p className="text-xs text-danger">
+          Couldn't load charts: {(charts.error as Error).message}
+        </p>
+      ) : (charts.data?.length ?? 0) === 0 ? (
+        <p className="text-xs text-ink-muted">No charts in this worklist yet.</p>
+      ) : (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[600px]">
+          <thead>
+            <tr>
+              <th className="table-head">Assignee</th>
+              <th className="table-head">Charts</th>
+              <th className="table-head text-right pr-4">Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...groups.entries()].map(([userId, serials]) => {
+              const name = userMap.get(userId) ?? `User ${userId}`;
+              return (
+                <tr key={userId} className="border-t border-line">
+                  <td className="table-cell">
+                    <div className="flex items-center gap-2">
+                      <Avatar name={name} size="sm" />
+                      <span className="text-sm font-semibold text-ink">{name}</span>
+                    </div>
+                  </td>
+                  <td className="table-cell text-sm font-mono text-ink-muted">
+                    {formatRanges(serials)}
+                  </td>
+                  <td className="table-cell text-sm text-ink text-right pr-4 font-semibold">
+                    {serials.length}
+                  </td>
+                </tr>
+              );
+            })}
+            {unallocated.length > 0 && (
+              <tr className="border-t border-line">
+                <td className="table-cell">
+                  <PillBadge tone="sky">Unallocated</PillBadge>
+                </td>
+                <td className="table-cell text-sm font-mono text-ink-muted">
+                  {formatRanges(unallocated)}
+                </td>
+                <td className="table-cell text-sm text-ink text-right pr-4 font-semibold">
+                  {unallocated.length}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      )}
+    </div>
   );
 }

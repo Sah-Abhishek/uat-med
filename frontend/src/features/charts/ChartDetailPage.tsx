@@ -1,44 +1,36 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getChart,
-  updateChart,
-  startChart,
-  stopChart,
-  transitionChart,
-  listChartFeedback,
-  addChartFeedback,
-  updateChartFeedback,
-  type UpdateChartDto,
-} from '@/api/charts';
-import type {
-  ApiErrorShape,
-  Chart,
-  ChartMilestone,
-  ChartStatus,
-  FeedbackStatus,
-  Priority,
-} from '@/api/types';
-import { PageHeader } from '@/components/layout/PageHeader';
-import { Card, CollapsibleCard } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Input, Label, Select, Textarea } from '@/components/ui/Field';
-import { Avatar } from '@/components/ui/Primitives';
-import { ChartStatusChip, MilestoneChip, PriorityChip } from '@/components/ui/Chip';
-import { useAuth } from '@/auth/store';
-import { formatDate, formatDateTime } from '@/lib/utils';
-import {
   ArrowLeft,
-  Play,
-  Square,
-  Save,
+  ChevronLeft,
   ChevronRight,
-  ChevronLeft as ChevronLeftIcon,
-  Loader2,
-  MessageSquarePlus,
-  CheckCircle2,
+  PanelRightClose,
+  PanelRightOpen,
+  Save,
 } from 'lucide-react';
+import { getChart, updateChart, getActiveTimer, type UpdateChartDto } from '@/api/charts';
+import { listUsers } from '@/api/users';
+import type { AiEncounterResult, Chart, Priority, UploadedDocument } from '@/api/types';
+import { useAuth } from '@/auth/store';
+import { Button } from '@/components/ui/Button';
+import { HeaderCard } from './chart-detail/HeaderCard';
+import { UploadSection } from './chart-detail/UploadSection';
+import { ChartInfoSection } from './chart-detail/ChartInfoSection';
+import { ProcessingInfoSection } from './chart-detail/ProcessingInfoSection';
+import { AuditInfoSection } from './chart-detail/AuditInfoSection';
+import { DocumentViewerModal } from './chart-detail/DocumentViewerModal';
+import { ReviewEditModal } from './chart-detail/ReviewEditModal';
+import { useFormDraft, useAuditDraft, useCustomFieldValues } from './chart-detail/formState';
+import { useFieldConfig, STANDARD_FIELD_MAP } from './chart-detail/useFieldConfig';
+import { ChartDetailSkeleton } from './chart-detail/ChartDetailSkeleton';
+import { UsersPanel } from './chart-detail/sidebar/UsersPanel';
+import { ConversationLog } from './chart-detail/sidebar/ConversationLog';
+import { TimeTracker } from './chart-detail/sidebar/TimeTracker';
+import { AiIcdPrediction } from './chart-detail/sidebar/AiIcdPrediction';
+import { DocumentationGaps } from './chart-detail/sidebar/DocumentationGaps';
+import { PhysicianQueries } from './chart-detail/sidebar/PhysicianQueries';
+import { CodingFeedback } from './chart-detail/sidebar/CodingFeedback';
 
 export function ChartDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,13 +42,7 @@ export function ChartDetailPage() {
     enabled: !!id,
   });
 
-  if (isPending)
-    return (
-      <div className="p-8 flex items-center gap-2 text-ink-muted">
-        <Loader2 className="w-4 h-4 animate-spin" /> Loading chart…
-      </div>
-    );
-  if (!chart) return <div className="p-8 text-ink-muted">Not found.</div>;
+  if (!isPending && !chart) return <div className="p-8 text-ink-muted">Not found.</div>;
 
   return (
     <div className="p-8 max-w-[1600px] space-y-5">
@@ -68,525 +54,303 @@ export function ChartDetailPage() {
         Back to charts
       </Link>
 
-      <div className="flex items-start justify-between gap-4">
-        <PageHeader
-          title={`Chart ${chart.chartNo ?? '—'}`}
-          subtitle={`Worklist ${chart.worklistNumber} · Serial ${chart.serialNo}`}
-        />
-        <div className="flex items-center gap-2 pt-1">
-          <Button variant="outline" size="sm" leftIcon={<ChevronLeftIcon className="w-3.5 h-3.5" />}>
-            Previous
-          </Button>
-          <Button variant="outline" size="sm" rightIcon={<ChevronRight className="w-3.5 h-3.5" />}>
-            Next
-          </Button>
-        </div>
+      <div className="flex items-center justify-between">
+        <Button variant="primary" leftIcon={<ChevronLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/charts')}>
+          Previous Chart
+        </Button>
+        <Button variant="primary" rightIcon={<ChevronRight className="w-3.5 h-3.5" />} onClick={() => navigate('/charts')}>
+          Next Chart
+        </Button>
       </div>
 
-      {/* Three-column layout */}
-      <div className="grid grid-cols-12 gap-5">
-        {/* LEFT: summary */}
-        <aside className="col-span-12 lg:col-span-3 space-y-4">
-          <ChartSummaryCard chart={chart} />
-          <UsersCard chart={chart} />
-        </aside>
-
-        {/* CENTER: editor sections */}
-        <div className="col-span-12 lg:col-span-6 space-y-4">
-          <ChartEditor chart={chart} />
-        </div>
-
-        {/* RIGHT: timer + feedback */}
-        <aside className="col-span-12 lg:col-span-3 space-y-4">
-          <TimerCard chart={chart} />
-          <FeedbackThread chart={chart} />
-          <MilestoneActions chart={chart} onClosed={() => navigate('/charts')} />
-        </aside>
-      </div>
+      {chart ? <ChartDetailBody chart={chart} /> : <ChartDetailSkeleton />}
     </div>
   );
 }
 
-/* ═════════════════ LEFT: summary + users ═════════════════ */
-function ChartSummaryCard({ chart }: { chart: Chart }) {
-  return (
-    <Card padding="default">
-      <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-3">
-        Chart summary
-      </p>
-      <div className="space-y-2 text-sm">
-        <Row label="Chart #" value={<span className="font-mono">{chart.chartNo ?? '—'}</span>} />
-        <Row label="MR #" value={chart.mrNumber ?? '—'} />
-        <Row label="Priority" value={<PriorityChip priority={chart.priority} />} />
-        <Row label="Milestone" value={<MilestoneChip milestone={chart.milestone} />} />
-        <Row label="Status" value={<ChartStatusChip status={chart.chartStatus} />} />
-        <Row label="DOS" value={formatDate(chart.dateOfService)} />
-      </div>
-    </Card>
-  );
-}
+/* ── Body — owns shared form state ───────────────────────── */
 
-function UsersCard({ chart }: { chart: Chart }) {
-  return (
-    <Card padding="default">
-      <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-3">
-        Users
-      </p>
-      <div className="space-y-3">
-        <UserBadge role="Coder" id={chart.allocatedCoderId} />
-        <UserBadge role="Auditor" id={chart.allocatedAuditorId} />
-      </div>
-    </Card>
-  );
-}
-function UserBadge({ role, id }: { role: string; id: string | null }) {
-  return (
-    <div className="flex items-center gap-2.5">
-      {id ? (
-        <Avatar name={`U ${id}`} size="md" />
-      ) : (
-        <div className="w-9 h-9 rounded-full bg-surface-sunken" />
-      )}
-      <div className="min-w-0">
-        <p className="text-[11px] text-ink-muted uppercase tracking-[0.08em] font-semibold">
-          {role}
-        </p>
-        <p className="text-sm text-ink font-semibold truncate">
-          {id ? `User ${id}` : 'Unassigned'}
-        </p>
-      </div>
-    </div>
-  );
-}
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-ink-muted text-[13px]">{label}</span>
-      <span className="text-ink text-[13px] font-medium">{value}</span>
-    </div>
-  );
-}
-
-/* ═════════════════ CENTER: editor ═════════════════ */
-function ChartEditor({ chart }: { chart: Chart }) {
+function ChartDetailBody({ chart }: { chart: Chart }) {
   const qc = useQueryClient();
-  const [local, setLocal] = useState<UpdateChartDto>(() => ({
-    priority: chart.priority,
+  const user = useAuth((s) => s.user);
+  const isAuditor = user?.role === 'AUDITOR';
+
+  // Frontend-only draft for the source's wide form. Seed with whatever the
+  // current Chart entity carries; everything else is local-only until backend lands.
+  const { draft, update: rawUpdate } = useFormDraft({
+    chartNo: chart.chartNo ?? '',
+    mrNo: chart.mrNumber ?? '',
+    dateOfService: chart.dateOfService ?? '',
+    dischargeDate: chart.dischargeDate ?? '',
     primaryDiagnosis: chart.primaryDiagnosis ?? '',
-    secondaryDiagnoses: chart.secondaryDiagnoses ?? [],
-    emLevel: chart.emLevel ?? '',
-    coderCommentsToClient: '',
-    rejectionDenialComments: '',
-    deficiencyComments: '',
-  }));
-  const [savedAt, setSavedAt] = useState<Date | null>(null);
+    em: chart.emLevel ?? '',
+    priority: chart.priority,
+    chartStatus:
+      chart.chartStatus === 'COMPLETE' ? 'Complete' : chart.chartStatus === 'INCOMPLETE' ? 'Incomplete' : 'Open',
+  });
+  const { audit, updateAudit: rawUpdateAudit } = useAuditDraft();
+  const { values: customValues, updateValue: rawUpdateCustomValue } = useCustomFieldValues(
+    (chart.customFields ?? {}) as Record<string, unknown>,
+  );
 
-  const mutation = useMutation({
-    mutationFn: (dto: UpdateChartDto) => updateChart(chart.id, dto),
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [activeDocId, setActiveDocId] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+
+  // Hydrate the ICD-Predictor result + uploaded docs from customFields on first
+  // paint, so a page reload after processing keeps the sidebar populated. The
+  // upload UI overwrites these with the fresh response after a new run.
+  const persisted = chart.customFields as
+    | { aiPrediction?: AiEncounterResult; uploadedDocs?: UploadedDocument[] }
+    | undefined;
+  const [aiPrediction, setAiPrediction] = useState<AiEncounterResult | null>(
+    persisted?.aiPrediction ?? null,
+  );
+  const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>(
+    persisted?.uploadedDocs ?? [],
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [missingFields, setMissingFields] = useState<string[]>([]);
+  // Track unsaved edits so we can block "Stop timer" until the user saves.
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Wrap each updater so any user edit flips the draft to "dirty"; cleared on save success.
+  const update: typeof rawUpdate = (k, v) => {
+    setIsDirty(true);
+    rawUpdate(k, v);
+  };
+  const updateAudit: typeof rawUpdateAudit = (rowKey, field, value) => {
+    setIsDirty(true);
+    rawUpdateAudit(rowKey, field, value);
+  };
+  const updateCustomValue: typeof rawUpdateCustomValue = (id, v) => {
+    setIsDirty(true);
+    rawUpdateCustomValue(id, v);
+  };
+
+  // Real timer state — only true when this user has an active timer ticking
+  // on this specific chart. Milestone alone is unreliable (it stays at
+  // CODING_IN_PROGRESS after Stop, so we can't infer "is the timer running"
+  // from it). Shares the cache key used by HeaderCard's TimerPanel.
+  const isCoderOrAuditor = user?.role === 'CODER' || user?.role === 'AUDITOR';
+  const activeTimer = useQuery({
+    queryKey: ['active-timer'],
+    queryFn: getActiveTimer,
+    enabled: isCoderOrAuditor,
+  });
+  const timerRunning = activeTimer.data?.chartId === chart.id;
+  const timerStopped = !timerRunning;
+  const auditDisabled = !isAuditor || !timerRunning;
+
+  const cfg = useFieldConfig(chart);
+
+  // Allocation pickers in the Processing Info section need real user lists.
+  const codersQ = useQuery({
+    queryKey: ['users', 'coders'],
+    queryFn: () => listUsers({ role: 'CODER', pageSize: 100, status: 'ACTIVE' }),
+  });
+  const auditorsQ = useQuery({
+    queryKey: ['users', 'auditors'],
+    queryFn: () => listUsers({ role: 'AUDITOR', pageSize: 100, status: 'ACTIVE' }),
+  });
+  const coderOpts = (codersQ.data?.items ?? []).map((u) => ({ id: u.id, fullName: u.fullName }));
+  const auditorOpts = (auditorsQ.data?.items ?? []).map((u) => ({ id: u.id, fullName: u.fullName }));
+
+  /**
+   * Check every field marked MANDATORY in the per-combo config and collect
+   * any whose draft slot is empty. Includes custom fields. Returns labels.
+   */
+  function collectMissingMandatory(): string[] {
+    const missing: string[] = [];
+    for (const f of STANDARD_FIELD_MAP) {
+      if (cfg.getValidation(f.key) !== 'MANDATORY') continue;
+      const v = (draft as unknown as Record<string, unknown>)[f.draftKey];
+      const isEmpty = f.isArray
+        ? !Array.isArray(v) || v.length === 0
+        : v === undefined || v === null || v === '';
+      if (isEmpty) missing.push(f.label);
+    }
+    for (const cf of cfg.customFields) {
+      if (cf.validation !== 'MANDATORY') continue;
+      const v = customValues[String(cf.id)];
+      const isEmpty =
+        cf.type === 'dropdown' && cf.isMultiSelect
+          ? !Array.isArray(v) || v.length === 0
+          : v === undefined || v === null || v === '';
+      if (isEmpty) missing.push(cf.name);
+    }
+    return missing;
+  }
+
+  const saveMut = useMutation({
+    mutationFn: () => {
+      const payload: UpdateChartDto = {
+        priority: (draft.priority || chart.priority) as Priority,
+        primaryDiagnosis: draft.primaryDiagnosis || undefined,
+        emLevel: draft.em || undefined,
+        coderCommentsToClient: draft.coderComments || undefined,
+        rejectionDenialComments: draft.rejectionComments || undefined,
+        deficiencyComments: draft.deficiencyComments || undefined,
+        admitDate: draft.admitDate || undefined,
+        dischargeDate: draft.dischargeDate || undefined,
+        dos: draft.dateOfService || undefined,
+        drgValue: draft.drgValue ? parseFloat(draft.drgValue) || undefined : undefined,
+        // Drives the milestone state machine: backend keeps the chart in
+        // CODING_IN_PROGRESS / AUDIT_IN_PROGRESS when these are set, otherwise
+        // advances to CODING_DONE / AUDIT_DONE.
+        allocatedCoderId: draft.allocateCoder ? Number(draft.allocateCoder) : undefined,
+        allocatedAuditorId: draft.allocateAuditor ? Number(draft.allocateAuditor) : undefined,
+        customFields: customValues,
+      };
+      return updateChart(chart.id, payload);
+    },
     onSuccess: () => {
-      setSavedAt(new Date());
+      setIsDirty(false);
       qc.invalidateQueries({ queryKey: ['chart', chart.id] });
+      qc.invalidateQueries({ queryKey: ['charts'] });
+      qc.invalidateQueries({ queryKey: ['active-timer'] });
     },
   });
 
-  // Debounced auto-save
-  const timer = useRef<number | null>(null);
-  function patch(partial: UpdateChartDto) {
-    setLocal((prev) => ({ ...prev, ...partial }));
-    if (timer.current) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      mutation.mutate({ ...local, ...partial });
-    }, 800);
+  function onSaveClick() {
+    const missing = collectMissingMandatory();
+    setMissingFields(missing);
+    if (missing.length === 0) saveMut.mutate();
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between text-[11px] text-ink-muted">
-        <span>Auto-save enabled</span>
-        {mutation.isPending ? (
-          <span className="flex items-center gap-1">
-            <Loader2 className="w-3 h-3 animate-spin" /> Saving…
-          </span>
-        ) : savedAt ? (
-          <span className="flex items-center gap-1 text-success">
-            <CheckCircle2 className="w-3 h-3" /> Saved {formatDateTime(savedAt.toISOString())}
-          </span>
-        ) : null}
-      </div>
-
-      {/* Chart Info */}
-      <CollapsibleCard title="Chart Info" defaultOpen>
-        <div className="grid grid-cols-2 gap-4 pt-3">
-          <Field label="Priority">
-            <Select
-              value={local.priority}
-              onChange={(e) => patch({ priority: e.target.value as Priority })}
-            >
-              <option value="CRITICAL">Critical</option>
-              <option value="HIGH">High</option>
-              <option value="MEDIUM">Medium</option>
-              <option value="LOW">Low</option>
-              <option value="FINALIZED">Finalized</option>
-            </Select>
-          </Field>
-          <Field label="EM Level">
-            <Input
-              value={local.emLevel ?? ''}
-              onChange={(e) => patch({ emLevel: e.target.value })}
-            />
-          </Field>
-          <Field label="Admit date">
-            <Input
-              type="date"
-              defaultValue={chart.dischargeDate ?? ''}
-              onChange={(e) => patch({ admitDate: e.target.value })}
-            />
-          </Field>
-          <Field label="Discharge date">
-            <Input
-              type="date"
-              defaultValue={chart.dischargeDate ?? ''}
-              onChange={(e) => patch({ dischargeDate: e.target.value })}
-            />
-          </Field>
-          <Field label="DOS">
-            <Input
-              type="date"
-              defaultValue={chart.dateOfService ?? ''}
-              onChange={(e) => patch({ dos: e.target.value })}
-            />
-          </Field>
-          <Field label="DRG value">
-            <Input
-              type="number"
-              step="0.01"
-              defaultValue={undefined}
-              onChange={(e) => patch({ drgValue: parseFloat(e.target.value) || undefined })}
-            />
-          </Field>
-        </div>
-      </CollapsibleCard>
-
-      {/* Processing Info */}
-      <CollapsibleCard title="Processing Info" defaultOpen>
-        <div className="grid grid-cols-1 gap-4 pt-3">
-          <Field label="Primary diagnosis">
-            <Input
-              value={local.primaryDiagnosis ?? ''}
-              onChange={(e) => patch({ primaryDiagnosis: e.target.value })}
-              placeholder="ICD-10 code"
-            />
-          </Field>
-          <Field label="Secondary diagnoses (comma-separated)">
-            <Input
-              value={(local.secondaryDiagnoses ?? []).join(', ')}
-              onChange={(e) =>
-                patch({
-                  secondaryDiagnoses: e.target.value
-                    .split(',')
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                })
-              }
-            />
-          </Field>
-          <Field label="Coder comments to client">
-            <Textarea
-              rows={3}
-              value={local.coderCommentsToClient ?? ''}
-              onChange={(e) => patch({ coderCommentsToClient: e.target.value })}
-            />
-          </Field>
-          <Field label="Deficiency comments">
-            <Textarea
-              rows={3}
-              value={local.deficiencyComments ?? ''}
-              onChange={(e) => patch({ deficiencyComments: e.target.value })}
-            />
-          </Field>
-        </div>
-      </CollapsibleCard>
-
-      {/* Audit Information */}
-      <CollapsibleCard title="Audit Information" subtitle="Auditor notes, rejection comments">
-        <div className="grid grid-cols-1 gap-4 pt-3">
-          <Field label="Rejection / denial comments">
-            <Textarea
-              rows={4}
-              value={local.rejectionDenialComments ?? ''}
-              onChange={(e) => patch({ rejectionDenialComments: e.target.value })}
-            />
-          </Field>
-        </div>
-      </CollapsibleCard>
-
-      <div className="flex justify-end">
-        <Button
-          leftIcon={<Save className="w-3.5 h-3.5" />}
-          loading={mutation.isPending}
-          onClick={() => mutation.mutate(local)}
-        >
-          Save now
-        </Button>
-      </div>
-    </div>
-  );
-}
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-/* ═════════════════ RIGHT: timer ═════════════════ */
-function TimerCard({ chart }: { chart: Chart }) {
-  const qc = useQueryClient();
-  const user = useAuth((s) => s.user)!;
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [elapsed, setElapsed] = useState(0);
-
-  // Tick
-  useEffect(() => {
-    if (!startedAt) return;
-    const iv = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
-    return () => clearInterval(iv);
-  }, [startedAt]);
-
-  const startMut = useMutation({
-    mutationFn: () => startChart(chart.id),
-    onSuccess: (res) => {
-      setStartedAt(Date.parse(res.startedAt));
-      qc.invalidateQueries({ queryKey: ['chart', chart.id] });
-    },
-  });
-  const stopMut = useMutation({
-    mutationFn: () => stopChart(chart.id),
-    onSuccess: () => {
-      setStartedAt(null);
-      setElapsed(0);
-      qc.invalidateQueries({ queryKey: ['chart', chart.id] });
-    },
-  });
-
-  const canStart = user.role === 'CODER' || user.role === 'AUDITOR';
-  const hh = Math.floor(elapsed / 3_600_000).toString().padStart(2, '0');
-  const mm = Math.floor((elapsed % 3_600_000) / 60_000).toString().padStart(2, '0');
-  const ss = Math.floor((elapsed % 60_000) / 1000).toString().padStart(2, '0');
-
-  if (!canStart) return null;
-
-  return (
-    <div className="rounded-card p-5 bg-gradient-to-br from-cyan-500 to-teal-600 text-white">
-      <p className="text-[11px] uppercase tracking-[0.1em] opacity-80 font-semibold mb-2">
-        {startedAt ? 'Coding in progress' : 'Timer'}
-      </p>
-      <p className="text-4xl font-bold font-mono tabular-nums mb-4">
-        {hh}:{mm}:{ss}
-      </p>
-      {startedAt ? (
-        <Button
-          variant="primary"
-          className="!bg-white !text-cyan-700 w-full"
-          leftIcon={<Square className="w-3.5 h-3.5" />}
-          loading={stopMut.isPending}
-          onClick={() => stopMut.mutate()}
-        >
-          Stop
-        </Button>
-      ) : (
-        <Button
-          className="!bg-white !text-cyan-700 w-full"
-          leftIcon={<Play className="w-3.5 h-3.5" />}
-          loading={startMut.isPending}
-          onClick={() => startMut.mutate()}
-        >
-          Start coding
-        </Button>
-      )}
-    </div>
-  );
-}
-
-/* ═════════════════ RIGHT: feedback thread ═════════════════ */
-function FeedbackThread({ chart }: { chart: Chart }) {
-  const user = useAuth((s) => s.user)!;
-  const qc = useQueryClient();
-  const [composing, setComposing] = useState(false);
-  const [newComments, setNewComments] = useState('');
-
-  const { data: feedback = [] } = useQuery({
-    queryKey: ['chart', chart.id, 'feedback'],
-    queryFn: () => listChartFeedback(chart.id),
-  });
-
-  const addMut = useMutation({
-    mutationFn: () =>
-      addChartFeedback(chart.id, {
-        categoryId: 1,
-        feedbackTypeId: 1,
-        feedbackStatus: 'Feedback Provided',
-        comments: newComments,
-      }),
-    onSuccess: () => {
-      setNewComments('');
-      setComposing(false);
-      qc.invalidateQueries({ queryKey: ['chart', chart.id, 'feedback'] });
-    },
-  });
-
-  const updateMut = useMutation({
-    mutationFn: ({ fid, status }: { fid: string; status: FeedbackStatus }) =>
-      updateChartFeedback(fid, { feedbackStatus: status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['chart', chart.id, 'feedback'] }),
-  });
-
-  return (
-    <Card padding="default">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold">
-          Feedback ({feedback.length})
-        </p>
-        {user.role === 'AUDITOR' && !composing && (
-          <button
-            onClick={() => setComposing(true)}
-            className="text-xs font-semibold text-primary-ink bg-primary-soft hover:bg-primary/30 px-2 py-1 rounded-pill flex items-center gap-1"
-          >
-            <MessageSquarePlus className="w-3 h-3" /> Add
-          </button>
+    <div
+      className={`grid grid-cols-1 ${
+        sidebarOpen ? 'lg:grid-cols-[1fr_340px]' : 'lg:grid-cols-1'
+      } gap-5 items-start relative`}
+    >
+      {/* Sidebar toggle — pinned to the right edge */}
+      <button
+        type="button"
+        onClick={() => setSidebarOpen((v) => !v)}
+        className="absolute top-0 right-0 z-10 inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-line rounded-pill px-3 py-1.5 shadow-card hover:bg-surface-2 transition"
+        title={sidebarOpen ? 'Collapse sidebar' : 'Show sidebar'}
+      >
+        {sidebarOpen ? (
+          <>
+            <PanelRightClose className="w-3.5 h-3.5" />
+            Hide panel
+          </>
+        ) : (
+          <>
+            <PanelRightOpen className="w-3.5 h-3.5" />
+            Show panel
+          </>
         )}
+      </button>
+
+      {/* LEFT — main content */}
+      <div className="space-y-5 min-w-0">
+        <HeaderCard chart={chart} canStop={!isDirty} />
+
+        <UploadSection
+          chartId={chart.id}
+          uploadedDocs={uploadedDocs}
+          onView={(docId) => {
+            setActiveDocId(docId);
+            setViewerOpen(true);
+          }}
+          onProcessed={(result) => {
+            setAiPrediction(result);
+            setUploadedDocs(result.uploadedDocs);
+            // The server stashes the prediction under customFields.aiPrediction;
+            // refetch so other consumers (e.g. the milestone state) see it.
+            qc.invalidateQueries({ queryKey: ['chart', chart.id] });
+          }}
+        />
+
+        <ChartInfoSection
+          draft={draft}
+          update={update}
+          readOnly={timerStopped}
+          isAuditor={isAuditor}
+          cfg={cfg}
+          customValues={customValues}
+          updateCustomValue={updateCustomValue}
+        />
+        <ProcessingInfoSection
+          draft={draft}
+          update={update}
+          readOnly={timerStopped}
+          isAuditor={isAuditor}
+          cfg={cfg}
+          customValues={customValues}
+          updateCustomValue={updateCustomValue}
+          coders={coderOpts}
+          auditors={auditorOpts}
+        />
+        <AuditInfoSection
+          draft={draft}
+          update={update}
+          audit={audit}
+          updateAudit={updateAudit}
+          disabled={auditDisabled}
+          feedbackTypes={cfg.options.feedbackTypes}
+        />
+
+        {missingFields.length > 0 && (
+          <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3">
+            <p className="text-sm font-semibold text-danger mb-1">
+              Please fill the following required field{missingFields.length > 1 ? 's' : ''}:
+            </p>
+            <ul className="text-xs text-danger list-disc list-inside">
+              {missingFields.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <Button
+            variant="danger"
+            leftIcon={<Save className="w-3.5 h-3.5" />}
+            loading={saveMut.isPending}
+            onClick={onSaveClick}
+          >
+            Save
+          </Button>
+        </div>
       </div>
 
-      {composing && (
-        <div className="space-y-2 mb-4 p-3 bg-surface-sunken rounded-lg">
-          <Textarea
-            rows={3}
-            placeholder="Feedback comments…"
-            value={newComments}
-            onChange={(e) => setNewComments(e.target.value)}
+      {/* RIGHT — sidebar */}
+      {sidebarOpen && (
+        <aside className="space-y-4 lg:sticky lg:top-4">
+          <UsersPanel chart={chart} />
+          <ConversationLog chart={chart} timerRunning={timerRunning} />
+          <TimeTracker />
+          <AiIcdPrediction
+            prediction={aiPrediction}
+            hasUploadedDocs={uploadedDocs.length > 0 || !!aiPrediction}
+            timerRunning={timerRunning}
+            onReview={() => setReviewOpen(true)}
           />
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setComposing(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" loading={addMut.isPending} onClick={() => addMut.mutate()}>
-              Submit
-            </Button>
-          </div>
-        </div>
+          <DocumentationGaps prediction={aiPrediction} />
+          <PhysicianQueries prediction={aiPrediction} />
+          <CodingFeedback prediction={aiPrediction} />
+        </aside>
       )}
 
-      {feedback.length === 0 ? (
-        <p className="text-[11px] text-ink-subtle">No feedback yet.</p>
-      ) : (
-        <div className="space-y-3">
-          {feedback.map((f) => (
-            <div key={f.id} className="text-xs border-l-2 border-primary pl-3">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-ink">{f.feedbackTypeName}</span>
-                <span className="text-ink-subtle text-[10px]">{formatDate(f.createdAt)}</span>
-              </div>
-              <p className="text-ink-muted mt-0.5">{f.comments}</p>
-              <p className="text-[10px] text-ink-subtle mt-1">
-                Status: <span className="font-medium">{f.feedbackStatus}</span>
-              </p>
-              {user.role === 'CODER' && f.feedbackStatus === 'Feedback Provided' && (
-                <div className="flex gap-1 mt-2">
-                  <button
-                    onClick={() => updateMut.mutate({ fid: f.id, status: 'Agree' })}
-                    className="text-[10px] px-2 py-0.5 rounded-pill bg-success-soft text-success font-semibold"
-                  >
-                    Agree
-                  </button>
-                  <button
-                    onClick={() => updateMut.mutate({ fid: f.id, status: 'Reject' })}
-                    className="text-[10px] px-2 py-0.5 rounded-pill bg-danger-soft text-danger font-semibold"
-                  >
-                    Reject
-                  </button>
-                  <button
-                    onClick={() => updateMut.mutate({ fid: f.id, status: 'Feedback Implemented' })}
-                    className="text-[10px] px-2 py-0.5 rounded-pill bg-primary-soft text-primary-ink font-semibold"
-                  >
-                    Implement
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
+      <DocumentViewerModal
+        open={viewerOpen}
+        onClose={() => setViewerOpen(false)}
+        docs={uploadedDocs}
+        activeId={activeDocId}
+        onSelect={setActiveDocId}
+        prediction={aiPrediction}
+      />
+
+      <ReviewEditModal
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        prediction={aiPrediction}
+        docs={uploadedDocs}
+      />
+    </div>
   );
-}
-
-/* ═════════════════ RIGHT: milestone actions ═════════════════ */
-function MilestoneActions({ chart, onClosed }: { chart: Chart; onClosed: () => void }) {
-  const qc = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
-
-  const mut = useMutation({
-    mutationFn: (dto: { milestone: ChartMilestone; chartStatus: ChartStatus }) =>
-      transitionChart(chart.id, dto),
-    onSuccess: (next) => {
-      qc.invalidateQueries({ queryKey: ['chart', chart.id] });
-      if (next.milestone === 'CLOSED') onClosed();
-    },
-    onError: (err) => setError((err as unknown as ApiErrorShape).message),
-  });
-
-  // Suggest the next plausible transition based on current milestone
-  const suggestion = getNextTransition(chart.milestone);
-
-  return (
-    <Card padding="default">
-      <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-3">
-        Milestone
-      </p>
-      {error && (
-        <div className="text-[11px] px-2 py-1.5 rounded bg-danger-soft text-danger mb-3">
-          {error}
-        </div>
-      )}
-      {suggestion ? (
-        <Button
-          className="w-full"
-          loading={mut.isPending}
-          onClick={() =>
-            mut.mutate({
-              milestone: suggestion.milestone,
-              chartStatus: suggestion.chartStatus,
-            })
-          }
-        >
-          {suggestion.label}
-        </Button>
-      ) : (
-        <p className="text-xs text-ink-muted">Chart is closed. No further transitions.</p>
-      )}
-    </Card>
-  );
-}
-
-function getNextTransition(
-  m: ChartMilestone,
-): { milestone: ChartMilestone; chartStatus: ChartStatus; label: string } | null {
-  switch (m) {
-    case 'READY_TO_CODE':
-      return { milestone: 'CODING_IN_PROGRESS', chartStatus: 'OPEN', label: 'Start coding' };
-    case 'CODING_IN_PROGRESS':
-      return { milestone: 'CODING_DONE', chartStatus: 'COMPLETE', label: 'Mark coding complete' };
-    case 'CODING_DONE':
-      return { milestone: 'READY_TO_AUDIT', chartStatus: 'COMPLETE', label: 'Send to audit' };
-    case 'READY_TO_AUDIT':
-      return { milestone: 'AUDIT_IN_PROGRESS', chartStatus: 'OPEN', label: 'Start audit' };
-    case 'AUDIT_IN_PROGRESS':
-      return { milestone: 'AUDIT_DONE', chartStatus: 'COMPLETE', label: 'Mark audit complete' };
-    case 'AUDIT_DONE':
-      return { milestone: 'CLOSED', chartStatus: 'COMPLETE', label: 'Close chart' };
-    case 'CLOSED':
-      return null;
-  }
 }
