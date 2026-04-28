@@ -1,0 +1,438 @@
+{
+    "id": "b220a536-1813-46cc-8f3b-63e93583b4b5",
+    "chart_number": null,
+    "encounter_type": "OUTPATIENT",
+    "encounter_date": null,
+    "facility": null,
+    "department": null,
+    "status": "COMPLETE",
+    "report_count": 2,
+    "clinical_summary": {
+        "vitals": {
+            "heart_rate": "",
+            "pain_score": "",
+            "temperature": "",
+            "blood_pressure": "",
+            "respiratory_rate": "",
+            "oxygen_saturation": ""
+        },
+        "medications": [],
+        "social_history": {
+            "drugs": "",
+            "alcohol": "",
+            "tobacco": ""
+        },
+        "chief_complaint": "Not explicitly documented in provided notes",
+        "clinical_context": "The provided notes do not contain explicit clinical information. The patient is a 75-year-old individual seen at Taylor Regional Surgical Associates on [Date]. No specific details about the visit, diagnoses, procedures, or treatments are documented.",
+        "significant_labs": {},
+        "primary_diagnoses": [],
+        "secondary_diagnoses": [],
+        "procedures_performed": []
+    },
+    "final_codes_json": {
+        "codes": [
+            {
+                "code": "K5750",
+                "code_type": "primary",
+                "confidence": 0.9,
+                "description": "Dvrtclos of both sm and lg int w/o perf or abscs w/o bleed",
+                "justification": "After the workup, the primary diagnosis remains mild diverticulosis coli of the sigmoid colon."
+            },
+            {
+                "code": "K5750",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Dvrtclos of both sm and lg int w/o perf or abscs w/o bleed",
+                "justification": "The patient presented with mild diverticulosis coli of the sigmoid colon, which is the chief complaint."
+            },
+            {
+                "code": "K621",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Rectal polyp",
+                "justification": "The patient has a small hyperplastic polyp in the rectum, which is a secondary diagnosis."
+            },
+            {
+                "code": "Z6837",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Body mass index [BMI] 37.0-37.9, adult",
+                "justification": "The patient's BMI is 37.4 kg/m2, indicating obesity."
+            },
+            {
+                "code": "R03",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Abnormal blood-pressure reading, without diagnosis",
+                "justification": "The patient has an elevated blood pressure of 158/91 mmHg."
+            },
+            {
+                "code": "Z860102",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Personal history of hyperplastic colon polyps",
+                "justification": "The patient has a personal history of hyperplastic colon polyps."
+            },
+            {
+                "code": "45384",
+                "code_type": "cpt",
+                "confidence": 0.9,
+                "description": "Colonoscopy with polypectomy",
+                "justification": "The patient underwent a colonoscopy with cold forcep polypectomy."
+            },
+            {
+                "code": "99283",
+                "code_type": "cpt",
+                "confidence": 0.9,
+                "description": "Moderate MDM, acute uncomplicated with systemic symptoms",
+                "justification": "The patient presented with mild diverticulosis and a rectal polyp, requiring a colonoscopy. The complexity is moderate, and there are multiple diagnoses and data reviewed."
+            }
+        ],
+        "agent4_full": {
+            "feedback": {
+                "coding_tips": [
+                    {
+                        "tip": "Ensure that all relevant past medical history, surgeries, and hospitalizations are documented and coded.",
+                        "related_code": "Z860102",
+                        "potential_impact": "Improves the accuracy of the patient's medical history and supports more comprehensive coding."
+                    }
+                ],
+                "compliance_alerts": [
+                    {
+                        "alert": "Ensure that all necessary documentation is present to support the selected codes.",
+                        "severity": "high",
+                        "regulation": "CMS Coding Guidelines",
+                        "recommended_action": "Review and update the clinical documentation to include all relevant details."
+                    }
+                ],
+                "documentation_gaps": [
+                    {
+                        "gap": "Specific details about the patient's family history of colon polyps",
+                        "impact": "May affect the selection of appropriate personal and family history codes",
+                        "priority": "medium",
+                        "suggestion": "Document whether the patient has a family history of colon polyps"
+                    },
+                    {
+                        "gap": "Details about the patient's current medications and allergies",
+                        "impact": "May affect the completeness of the patient's medical history",
+                        "priority": "medium",
+                        "suggestion": "Document the patient's current medications and allergies"
+                    }
+                ],
+                "physician_queries_needed": [
+                    {
+                        "query": "Does the patient have a family history of colon polyps?",
+                        "reason": "To accurately document and code the patient's family history",
+                        "priority": "medium",
+                        "impact_on_coding": "May require adding a family history code (Z83718)"
+                    },
+                    {
+                        "query": "What are the patient's current medications and allergies?",
+                        "reason": "To ensure a complete medical history",
+                        "priority": "medium",
+                        "impact_on_coding": "May require additional codes for medications and allergies"
+                    }
+                ]
+            },
+            "metadata": {
+                "total_codes_extracted": 9
+            },
+            "audit_notes": "The clinical report provided does not contain explicit clinical information. The patient is a 75-year-old individual seen at Taylor Regional Surgical Associates on [Date]. No specific details about the visit, diagnoses, procedures, or treatments are documented. Therefore, the clinical narrative and some sections of the JSON output are left blank.",
+            "medications": [],
+            "vitals_summary": {
+                "heart_rate": "",
+                "pain_score": "",
+                "temperature": "",
+                "blood_pressure": "158/91 mmHg",
+                "respiratory_rate": "",
+                "oxygen_saturation": ""
+            },
+            "coding_categories": {
+                "modifiers": {
+                    "codes": [
+                        {
+                            "evidence": {
+                                "exact_text": "E/M service provided on the same day as the colonoscopy."
+                            },
+                            "confidence": "high",
+                            "ai_reasoning": "The E/M service is significant and separately identifiable from the colonoscopy procedure.",
+                            "modifier_code": "25",
+                            "modifier_name": "Significant, separately identifiable E/M service by the same physician on the same day of the procedure or other service",
+                            "applies_to_code": "99283"
+                        }
+                    ]
+                },
+                "procedures": {
+                    "codes": [
+                        {
+                            "date": "",
+                            "cpt_code": "45384",
+                            "evidence": {
+                                "exact_text": "Procedure: Colonoscopy to cecum with cold forcep polypectomy."
+                            },
+                            "findings": [],
+                            "provider": "",
+                            "confidence": "high",
+                            "description": "Colonoscopy with polypectomy",
+                            "ai_reasoning": "The patient underwent a colonoscopy with cold forcep polypectomy.",
+                            "procedure_name": "Colonoscopy, flexible, proximal to splenic flexure; with removal of 1-2 polyps, each 1 cm or less (separate procedure)"
+                        }
+                    ]
+                },
+                "ed_em_level": {
+                    "codes": [
+                        {
+                            "code": "99283",
+                            "evidence": {
+                                "exact_text": "Patient presented with mild diverticulosis coli of the sigmoid colon and a small hyperplastic polyp in the rectum. Colonoscopy was performed."
+                            },
+                            "confidence": "high",
+                            "description": "Moderate MDM, acute uncomplicated with systemic symptoms",
+                            "ai_reasoning": "The patient presented with mild diverticulosis and a rectal polyp, requiring a colonoscopy. The complexity is moderate, and there are multiple diagnoses and data reviewed.",
+                            "level_justification": {
+                                "data_reviewed": "Colonoscopy results, vital signs, BMI",
+                                "mdm_complexity": "Moderate",
+                                "number_of_diagnoses": "4",
+                                "risk_of_complications": "Low to moderate"
+                            }
+                        }
+                    ]
+                },
+                "reason_for_admit": {
+                    "codes": [
+                        {
+                            "evidence": {
+                                "exact_text": "Patient presents with mild diverticulosis coli of the sigmoid colon."
+                            },
+                            "confidence": "high",
+                            "description": "Dvrtclos of both sm and lg int w/o perf or abscs w/o bleed",
+                            "icd_10_code": "K5750",
+                            "ai_reasoning": "The patient presented with mild diverticulosis coli of the sigmoid colon, which is the chief complaint."
+                        }
+                    ]
+                },
+                "primary_diagnosis": {
+                    "codes": [
+                        {
+                            "evidence": {
+                                "exact_text": "Final diagnosis: Mild diverticulosis coli of the sigmoid colon."
+                            },
+                            "confidence": "high",
+                            "description": "Dvrtclos of both sm and lg int w/o perf or abscs w/o bleed",
+                            "icd_10_code": "K5750",
+                            "ai_reasoning": "After the workup, the primary diagnosis remains mild diverticulosis coli of the sigmoid colon."
+                        }
+                    ]
+                },
+                "secondary_diagnoses": {
+                    "codes": [
+                        {
+                            "evidence": {
+                                "exact_text": "Small hyperplastic polyp found in the rectum."
+                            },
+                            "confidence": "high",
+                            "description": "Rectal polyp",
+                            "icd_10_code": "K621",
+                            "ai_reasoning": "The patient has a small hyperplastic polyp in the rectum, which is a secondary diagnosis."
+                        },
+                        {
+                            "evidence": {
+                                "exact_text": "BMI: 37.4 kg/m2"
+                            },
+                            "confidence": "high",
+                            "description": "Body mass index [BMI] 37.0-37.9, adult",
+                            "icd_10_code": "Z6837",
+                            "ai_reasoning": "The patient's BMI is 37.4 kg/m2, indicating obesity."
+                        },
+                        {
+                            "evidence": {
+                                "exact_text": "Blood Pressure: 158/91 mmHg"
+                            },
+                            "confidence": "high",
+                            "description": "Abnormal blood-pressure reading, without diagnosis",
+                            "icd_10_code": "R03",
+                            "ai_reasoning": "The patient has an elevated blood pressure of 158/91 mmHg."
+                        },
+                        {
+                            "evidence": {
+                                "exact_text": "Patient has a history of hyperplastic colon polyps."
+                            },
+                            "confidence": "high",
+                            "description": "Personal history of hyperplastic colon polyps",
+                            "icd_10_code": "Z860102",
+                            "ai_reasoning": "The patient has a personal history of hyperplastic colon polyps."
+                        }
+                    ]
+                }
+            },
+            "lab_results_summary": [],
+            "ai_narrative_summary": {
+                "medications": {
+                    "current": [],
+                    "allergies": []
+                },
+                "family_history": {
+                    "relevant_conditions": []
+                },
+                "social_history": {
+                    "drugs": "",
+                    "alcohol": "",
+                    "tobacco": "",
+                    "occupation": "",
+                    "living_situation": ""
+                },
+                "chief_complaint": {
+                    "text": "",
+                    "onset": "",
+                    "duration": "",
+                    "evidence": {
+                        "exact_text": ""
+                    },
+                    "severity": "",
+                    "associated_symptoms": []
+                },
+                "clinical_alerts": [],
+                "timeline_of_care": [],
+                "review_of_systems": {
+                    "psychiatric": "",
+                    "respiratory": "",
+                    "neurological": "",
+                    "other_systems": "",
+                    "cardiovascular": "",
+                    "constitutional": "",
+                    "musculoskeletal": "",
+                    "gastrointestinal": ""
+                },
+                "attending_provider": "",
+                "diagnostic_results": {
+                    "ekg": "",
+                    "labs": [],
+                    "imaging": [],
+                    "other_tests": []
+                },
+                "assessment_and_plan": {
+                    "plan": "",
+                    "diagnoses": [],
+                    "follow_up": "",
+                    "assessment": "",
+                    "disposition": ""
+                },
+                "consulting_providers": [],
+                "past_medical_history": {
+                    "surgeries": [],
+                    "conditions": [],
+                    "hospitalizations": []
+                },
+                "patient_demographics": {
+                    "age": "75",
+                    "sex": "",
+                    "weight": "",
+                    "allergies": []
+                },
+                "physical_examination": {
+                    "neck": "",
+                    "skin": "",
+                    "heent": "",
+                    "vitals": {
+                        "heart_rate": "",
+                        "pain_score": "",
+                        "temperature": "",
+                        "blood_pressure": "",
+                        "respiratory_rate": "",
+                        "oxygen_saturation": ""
+                    },
+                    "abdomen": "",
+                    "general": "",
+                    "extremities": "",
+                    "psychiatric": "",
+                    "respiratory": "",
+                    "neurological": "",
+                    "cardiovascular": ""
+                },
+                "history_of_present_illness": {
+                    "text": "",
+                    "timing": "",
+                    "context": "",
+                    "quality": "",
+                    "duration": "",
+                    "evidence": {
+                        "exact_text": ""
+                    },
+                    "location": "",
+                    "severity": "",
+                    "modifying_factors": "",
+                    "associated_signs_symptoms": ""
+                }
+            }
+        },
+        "audit_notes": "The clinical report provided does not contain explicit clinical information. The patient is a 75-year-old individual seen at Taylor Regional Surgical Associates on [Date]. No specific details about the visit, diagnoses, procedures, or treatments are documented. Therefore, the clinical narrative and some sections of the JSON output are left blank."
+    },
+    "pipeline_timing": {
+        "step_2_rag": 0.2,
+        "step_6_save": 0.0,
+        "agent3_codes": [
+            {
+                "code": "K5750",
+                "code_type": "primary",
+                "confidence": 0.9,
+                "description": "Dvrtclos of both sm and lg int w/o perf or abscs w/o bleed"
+            },
+            {
+                "code": "K5750",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Dvrtclos of both sm and lg int w/o perf or abscs w/o bleed"
+            },
+            {
+                "code": "K621",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Rectal polyp"
+            },
+            {
+                "code": "Z6837",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Body mass index [BMI] 37.0-37.9, adult"
+            },
+            {
+                "code": "R03",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Abnormal blood-pressure reading, without diagnosis"
+            },
+            {
+                "code": "Z860102",
+                "code_type": "secondary",
+                "confidence": 0.9,
+                "description": "Personal history of hyperplastic colon polyps"
+            },
+            {
+                "code": "45384",
+                "code_type": "cpt",
+                "confidence": 0.9,
+                "description": "Colonoscopy with polypectomy"
+            },
+            {
+                "code": "99283",
+                "code_type": "cpt",
+                "confidence": 0.9,
+                "description": "Moderate MDM, acute uncomplicated with systemic symptoms"
+            }
+        ],
+        "agent4_added": [],
+        "step_5a_mimic": 0.75,
+        "agent4_removed": [],
+        "step_0_ocr_all": 38.816,
+        "step_4b_agent3": 48.751,
+        "step_5b_agent4": 77.149,
+        "total_pipeline": 172.29,
+        "step_06_summarize": 6.021,
+        "step_1_coder_rules": 0.156,
+        "step_3_corrections": 0.232,
+        "step_4a_guidelines": 0.205,
+        "step_05_consolidate": 0.0,
+        "agent4_unchanged_count": 7
+    },
+    "created_at": "2026-04-27T18:43:19.070375Z"
+}
