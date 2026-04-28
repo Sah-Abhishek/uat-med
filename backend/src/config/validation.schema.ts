@@ -61,6 +61,23 @@ export const validationSchema = Joi.object({
   HIPAA_BREACH_NOTIFY_EMAIL: Joi.string().email().default('security@valerionhealth.com'),
   PHI_ENCRYPTION_KEY_ID: Joi.string().allow('').optional(),
 
+  // ───── MinIO / S3-compatible storage for clinical documents ─────
+  // Optional; when unset, document upload will fail with 503.
+  S3_ENDPOINT_URL: Joi.string().uri().allow('').optional(),
+  S3_ACCESS_KEY: Joi.string().allow('').optional(),
+  S3_SECRET_KEY: Joi.string().allow('').optional(),
+  S3_BUCKET_NAME: Joi.string().allow('').optional(),
+  S3_REGION: Joi.string().default('us-east-1'),
+
+  // ───── ICD Predictor gateway (encounter flow) ─────
+  // Optional in dev so the app boots without an AI gateway. When unset, the
+  // /charts/:id/process-documents endpoint returns 503.
+  ICD_PREDICTOR_BASE_URL: Joi.string().uri().allow('').optional(),
+  ICD_PREDICTOR_TOKEN: Joi.string().allow('').optional(),
+  ICD_PREDICTOR_ENCOUNTER_TYPE: Joi.string().valid('OUTPATIENT', 'INPATIENT').default('OUTPATIENT'),
+  ICD_PREDICTOR_POLL_INTERVAL: Joi.number().default(10000),
+  ICD_PREDICTOR_POLL_TIMEOUT: Joi.number().default(600000),
+
   // ───── Observability ─────
   LOG_LEVEL: Joi.string().valid('debug', 'info', 'warn', 'error').default('info'),
   OTEL_EXPORTER_OTLP_ENDPOINT: Joi.string().allow('').optional(),

@@ -67,7 +67,7 @@ export class UsersService {
   }
 
   async detail(id: number, caller: AuthenticatedUser) {
-    if (caller.role !== Role.ADMIN && caller.role !== Role.MANAGER && caller.id !== id) {
+    if (caller.role !== Role.TEAMLEAD && caller.role !== Role.MANAGER && caller.id !== id) {
       throw new ForbiddenException({ error: { code: 'forbidden', message: 'Cannot view other users.' } });
     }
     const u = await this.users.findOne({ where: { id }, relations: ['client', 'location', 'primarySpeciality'] });
@@ -79,7 +79,7 @@ export class UsersService {
     const u = await this.users.findOne({ where: { id } });
     if (!u) throw new NotFoundException();
     const isSelf = caller.id === id;
-    const isAdmin = caller.role === Role.ADMIN;
+    const isAdmin = caller.role === Role.TEAMLEAD;
     if (!isSelf && !isAdmin) throw new ForbiddenException();
     if (isSelf && !isAdmin) {
       ['role', 'status', 'clientId', 'locationId', 'primarySpecialityId', 'designation'].forEach(k => delete (dto as any)[k]);
@@ -127,7 +127,7 @@ export class UsersService {
   async markAttendance(userId: number, dto: MarkAttendanceDto, caller: AuthenticatedUser) {
     const today = new Date().toISOString().slice(0, 10);
     const isSelf = caller.id === userId;
-    if (isSelf && caller.role !== Role.ADMIN && dto.date !== today) {
+    if (isSelf && caller.role !== Role.TEAMLEAD && dto.date !== today) {
       throw new ForbiddenException({ error: { code: 'forbidden', message: 'Self-mark restricted to today.' } });
     }
     const existing = await this.attendanceRepo.findOne({ where: { userId, date: dto.date } });

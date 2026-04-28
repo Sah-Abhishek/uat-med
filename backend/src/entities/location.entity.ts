@@ -16,6 +16,9 @@ export class Location {
   @Column({ type: 'varchar', length: 32, nullable: true }) code?: string;
   @Column({ name: 'is_active', type: 'boolean', default: true }) isActive: boolean;
 
+  @Column({ name: 'does_support_process_wise_coding', type: 'boolean', default: false })
+  doesSupportProcessWiseCoding: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' }) createdAt: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' }) updatedAt: Date;
 }

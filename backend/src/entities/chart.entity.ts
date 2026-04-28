@@ -23,7 +23,7 @@ export class Chart {
   @Column({ name: 'admit_date', type: 'date', nullable: true }) admitDate?: string;
   @Column({ name: 'discharge_date', type: 'date', nullable: true }) dischargeDate?: string;
 
-  @Column({ type: 'varchar', length: 40, default: ChartMilestone.READY_TO_CODE }) @Index()
+  @Column({ type: 'varchar', length: 40, default: ChartMilestone.READY_TO_ALLOCATE }) @Index()
   milestone: ChartMilestone;
 
   @Column({ name: 'chart_status', type: 'varchar', length: 16, default: ChartStatus.OPEN }) @Index()

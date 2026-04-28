@@ -1,15 +1,35 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Put, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UploadedFiles,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { ChartsService } from './charts.service';
 import { QueryChartsDto } from './dto/query-charts.dto';
 import { UpdateChartDto } from './dto/update-chart.dto';
 import { BulkModifyDto, BulkIdsDto } from './dto/bulk-modify.dto';
 import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
+import { ProcessDocumentsDto } from './dto/process-documents.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
+
+const MAX_FILE_BYTES = 50 * 1024 * 1024; // ICD gateway upload ceiling
+const MAX_FILES = 20;
 
 @ApiTags('Charts')
 @ApiBearerAuth('bearerAuth')
@@ -27,6 +47,13 @@ export class ChartsController {
   @ApiOperation({ summary: 'Counters for priority tabs and top status cards.' })
   summary(@CurrentUser() user: AuthenticatedUser) {
     return this.svc.summary(user);
+  }
+
+  @Get('active-timer')
+  @Roles(Role.CODER, Role.AUDITOR)
+  @ApiOperation({ summary: "Returns the user's currently running chart timer (or null)." })
+  activeTimer(@CurrentUser() user: AuthenticatedUser) {
+    return this.svc.activeTimer(user);
   }
 
   @Get('columns')
@@ -117,5 +144,43 @@ export class ChartsController {
   @ApiOperation({ summary: 'Coder responds to feedback (Agree / Reject / Implement).' })
   updateFeedback(@Param('feedbackId', ParseIntPipe) feedbackId: number, @Body() dto: UpdateFeedbackDto) {
     return this.svc.updateFeedback(feedbackId, dto);
+  }
+
+  /**
+   * Run the ICD Predictor encounter flow for an uploaded batch of documents.
+   * The frontend POSTs multipart/form-data with N `files` plus a comma-
+   * separated `reportTypes` (HP, DISCHARGE_SUMMARY, …) in the SAME order.
+   *
+   * The request blocks until the gateway pipeline finishes (typically 30–90s,
+   * polled at ICD_PREDICTOR_POLL_INTERVAL up to ICD_PREDICTOR_POLL_TIMEOUT).
+   */
+  @Post(':id/process-documents')
+  @Roles(Role.CODER, Role.AUDITOR)
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_FILES, {
+      limits: { fileSize: MAX_FILE_BYTES },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        files: { type: 'array', items: { type: 'string', format: 'binary' } },
+        reportTypes: { type: 'string', description: 'Comma-separated list, one per file in order.' },
+        documentType: { type: 'string', description: 'Optional fallback hint when reportTypes is missing.' },
+      },
+    },
+  })
+  @ApiOperation({ summary: 'Upload documents and run ICD Predictor (encounter flow).' })
+  processDocuments(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() body: ProcessDocumentsDto,
+  ) {
+    if (!files?.length) {
+      throw new BadRequestException({ error: { code: 'bad_request', message: 'No files uploaded.' } });
+    }
+    return this.svc.processDocuments(id, files, body);
   }
 }

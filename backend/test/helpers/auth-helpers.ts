@@ -25,6 +25,6 @@ export function signAsUser(moduleRef: TestingModule, u: TestUserPayload): string
 export const asCoder   = (moduleRef: TestingModule, id = 1001) => signAsUser(moduleRef, { id, role: Role.CODER, clientId: 7, locationId: 12 });
 export const asAuditor = (moduleRef: TestingModule, id = 1002) => signAsUser(moduleRef, { id, role: Role.AUDITOR, clientId: 7, locationId: 12 });
 export const asManager = (moduleRef: TestingModule, id = 1003) => signAsUser(moduleRef, { id, role: Role.MANAGER, clientId: 7, locationId: 12 });
-export const asAdmin   = (moduleRef: TestingModule, id = 1004) => signAsUser(moduleRef, { id, role: Role.ADMIN });
+export const asAdmin   = (moduleRef: TestingModule, id = 1004) => signAsUser(moduleRef, { id, role: Role.TEAMLEAD });
 
 export const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });

@@ -1,4 +1,13 @@
 import 'reflect-metadata';
+import * as dns from 'dns';
+import * as net from 'net';
+
+// Workaround for Node 20+'s autoSelectFamily ("Happy Eyeballs") timing out
+// against TLS-required Postgres providers like Neon. Must run before TypeORM
+// opens its first connection.
+dns.setDefaultResultOrder('ipv4first');
+net.setDefaultAutoSelectFamily(false);
+
 import { NestFactory, Reflector } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ClassSerializerInterceptor, ValidationPipe } from '@nestjs/common';

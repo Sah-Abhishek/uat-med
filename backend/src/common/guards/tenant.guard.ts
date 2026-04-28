@@ -11,7 +11,7 @@ export class TenantGuard implements CanActivate {
     const req = context.switchToHttp().getRequest();
     const user = req.user;
     if (!user) return false;
-    if (user.role === Role.ADMIN) return true;
+    if (user.role === Role.TEAMLEAD) return true;
 
     const requestedClientId = Number(req.query?.clientId ?? req.body?.clientId ?? user.clientId);
     const requestedLocationId = Number(req.query?.locationId ?? req.body?.locationId ?? user.locationId);

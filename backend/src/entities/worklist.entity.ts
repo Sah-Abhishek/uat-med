@@ -3,6 +3,7 @@ import { WorklistStatus } from '../common/enums';
 import { Client } from './client.entity';
 import { Location } from './location.entity';
 import { PrimarySpeciality } from './primary-speciality.entity';
+import { Process } from './process.entity';
 import { Chart } from './chart.entity';
 
 @Entity('worklists')
@@ -25,6 +26,7 @@ export class Worklist {
   primarySpeciality: PrimarySpeciality;
 
   @Column({ name: 'process_id', type: 'bigint' }) processId: number;
+  @ManyToOne(() => Process) @JoinColumn({ name: 'process_id' }) process: Process;
 
   @Column({ name: 'date_of_service', type: 'date', nullable: true }) dateOfService?: string;
   @Column({ name: 'received_date', type: 'date' }) @Index() receivedDate: string;

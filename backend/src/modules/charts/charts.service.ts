@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Chart } from '../../entities/chart.entity';
@@ -12,9 +12,13 @@ import { QueryChartsDto } from './dto/query-charts.dto';
 import { UpdateChartDto } from './dto/update-chart.dto';
 import { BulkModifyDto } from './dto/bulk-modify.dto';
 import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
+import { ProcessDocumentsDto } from './dto/process-documents.dto';
+import { AiPredictorService, InboundFile, ReportType, UploadedDocument } from './ai-predictor.service';
+import { DocumentStorageService } from './document-storage.service';
 
 /** Allowed milestone transitions (see §21.2 of the spec). */
 const TRANSITIONS: Record<ChartMilestone, ChartMilestone[]> = {
+  [ChartMilestone.READY_TO_ALLOCATE]:   [ChartMilestone.READY_TO_CODE],
   [ChartMilestone.READY_TO_CODE]:       [ChartMilestone.CODING_IN_PROGRESS],
   [ChartMilestone.CODING_IN_PROGRESS]:  [ChartMilestone.CODING_DONE, ChartMilestone.READY_TO_CODE],
   [ChartMilestone.CODING_DONE]:         [ChartMilestone.READY_TO_AUDIT],
@@ -35,6 +39,8 @@ export class ChartsService {
     @InjectRepository(Chart) private readonly charts: Repository<Chart>,
     @InjectRepository(ChartAllocation) private readonly allocations: Repository<ChartAllocation>,
     @InjectRepository(ChartFeedback) private readonly feedbacks: Repository<ChartFeedback>,
+    private readonly aiPredictor: AiPredictorService,
+    private readonly storage: DocumentStorageService,
   ) {}
 
   async list(q: QueryChartsDto, user: AuthenticatedUser) {
@@ -98,12 +104,35 @@ async update(id: number, dto: UpdateChartDto) {
   const c = await this.charts.findOne({ where: { id } });
   if (!c) throw new NotFoundException();
 
+  // Track who the chart was allocated to *as part of this save*, so we can
+  // distinguish "save with handoff" from "save without handoff".
+  const allocatingCoder = dto.allocatedCoderId !== undefined && dto.allocatedCoderId !== null;
+  const allocatingAuditor = dto.allocatedAuditorId !== undefined && dto.allocatedAuditorId !== null;
+  const allocatingSomeone = allocatingCoder || allocatingAuditor;
+
   // Merge customFields rather than overwrite — preserves other keys.
   const { customFields, ...flat } = dto;
   Object.assign(c, flat);
   if (customFields) {
     c.customFields = { ...(c.customFields ?? {}), ...customFields };
   }
+
+  // Milestone transitions driven by save (per workflow spec):
+  //   CODING_IN_PROGRESS + allocation set            → stays CODING_IN_PROGRESS (handoff)
+  //   CODING_IN_PROGRESS + no allocation             → CODING_DONE
+  //   AUDIT_IN_PROGRESS  + allocation set            → stays AUDIT_IN_PROGRESS (handoff)
+  //   AUDIT_IN_PROGRESS  + no allocation             → AUDIT_DONE
+  //   CODING_DONE        + auditor allocated         → READY_TO_AUDIT
+  if (c.milestone === ChartMilestone.CODING_IN_PROGRESS && !allocatingSomeone) {
+    c.milestone = ChartMilestone.CODING_DONE;
+  } else if (c.milestone === ChartMilestone.AUDIT_IN_PROGRESS && !allocatingSomeone) {
+    c.milestone = ChartMilestone.AUDIT_DONE;
+  }
+
+  if (c.milestone === ChartMilestone.CODING_DONE && allocatingAuditor) {
+    c.milestone = ChartMilestone.READY_TO_AUDIT;
+  }
+
   return this.charts.save(c);
 }
 
@@ -123,6 +152,26 @@ async update(id: number, dto: UpdateChartDto) {
   async startTimer(id: number, user: AuthenticatedUser) {
     const c = await this.charts.findOne({ where: { id } });
     if (!c) throw new NotFoundException();
+
+    // Single-active-chart guard: a user can only have one timer running at a time.
+    // If a timer is active for a different chart, return 409 with that chart's id + number
+    // so the frontend can route the user back to it.
+    for (const [key, started] of activeTimers) {
+      const [uid, otherChartId] = key.split(':');
+      if (Number(uid) === user.id && Number(otherChartId) !== id) {
+        const other = await this.charts.findOne({ where: { id: Number(otherChartId) } });
+        throw new ConflictException({
+          error: {
+            code: 'timer_conflict',
+            message: 'Another chart is already in progress. Save it before working on this chart.',
+            activeChartId: String(otherChartId),
+            activeChartNo: other?.chartNo ?? null,
+            startedAt: new Date(started).toISOString(),
+          },
+        });
+      }
+    }
+
     const now = Date.now();
     activeTimers.set(`${user.id}:${id}`, now);
     if (c.milestone === ChartMilestone.READY_TO_CODE && user.role === Role.CODER) {
@@ -141,6 +190,33 @@ async update(id: number, dto: UpdateChartDto) {
     if (!started) throw new BadRequestException({ error: { code: 'bad_request', message: 'No active timer for this user/chart.' } });
     activeTimers.delete(key);
     return { chartId: id, elapsedMs: Date.now() - started };
+  }
+
+  /**
+   * Returns the user's currently running chart, if any.
+   * Used by the charts page (to show a "currently running" card) and by the
+   * chart-detail page (to restore the timer on reload).
+   */
+  async activeTimer(user: AuthenticatedUser) {
+    for (const [key, started] of activeTimers) {
+      const [uid, chartIdStr] = key.split(':');
+      if (Number(uid) !== user.id) continue;
+      const chartId = Number(chartIdStr);
+      const c = await this.charts.findOne({ where: { id: chartId } });
+      if (!c) {
+        activeTimers.delete(key);
+        continue;
+      }
+      return {
+        chartId: String(chartId),
+        chartNo: c.chartNo ?? null,
+        worklistId: String(c.worklistId),
+        milestone: c.milestone,
+        startedAt: new Date(started).toISOString(),
+        elapsedMs: Date.now() - started,
+      };
+    }
+    return null;
   }
 
   async bulkModify(dto: BulkModifyDto) {
@@ -198,5 +274,98 @@ async update(id: number, dto: UpdateChartDto) {
     if (!f) throw new NotFoundException();
     Object.assign(f, dto);
     return this.feedbacks.save(f);
+  }
+
+  /**
+   * Run the ICD Predictor encounter flow on the uploaded files for this chart.
+   * Returns the predicted codes; the result is also stashed under
+   * `customFields.aiPrediction` so the chart-detail page restores it on reload.
+   */
+  async processDocuments(
+    id: number,
+    files: Express.Multer.File[],
+    body: ProcessDocumentsDto,
+  ) {
+    const c = await this.charts.findOne({ where: { id } });
+    if (!c) throw new NotFoundException();
+
+    // Build report_types parallel to files: prefer explicit comma-separated
+    // list from FE; fall back to inferring from documentType + filename.
+    const explicit = (body.reportTypes ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean) as ReportType[];
+
+    const reportTypes: ReportType[] = files.map(
+      (f, i) => (explicit[i] as ReportType) ?? this.aiPredictor.mapReportType(body.documentType, f.originalname),
+    );
+
+    // 1) Persist each upload to S3/MinIO so the chart-detail page can iframe
+    //    it later. We do this BEFORE the gateway call so that even if the AI
+    //    pipeline fails, the documents are still saved against the chart.
+    const stored = await this.storage.uploadMany(files, c.id);
+
+    // 2) Forward the same buffers (in the same order) to the ICD predictor.
+    const inbound: InboundFile[] = files.map((f, i) => ({
+      buffer: f.buffer,
+      filename: f.originalname,
+      mimeType: f.mimetype,
+      reportType: reportTypes[i],
+    }));
+
+    const result = await this.aiPredictor.processEncounter(inbound, {
+      mrn: c.mrNumber,
+      encounterDate: c.dos ?? c.admitDate,
+      // facility / department aren't normalized columns yet — pass whatever
+      // the chart's customFields exposes so the encounter can be filed
+      // against the right cohort in the gateway.
+      facility: this.optionalString(c.customFields?.facility),
+      department: this.optionalString(c.customFields?.specialty),
+    });
+
+    // Stitch the gateway's report_ids back onto each stored doc, in the same
+    // order they were sent. This lets the FE link a viewable PDF to the AI's
+    // per-document analysis.
+    const existing = ((c.customFields?.uploadedDocs as UploadedDocument[] | undefined) ?? []);
+    const newDocs: UploadedDocument[] = stored.map((s, i) => ({
+      id: `${c.id}-${Date.now()}-${i}`,
+      filename: s.filename,
+      mimeType: s.mimeType,
+      size: s.size,
+      url: s.url,
+      reportType: reportTypes[i],
+      reportId: result.reportIds[i],
+    }));
+    const uploadedDocs = [...existing, ...newDocs];
+
+    // Persist the prediction so the page survives a refresh without re-running
+    // the pipeline. Stored under customFields to avoid a schema migration.
+    c.customFields = {
+      ...(c.customFields ?? {}),
+      uploadedDocs,
+      aiPrediction: {
+        encounterId: result.encounterId,
+        reportIds: result.reportIds,
+        status: result.status,
+        codes: result.codes,
+        primary: result.primary,
+        secondary: result.secondary,
+        procedures: result.procedures,
+        clinicalSummary: result.clinicalSummary,
+        auditNotes: result.auditNotes,
+        codingTips: result.codingTips,
+        complianceAlerts: result.complianceAlerts,
+        documentationGaps: result.documentationGaps,
+        physicianQueries: result.physicianQueries,
+        generatedAt: new Date().toISOString(),
+      },
+    };
+    await this.charts.save(c);
+
+    return { ...result, uploadedDocs };
+  }
+
+  private optionalString(v: unknown): string | undefined {
+    return typeof v === 'string' && v.trim() ? v.trim() : undefined;
   }
 }

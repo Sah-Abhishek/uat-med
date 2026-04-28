@@ -32,7 +32,7 @@ export class UsersController {
   }
 
   @Post()
-  @Roles(Role.ADMIN)
+  @Roles(Role.TEAMLEAD)
   @HttpCode(201)
   @ApiOperation({ summary: 'Admin creates a user directly (bypasses signup).' })
   create(@Body() dto: CreateUserDto) {
@@ -40,14 +40,14 @@ export class UsersController {
   }
 
   @Get('signup-requests')
-  @Roles(Role.ADMIN)
+  @Roles(Role.TEAMLEAD)
   @ApiOperation({ summary: 'Pending signup approval queue.' })
   signupRequests() {
     return this.svc.signupRequests();
   }
 
   @Post('signup-requests/:id/approve')
-  @Roles(Role.ADMIN)
+  @Roles(Role.TEAMLEAD)
   @HttpCode(200)
   @ApiOperation({ summary: 'Approve a pending request and provision the user.' })
   approve(@Param('id', ParseIntPipe) id: number, @Body() body: CreateUserDto) {
@@ -55,7 +55,7 @@ export class UsersController {
   }
 
   @Post('signup-requests/:id/decline')
-  @Roles(Role.ADMIN)
+  @Roles(Role.TEAMLEAD)
   @HttpCode(200)
   @ApiOperation({ summary: 'Decline a signup request with a reason.' })
   decline(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string) {
@@ -75,7 +75,7 @@ export class UsersController {
   }
 
   @Post(':id/deactivate')
-  @Roles(Role.ADMIN)
+  @Roles(Role.TEAMLEAD)
   @HttpCode(200)
   @ApiOperation({ summary: 'Deactivate a user and revoke tokens.' })
   deactivate(@Param('id', ParseIntPipe) id: number, @Body('reason') reason?: string) {
@@ -83,7 +83,7 @@ export class UsersController {
   }
 
   @Post(':id/activate')
-  @Roles(Role.ADMIN)
+  @Roles(Role.TEAMLEAD)
   @HttpCode(200)
   activate(@Param('id', ParseIntPipe) id: number) {
     return this.svc.activate(id);

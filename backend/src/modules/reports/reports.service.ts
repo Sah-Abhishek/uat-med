@@ -96,7 +96,7 @@ export class ReportsService {
   async getTemplate(id: number, user: AuthenticatedUser) {
     const t = await this.templates.findOne({ where: { id } });
     if (!t) throw new NotFoundException();
-    if (!t.isShared && t.ownerId !== user.id && user.role !== Role.ADMIN && user.role !== Role.MANAGER) {
+    if (!t.isShared && t.ownerId !== user.id && user.role !== Role.TEAMLEAD && user.role !== Role.MANAGER) {
       throw new ForbiddenException();
     }
     return t;
@@ -105,7 +105,7 @@ export class ReportsService {
   async updateTemplate(id: number, dto: SaveTemplateDto, user: AuthenticatedUser) {
     const t = await this.templates.findOne({ where: { id } });
     if (!t) throw new NotFoundException();
-    if (t.ownerId !== user.id && user.role !== Role.ADMIN) throw new ForbiddenException();
+    if (t.ownerId !== user.id && user.role !== Role.TEAMLEAD) throw new ForbiddenException();
     Object.assign(t, dto);
     return this.templates.save(t);
   }
@@ -113,7 +113,7 @@ export class ReportsService {
   async deleteTemplate(id: number, user: AuthenticatedUser) {
     const t = await this.templates.findOne({ where: { id } });
     if (!t) throw new NotFoundException();
-    if (t.ownerId !== user.id && user.role !== Role.ADMIN) throw new ForbiddenException();
+    if (t.ownerId !== user.id && user.role !== Role.TEAMLEAD) throw new ForbiddenException();
     await this.templates.delete(id);
     return { status: 'deleted' };
   }

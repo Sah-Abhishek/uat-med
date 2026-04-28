@@ -8,11 +8,11 @@ import { AuthService } from '../modules/auth/auth.service';
 import { Role } from '../common/enums/roles.enum';
 
 /**
- * Seeds a bootstrap ADMIN user from env vars on application start.
+ * Seeds a bootstrap TEAMLEAD user from env vars on application start.
  *
  * - If BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD are not both set, it logs and skips.
  * - If a user with that email already exists, it logs and skips (idempotent).
- * - Otherwise creates the user with role=ADMIN and status=ACTIVE.
+ * - Otherwise creates the user with role=TEAMLEAD and status=ACTIVE.
  */
 @Injectable()
 export class BootstrapService implements OnApplicationBootstrap {
@@ -45,11 +45,11 @@ export class BootstrapService implements OnApplicationBootstrap {
     }
 
     const created = await this.auth.createUserWithPassword({
-      email, fullName, password, role: Role.ADMIN,
+      email, fullName, password, role: Role.TEAMLEAD,
     });
 
     this.logger.warn(
-      `Bootstrap ADMIN created: ${email} (id=${created.id}). ` +
+      `Bootstrap TEAMLEAD created: ${email} (id=${created.id}). ` +
       `Rotate via POST /auth/password/change after first login.`,
     );
   }

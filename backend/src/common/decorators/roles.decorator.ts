@@ -5,6 +5,6 @@ export const ROLES_KEY = 'roles';
 
 /**
  * Restricts an endpoint to one or more roles.
- * Example: @Roles(Role.MANAGER, Role.ADMIN)
+ * Example: @Roles(Role.MANAGER, Role.TEAMLEAD)
  */
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);

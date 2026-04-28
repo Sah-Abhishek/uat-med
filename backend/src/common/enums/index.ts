@@ -17,6 +17,7 @@ export enum WorklistStatus {
 }
 
 export enum ChartMilestone {
+  READY_TO_ALLOCATE = 'READY_TO_ALLOCATE',
   READY_TO_CODE = 'READY_TO_CODE',
   CODING_IN_PROGRESS = 'CODING_IN_PROGRESS',
   CODING_DONE = 'CODING_DONE',
