@@ -60,7 +60,7 @@ api.interceptors.response.use(
     // Don't try to refresh if the failing call WAS /auth/refresh itself,
     // and don't retry login/signup.
     const url = original?.url ?? '';
-    const isAuthPath = /\/auth\/(refresh|login|signup)/.test(url);
+    const isAuthPath = /\/auth\/(refresh|login|signup|sso\/exchange)/.test(url);
 
     if (err.response?.status === 401 && original && !original._retried && !isAuthPath) {
       original._retried = true;

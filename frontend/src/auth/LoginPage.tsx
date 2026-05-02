@@ -52,8 +52,11 @@ export function LoginPage() {
           return;
         }
 
-        // Exchange Microsoft token for Valerion JWT
-        const valerionSession = await ssoExchange(msalResult.accessToken);
+        // Exchange Microsoft ID token for Valerion JWT.
+        // We use idToken (not accessToken) because ID tokens are issued for our app
+        // and signed with the tenant's keys, so the backend can verify them via JWKS.
+        // Access tokens for Graph scopes (User.Read) are signed by Graph and not verifiable here.
+        const valerionSession = await ssoExchange(msalResult.idToken);
         setFromLogin(valerionSession);
         navigate('/', { replace: true });
       } catch (err) {

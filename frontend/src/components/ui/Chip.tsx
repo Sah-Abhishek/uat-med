@@ -54,13 +54,13 @@ export function WorklistStatusChip({ status }: { status: WorklistStatus }) {
   return <span className={cn('chip', WORKLIST_STATUS_STYLES[status])}>{WORKLIST_STATUS_LABEL[status]}</span>;
 }
 
-/* ── Priority (CRITICAL | HIGH | MEDIUM | LOW | FINALIZED) ── */
+/* ── Priority (CRITICAL | HIGH | MEDIUM | LOW | DONE) ── */
 const PRIORITY_STYLES: Record<Priority, string> = {
   CRITICAL: 'bg-danger-soft text-danger',
   HIGH: 'bg-warn-soft text-warn',
   MEDIUM: 'bg-info-soft text-info',
   LOW: 'bg-surface-sunken text-ink-muted',
-  FINALIZED: 'bg-success-soft text-success',
+  DONE: 'bg-success-soft text-success',
 };
 export function PriorityChip({ priority }: { priority: Priority }) {
   return (
@@ -111,7 +111,7 @@ export function PillBadge({
 }) {
   const toneMap = {
     mint: 'bg-success-soft text-success',
-    butter: 'bg-primary-soft text-primary-ink',
+    butter: 'bg-primary-soft text-primary-ink dark:text-primary',
     coral: 'bg-danger-soft text-danger',
     sky: 'bg-info-soft text-info',
   };

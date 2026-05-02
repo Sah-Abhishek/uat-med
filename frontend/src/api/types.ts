@@ -76,6 +76,7 @@ export interface Worklist {
   status: WorklistStatus;
   receivedDate: string;
   dateOfService: string | null;
+  dateOfServiceTo: string | null;
   totalCharts: number;
   allocatedCharts: number;
   closedCharts: number;
@@ -108,7 +109,7 @@ export interface WorklistStatusSummary {
 
 /* ── Charts ───────────────────────────────────────────────── */
 // Aligned to spec — chartStatus drops IN_PROGRESS (not a server value);
-// milestone adds CLOSED; priority adds FINALIZED.
+// milestone adds CLOSED; priority adds DONE.
 
 export type ChartMilestone =
   | 'READY_TO_ALLOCATE'
@@ -122,7 +123,7 @@ export type ChartMilestone =
 
 export type ChartStatus = 'OPEN' | 'COMPLETE' | 'INCOMPLETE' | 'HOLD';
 
-export type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'FINALIZED';
+export type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'DONE';
 
 export interface Procedure {
   code: string;
@@ -234,7 +235,7 @@ export interface ChartSummary {
     high: number;
     medium: number;
     low: number;
-    finalized: number;
+    done: number;
   };
   milestones: {
     readyToCode: number;

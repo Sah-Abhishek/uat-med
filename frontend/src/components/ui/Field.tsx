@@ -529,17 +529,29 @@ export function DatePicker({
 
             {/* Footer: Today + Clear */}
             <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-line">
-              <button
-                type="button"
-                onClick={() => {
-                  const t = new Date();
-                  onChange(formatISODate(t));
-                  setOpen(false);
-                }}
-                className="text-[11px] font-semibold text-primary hover:underline"
-              >
-                Today
-              </button>
+              {(() => {
+                const todayDisabled = isOutOfRange(today);
+                return (
+                  <button
+                    type="button"
+                    disabled={todayDisabled}
+                    onClick={() => {
+                      if (todayDisabled) return;
+                      onChange(formatISODate(today));
+                      setOpen(false);
+                    }}
+                    title={todayDisabled ? 'Today is outside the allowed range' : undefined}
+                    className={cn(
+                      'text-[11px] font-semibold transition',
+                      todayDisabled
+                        ? 'text-ink-subtle cursor-not-allowed'
+                        : 'text-primary hover:underline',
+                    )}
+                  >
+                    Today
+                  </button>
+                );
+              })()}
               {value && (
                 <button
                   type="button"
@@ -556,6 +568,382 @@ export function DatePicker({
           </div>,
           document.body,
         )}
+    </div>
+  );
+}
+
+/* ── RangeDatePicker — two-month range selector ──────────────────── */
+interface RangeDatePickerProps {
+  value: { from: string | null; to: string | null };
+  onChange: (next: { from: string | null; to: string | null }) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  min?: string;
+  max?: string;
+}
+export function RangeDatePicker({
+  value,
+  onChange,
+  placeholder = 'Select date range',
+  disabled,
+  className,
+  min,
+  max,
+}: RangeDatePickerProps) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+
+  const fromDate = parseISODate(value.from);
+  const toDate = parseISODate(value.to);
+  const minDate = parseISODate(min);
+  const maxDate = parseISODate(max);
+
+  const [viewMonth, setViewMonth] = useState<Date>(() => {
+    const base = fromDate ?? new Date();
+    return new Date(base.getFullYear(), base.getMonth(), 1);
+  });
+  const [hover, setHover] = useState<Date | null>(null);
+
+  useEffect(() => {
+    if (fromDate) {
+      setViewMonth((vm) =>
+        vm.getFullYear() === fromDate.getFullYear() && vm.getMonth() === fromDate.getMonth()
+          ? vm
+          : new Date(fromDate.getFullYear(), fromDate.getMonth(), 1),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.from]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const POPOVER_W = 520;
+    const POPOVER_H = 320;
+    function reposition() {
+      const el = triggerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      let top = rect.bottom + 8;
+      let left = rect.left;
+      if (top + POPOVER_H > vh - 8 && rect.top - 8 > POPOVER_H) {
+        top = rect.top - 8 - POPOVER_H;
+      }
+      left = Math.max(8, Math.min(left, vw - POPOVER_W - 8));
+      setPosition({ top, left });
+    }
+    reposition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (
+        triggerRef.current?.contains(e.target as Node) ||
+        popoverRef.current?.contains(e.target as Node)
+      ) {
+        return;
+      }
+      setOpen(false);
+      setHover(null);
+    }
+    if (open) document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  function isOutOfRange(d: Date) {
+    if (minDate && d < new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate()))
+      return true;
+    if (maxDate && d > new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate()))
+      return true;
+    return false;
+  }
+
+  function handleSelect(d: Date) {
+    if (isOutOfRange(d)) return;
+    // No range yet, or both endpoints already chosen → start a fresh range.
+    if (!fromDate || (fromDate && toDate)) {
+      onChange({ from: formatISODate(d), to: null });
+      return;
+    }
+    // From is set, picking the second endpoint. Swap if user picked an earlier date.
+    if (d < fromDate) {
+      onChange({ from: formatISODate(d), to: formatISODate(fromDate) });
+    } else {
+      onChange({ from: formatISODate(fromDate), to: formatISODate(d) });
+    }
+    setOpen(false);
+    setHover(null);
+  }
+
+  const monthA = viewMonth;
+  const monthB = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1);
+
+  const display = (() => {
+    if (fromDate && toDate) return `${formatDateDisplay(fromDate)} – ${formatDateDisplay(toDate)}`;
+    if (fromDate) return `${formatDateDisplay(fromDate)} – …`;
+    return placeholder;
+  })();
+
+  return (
+    <div className={cn('relative', className)}>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'w-full h-10 pl-3.5 pr-2.5 rounded-pill border bg-surface flex items-center gap-2 text-sm transition',
+          'border-line hover:border-line-strong hover:bg-surface-sunken/60',
+          open && 'border-primary/70 bg-surface-sunken/60 shadow-card',
+          disabled && 'opacity-50 cursor-not-allowed pointer-events-none',
+        )}
+      >
+        <CalendarIcon className="w-4 h-4 text-ink-muted shrink-0" />
+        <span
+          className={cn(
+            'flex-1 text-left truncate',
+            fromDate ? 'font-semibold text-ink' : 'text-ink-subtle',
+          )}
+        >
+          {display}
+        </span>
+        <ChevronDown
+          className={cn(
+            'w-3.5 h-3.5 text-ink-muted transition-transform shrink-0',
+            open && 'rotate-180 text-primary',
+          )}
+        />
+      </button>
+
+      {open && position && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            style={{ top: position.top, left: position.left, width: 520 }}
+            className={cn(
+              'fixed z-[100]',
+              'bg-surface border border-line rounded-xl shadow-pop dark:shadow-pop-dark p-3',
+            )}
+          >
+            <div className="flex items-stretch gap-2">
+              <RangeMonthGrid
+                month={monthA}
+                fromDate={fromDate}
+                toDate={toDate}
+                hover={hover}
+                isOutOfRange={isOutOfRange}
+                onHover={setHover}
+                onSelect={handleSelect}
+                showPrev
+                onPrev={() =>
+                  setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))
+                }
+              />
+              <div className="w-px bg-line" />
+              <RangeMonthGrid
+                month={monthB}
+                fromDate={fromDate}
+                toDate={toDate}
+                hover={hover}
+                isOutOfRange={isOutOfRange}
+                onHover={setHover}
+                onSelect={handleSelect}
+                showNext
+                onNext={() =>
+                  setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))
+                }
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-line">
+              <span className="text-[11px] text-ink-muted">
+                {fromDate && !toDate
+                  ? 'Pick the end date'
+                  : fromDate && toDate
+                  ? 'Click any date to start a new range'
+                  : 'Pick the start date'}
+              </span>
+              {(value.from || value.to) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange({ from: null, to: null });
+                    setHover(null);
+                  }}
+                  className="text-[11px] font-medium text-ink-muted hover:text-ink"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+function RangeMonthGrid({
+  month,
+  fromDate,
+  toDate,
+  hover,
+  isOutOfRange,
+  onHover,
+  onSelect,
+  showPrev,
+  showNext,
+  onPrev,
+  onNext,
+}: {
+  month: Date;
+  fromDate: Date | null;
+  toDate: Date | null;
+  hover: Date | null;
+  isOutOfRange: (d: Date) => boolean;
+  onHover: (d: Date | null) => void;
+  onSelect: (d: Date) => void;
+  showPrev?: boolean;
+  showNext?: boolean;
+  onPrev?: () => void;
+  onNext?: () => void;
+}) {
+  const gridStart = new Date(month);
+  gridStart.setDate(1 - month.getDay());
+  const cells: Date[] = [];
+  for (let i = 0; i < 42; i += 1) {
+    cells.push(new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i));
+  }
+  const today = new Date();
+
+  // Compute the effective range (committed or hover-preview).
+  const previewEnd = !toDate && fromDate && hover ? hover : null;
+  const rangeLo = fromDate
+    ? toDate
+      ? fromDate < toDate
+        ? fromDate
+        : toDate
+      : previewEnd
+      ? fromDate < previewEnd
+        ? fromDate
+        : previewEnd
+      : null
+    : null;
+  const rangeHi = fromDate
+    ? toDate
+      ? fromDate < toDate
+        ? toDate
+        : fromDate
+      : previewEnd
+      ? fromDate < previewEnd
+        ? previewEnd
+        : fromDate
+      : null
+    : null;
+
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center justify-between mb-2 px-1">
+        {showPrev ? (
+          <button
+            type="button"
+            onClick={onPrev}
+            className="w-6 h-6 rounded-md hover:bg-surface-sunken flex items-center justify-center text-ink-muted transition"
+            aria-label="Previous month"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+        ) : (
+          <span className="w-6 h-6" />
+        )}
+        <span className="text-[13px] font-bold text-ink select-none">
+          {MONTH_NAMES[month.getMonth()]} {month.getFullYear()}
+        </span>
+        {showNext ? (
+          <button
+            type="button"
+            onClick={onNext}
+            className="w-6 h-6 rounded-md hover:bg-surface-sunken flex items-center justify-center text-ink-muted transition"
+            aria-label="Next month"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        ) : (
+          <span className="w-6 h-6" />
+        )}
+      </div>
+
+      <div className="grid grid-cols-7 gap-y-0.5">
+        {WEEKDAY_LABELS.map((w) => (
+          <div
+            key={w}
+            className="text-center text-[9px] uppercase tracking-[0.06em] text-ink-subtle font-semibold py-1"
+          >
+            {w}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-y-0.5">
+        {cells.map((d) => {
+          const isOther = d.getMonth() !== month.getMonth();
+          const isToday = isSameDay(d, today);
+          const disabledCell = isOutOfRange(d);
+          const sameLo = rangeLo && isSameDay(d, rangeLo);
+          const sameHi = rangeHi && isSameDay(d, rangeHi);
+          const inRange =
+            rangeLo && rangeHi && d >= rangeLo && d <= rangeHi;
+          const isEndpoint = sameLo || sameHi;
+          const isOnlyOne = sameLo && sameHi;
+
+          return (
+            <button
+              key={d.toISOString()}
+              type="button"
+              disabled={disabledCell || isOther}
+              onMouseEnter={() => !isOther && onHover(d)}
+              onMouseLeave={() => onHover(null)}
+              onClick={() => !isOther && onSelect(d)}
+              className={cn(
+                'h-7 text-[12px] flex items-center justify-center transition relative',
+                isOther
+                  ? 'text-ink-subtle/40 pointer-events-none'
+                  : disabledCell
+                  ? 'text-ink-subtle opacity-30 pointer-events-none'
+                  : 'text-ink',
+                // Range fill (edges shaped, middle flat) — text stays readable on dark mode
+                inRange && !isEndpoint && 'bg-primary-soft text-ink',
+                inRange && sameLo && !isOnlyOne && 'bg-primary-soft rounded-l-md',
+                inRange && sameHi && !isOnlyOne && 'bg-primary-soft rounded-r-md',
+                // Endpoint pill on top
+                isEndpoint &&
+                  !disabledCell &&
+                  'bg-primary text-primary-ink font-bold rounded-md shadow-card',
+                // Today marker (only if not already styled)
+                !isEndpoint && !inRange && isToday && !isOther &&
+                  'border border-primary/60 font-semibold rounded-md',
+                !isEndpoint && !inRange && !isToday && !isOther && 'rounded-md hover:bg-surface-sunken font-medium',
+              )}
+            >
+              {d.getDate()}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

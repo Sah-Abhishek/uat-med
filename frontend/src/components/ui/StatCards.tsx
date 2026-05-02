@@ -30,9 +30,10 @@ interface TintedProps {
   sublabel?: string;
   icon?: ReactNode;
   className?: string;
+  loading?: boolean;
 }
 /** Big color-tinted stat card — used for Milestones on Dashboard */
-export function TintedStatCard({ tint, value, label, sublabel, icon, className }: TintedProps) {
+export function TintedStatCard({ tint, value, label, sublabel, icon, className, loading }: TintedProps) {
   return (
     <div className={cn('relative rounded-card p-5 min-h-[130px] overflow-hidden', TILE_BG[tint], className)}>
       {icon && (
@@ -40,15 +41,19 @@ export function TintedStatCard({ tint, value, label, sublabel, icon, className }
           {icon}
         </div>
       )}
-      <p
-        className={cn(
-          'font-bold leading-none tracking-tightish',
-          'text-[40px]',
-          TILE_NUMBER[tint],
-        )}
-      >
-        {typeof value === 'number' ? formatNumber(value) : value}
-      </p>
+      {loading ? (
+        <div className="h-[40px] w-20 rounded bg-ink/10 animate-pulse" />
+      ) : (
+        <p
+          className={cn(
+            'font-bold leading-none tracking-tightish',
+            'text-[40px]',
+            TILE_NUMBER[tint],
+          )}
+        >
+          {typeof value === 'number' ? formatNumber(value) : value}
+        </p>
+      )}
       <p className={cn('mt-3 text-sm font-semibold', TILE_NUMBER[tint])}>
         {label}
       </p>
@@ -66,9 +71,10 @@ interface IllProps {
   sublabel?: string;
   variant: 'complete' | 'incomplete' | 'open' | 'in-progress' | 'closed' | 'attending' | 'not-attending';
   className?: string;
+  loading?: boolean;
 }
 
-export function IllustrationStatCard({ value, label, sublabel, variant, className }: IllProps) {
+export function IllustrationStatCard({ value, label, sublabel, variant, className, loading }: IllProps) {
   const numberColor = {
     complete: 'text-success',
     incomplete: 'text-danger',
@@ -83,9 +89,13 @@ export function IllustrationStatCard({ value, label, sublabel, variant, classNam
     <div className={cn('card p-5 flex items-start gap-4 min-h-[130px]', className)}>
       <div className="flex-1">
         <div className="flex items-baseline gap-2">
-          <span className={cn('text-[40px] font-bold leading-none tracking-tightish', numberColor)}>
-            {formatNumber(value)}
-          </span>
+          {loading ? (
+            <span className="h-[40px] w-20 rounded bg-ink/10 animate-pulse" />
+          ) : (
+            <span className={cn('text-[40px] font-bold leading-none tracking-tightish', numberColor)}>
+              {formatNumber(value)}
+            </span>
+          )}
           <span className="text-sm font-semibold text-ink">{label}</span>
         </div>
         {sublabel && <p className="text-[11px] text-ink-muted mt-2">{sublabel}</p>}
@@ -102,11 +112,16 @@ interface CoralProps {
   value: string;
   label: string;
   className?: string;
+  loading?: boolean;
 }
-export function CoralPillStat({ value, label, className }: CoralProps) {
+export function CoralPillStat({ value, label, className, loading }: CoralProps) {
   return (
     <div className={cn('rounded-card bg-tile-coral p-5 min-h-[90px] flex flex-col justify-center text-center', className)}>
-      <p className="text-2xl font-bold text-danger">{value}</p>
+      {loading ? (
+        <div className="mx-auto h-6 w-24 rounded bg-ink/10 animate-pulse" />
+      ) : (
+        <p className="text-2xl font-bold text-danger">{value}</p>
+      )}
       <p className="text-xs font-medium text-danger mt-1">{label}</p>
     </div>
   );

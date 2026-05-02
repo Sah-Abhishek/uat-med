@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '@/auth/store';
 import { can, type Permission } from '@/permissions';
@@ -17,7 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import type { ComponentProps, ComponentType } from 'react';
+import type { ComponentProps, ComponentType, ReactNode } from 'react';
 
 interface NavItem {
   to: string;
@@ -59,7 +60,7 @@ export function Layout() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-bg flex">
+    <div className="h-screen overflow-hidden bg-bg flex">
       {/* ── Sidebar ─────────────────────────────────── */}
       <aside
         className={cn(
@@ -76,68 +77,126 @@ export function Layout() {
           {collapsed ? <ValerionMark className="w-9 h-9" /> : <ValerionLogo />}
         </div>
 
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto overflow-x-hidden">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {NAV.map((item) => {
             const visible = !item.requires || can(user, item.requires);
             if (!visible) return null;
             const Icon = item.icon;
             return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/'}
-                title={collapsed ? item.label : undefined}
-                className={({ isActive }) =>
-                  cn(
-                    'flex items-center gap-3 rounded-lg text-sm transition',
-                    collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
-                    isActive
-                      ? 'bg-primary-soft text-primary-ink dark:text-primary font-semibold'
-                      : 'text-ink-muted hover:bg-surface-sunken hover:text-ink font-medium',
-                  )
-                }
-              >
-                <Icon className="w-4 h-4 shrink-0" strokeWidth={2} />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-              </NavLink>
+              <HoverTooltip key={item.to} label={item.label} enabled={collapsed}>
+                <NavLink
+                  to={item.to}
+                  end={item.to === '/'}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center gap-3 rounded-lg text-sm transition',
+                      collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
+                      isActive
+                        ? 'bg-primary-soft text-primary-ink dark:text-primary font-semibold'
+                        : 'text-ink-muted hover:bg-surface-sunken hover:text-ink font-medium',
+                    )
+                  }
+                >
+                  <Icon className="w-4 h-4 shrink-0" strokeWidth={2} />
+                  {!collapsed && <span className="truncate">{item.label}</span>}
+                </NavLink>
+              </HoverTooltip>
             );
           })}
         </nav>
 
         {/* Power button at bottom */}
         <div className={cn('border-t border-line', collapsed ? 'p-2 flex justify-center' : 'p-3')}>
-          <button
-            className="w-10 h-10 rounded-full flex items-center justify-center text-primary hover:bg-primary-soft transition"
-            aria-label="Sign out"
-            title="Sign out (use menu for full options)"
-          >
-            <Power className="w-4 h-4" />
-          </button>
+          <HoverTooltip label="Sign out" enabled>
+            <button
+              className="w-10 h-10 rounded-full flex items-center justify-center text-primary hover:bg-primary-soft transition"
+              aria-label="Sign out"
+            >
+              <Power className="w-4 h-4" />
+            </button>
+          </HoverTooltip>
         </div>
 
         {/* Collapse toggle — pinned to the right edge */}
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="absolute top-20 -right-3 w-6 h-6 rounded-full bg-surface border border-line shadow-card flex items-center justify-center text-ink-muted hover:text-ink hover:bg-surface-2 transition z-10"
+        <HoverTooltip
+          label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          enabled
+          className="absolute top-20 -right-3 z-10"
         >
-          {collapsed ? (
-            <ChevronRight className="w-3 h-3" />
-          ) : (
-            <ChevronLeft className="w-3 h-3" />
-          )}
-        </button>
+          <button
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className="w-6 h-6 rounded-full bg-surface border border-line shadow-card flex items-center justify-center text-ink-muted hover:text-ink hover:bg-surface-2 transition"
+          >
+            {collapsed ? (
+              <ChevronRight className="w-3 h-3" />
+            ) : (
+              <ChevronLeft className="w-3 h-3" />
+            )}
+          </button>
+        </HoverTooltip>
       </aside>
 
       {/* ── Main area ───────────────────────────────── */}
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
         <TopBar />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 min-h-0 overflow-y-auto">
           <Outlet />
         </main>
       </div>
+    </div>
+  );
+}
+
+function HoverTooltip({
+  label,
+  enabled,
+  className,
+  children,
+}: {
+  label: string;
+  enabled: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  function showAt() {
+    if (!enabled || !wrapperRef.current) return;
+    const r = wrapperRef.current.getBoundingClientRect();
+    setPos({ top: r.top + r.height / 2, left: r.right + 12 });
+  }
+
+  return (
+    <div
+      ref={wrapperRef}
+      className={cn('relative', className)}
+      onMouseEnter={showAt}
+      onMouseLeave={() => setPos(null)}
+    >
+      {children}
+      {pos &&
+        createPortal(
+          <span
+            role="tooltip"
+            style={{ top: pos.top, left: pos.left }}
+            className={cn(
+              'pointer-events-none fixed z-[100] -translate-y-1/2',
+              'px-2.5 py-1.5 rounded-md whitespace-nowrap',
+              'bg-ink text-bg text-xs font-medium shadow-pop',
+              'animate-[tooltip-in_150ms_ease-out]',
+            )}
+          >
+            <span
+              aria-hidden
+              className="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-y-[5px] border-y-transparent border-r-[5px] border-r-ink"
+            />
+            {label}
+          </span>,
+          document.body,
+        )}
     </div>
   );
 }

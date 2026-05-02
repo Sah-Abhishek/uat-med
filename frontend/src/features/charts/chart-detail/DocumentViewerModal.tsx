@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, FileText, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AiEncounterResult, UploadedDocument } from '@/api/types';
+import { AiSummaryPanel } from './AiSummaryPanel';
 
 interface Props {
   open: boolean;
@@ -131,79 +132,3 @@ export function DocumentViewerModal({ open, onClose, docs, activeId, onSelect, p
   );
 }
 
-/* ── AI summary view — renders the gateway's clinical_summary blob ──────── */
-
-function AiSummaryPanel({ prediction }: { prediction?: AiEncounterResult | null }) {
-  if (!prediction) {
-    return (
-      <div className="p-6 text-sm text-ink-muted">
-        AI summary will appear here once the chart's documents are processed.
-      </div>
-    );
-  }
-  const cs = (prediction.clinicalSummary ?? {}) as Record<string, unknown>;
-  const text = (k: string) => (typeof cs[k] === 'string' ? (cs[k] as string) : '');
-  const list = (k: string) => (Array.isArray(cs[k]) ? (cs[k] as unknown[]) : []);
-  const labs = cs.significant_labs && typeof cs.significant_labs === 'object'
-    ? Object.entries(cs.significant_labs as Record<string, unknown>)
-    : [];
-
-  return (
-    <div className="p-6 space-y-5 text-sm">
-      <SummaryBlock title="Chief Complaint" body={text('chief_complaint')} />
-      <SummaryBlock title="Clinical Context" body={text('clinical_context')} />
-
-      <SummaryListBlock title="Primary Diagnoses" items={list('primary_diagnoses')} />
-      <SummaryListBlock title="Secondary Diagnoses" items={list('secondary_diagnoses')} />
-      <SummaryListBlock title="Procedures Performed" items={list('procedures_performed')} />
-
-      {labs.length > 0 && (
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-ink-muted font-semibold mb-2">
-            Significant Labs
-          </p>
-          <div className="rounded-md border border-line divide-y divide-line">
-            {labs.map(([test, value]) => (
-              <div key={test} className="flex items-center justify-between px-3 py-1.5">
-                <span className="text-xs font-semibold text-ink">{test}</span>
-                <span className="text-xs text-ink-muted font-mono">{String(value)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {prediction.auditNotes && (
-        <SummaryBlock title="Auditor Notes" body={prediction.auditNotes} />
-      )}
-    </div>
-  );
-}
-
-function SummaryBlock({ title, body }: { title: string; body: string }) {
-  if (!body) return null;
-  return (
-    <div>
-      <p className="text-[11px] uppercase tracking-wide text-ink-muted font-semibold mb-1">
-        {title}
-      </p>
-      <p className="text-sm text-ink leading-relaxed whitespace-pre-line">{body}</p>
-    </div>
-  );
-}
-
-function SummaryListBlock({ title, items }: { title: string; items: unknown[] }) {
-  if (!items.length) return null;
-  return (
-    <div>
-      <p className="text-[11px] uppercase tracking-wide text-ink-muted font-semibold mb-1">
-        {title}
-      </p>
-      <ul className="text-sm text-ink list-disc list-inside space-y-0.5">
-        {items.map((it, i) => (
-          <li key={i}>{typeof it === 'string' ? it : JSON.stringify(it)}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}

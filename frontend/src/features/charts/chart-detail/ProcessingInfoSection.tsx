@@ -34,7 +34,15 @@ export function ProcessingInfoSection({
   coders = [],
   auditors = [],
 }: Props) {
-  const dim = isAuditor ? 'opacity-50 pointer-events-none grayscale' : readOnly ? 'pointer-events-none' : '';
+  // Auditor profile only edits Coder QC Status here; everything else is locked.
+  // Coder profile edits everything except Coder QC Status. We apply this per-row
+  // (instead of one wrapper) so the Coder QC Status cell can stay un-dimmed and
+  // interactive for auditors despite living in the same section.
+  const lockForAuditor = isAuditor
+    ? 'opacity-50 pointer-events-none grayscale'
+    : readOnly
+    ? 'pointer-events-none'
+    : '';
   const isIncomplete = draft.chartStatus === 'Incomplete';
   const isComplete = draft.chartStatus === 'Complete';
 
@@ -66,7 +74,7 @@ export function ProcessingInfoSection({
 
   return (
     <CollapsibleCard title="Processing Info" subtitle="All fields related to processing this chart" defaultOpen>
-      <div className={`pt-3 ${dim}`}>
+      <div className="pt-3">
         {/* Row 1: chart status + responsible party */}
         {(visible('chartStatus') || visible('responsibleParty')) && (
           <div
@@ -75,6 +83,7 @@ export function ProcessingInfoSection({
               visible('chartStatus') && visible('responsibleParty')
                 ? 'grid-cols-[1fr_3fr]'
                 : 'grid-cols-1',
+              lockForAuditor,
             )}
           >
             {visible('chartStatus') && (
@@ -103,7 +112,13 @@ export function ProcessingInfoSection({
         )}
 
         {/* Row 2: hold reason — only enabled when Incomplete */}
-        <div className={cn('mb-4', !isIncomplete && 'opacity-50 pointer-events-none')}>
+        <div
+          className={cn(
+            'mb-4',
+            !isIncomplete && 'opacity-50 pointer-events-none',
+            lockForAuditor,
+          )}
+        >
           <Label required={isIncomplete}>Hold reason</Label>
           <MultiSelect
             value={draft.holdReason}
@@ -115,7 +130,13 @@ export function ProcessingInfoSection({
 
         {/* Row 3: coder comments — disabled when Complete */}
         {visible('coderCommentsToClient') && (
-          <div className={cn('mb-4', isComplete && 'opacity-50 pointer-events-none')}>
+          <div
+            className={cn(
+              'mb-4',
+              isComplete && 'opacity-50 pointer-events-none',
+              lockForAuditor,
+            )}
+          >
             <Label required={required('coderCommentsToClient')}>Coder comments to client</Label>
             <Textarea
               rows={3}
@@ -127,7 +148,7 @@ export function ProcessingInfoSection({
         )}
 
         {visible('rejectionDenialComments') && (
-          <div className="mb-4">
+          <div className={cn('mb-4', lockForAuditor)}>
             <Label required={required('rejectionDenialComments')}>Rejection / Denial Comments</Label>
             <Textarea
               rows={3}
@@ -139,7 +160,7 @@ export function ProcessingInfoSection({
         )}
 
         {visible('deficiencyComments') && (
-          <div className="mb-4">
+          <div className={cn('mb-4', lockForAuditor)}>
             <Label required={required('deficiencyComments')}>Deficiency Comments</Label>
             <Textarea
               rows={3}
@@ -151,12 +172,14 @@ export function ProcessingInfoSection({
         )}
 
         <div className="grid grid-cols-3 gap-4 mb-4">
-          <FormField
-            label="Date of completion"
-            value={new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
-            readOnly
-          />
-          <div>
+          <div className={lockForAuditor}>
+            <FormField
+              label="Date of completion"
+              value={new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
+              readOnly
+            />
+          </div>
+          <div className={lockForAuditor}>
             <Label required>Audit options</Label>
             <MultiSelect
               value={draft.auditOption}
@@ -165,17 +188,21 @@ export function ProcessingInfoSection({
               readOnly={readOnly}
             />
           </div>
-          <FormField
-            label="Coder QC Status"
-            type="select"
-            value={draft.qcStatus}
-            onChange={(v) => update('qcStatus', v)}
-            options={['Pending', 'Approved', 'Reject']}
-            readOnly={readOnly}
-          />
+          {/* Coder QC Status is auditor-owned: editable only in the auditor
+              profile, read-only for coders. */}
+          <div className={cn(!isAuditor && 'opacity-50 pointer-events-none')}>
+            <FormField
+              label="Coder QC Status"
+              type="select"
+              value={draft.qcStatus}
+              onChange={(v) => update('qcStatus', v)}
+              options={['Pending', 'Approved', 'Reject']}
+              readOnly={!isAuditor}
+            />
+          </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className={cn('grid grid-cols-3 gap-4', lockForAuditor)}>
           <FormField
             label="Allocate to auditor"
             type="select"
@@ -199,18 +226,25 @@ export function ProcessingInfoSection({
             type="select"
             value={draft.priority}
             onChange={(v) => update('priority', v)}
-            options={['Critical', 'High', 'Medium', 'Low']}
+            options={[
+              { value: 'CRITICAL', label: 'Critical' },
+              { value: 'HIGH', label: 'High' },
+              { value: 'MEDIUM', label: 'Medium' },
+              { value: 'LOW', label: 'Low' },
+            ]}
             readOnly={readOnly}
           />
         </div>
 
-        <CustomFieldsRenderer
-          fields={cfg.customFields}
-          placement="Processing Info"
-          values={customValues}
-          onChange={updateCustomValue}
-          readOnly={readOnly}
-        />
+        <div className={lockForAuditor}>
+          <CustomFieldsRenderer
+            fields={cfg.customFields}
+            placement="Processing Info"
+            values={customValues}
+            onChange={updateCustomValue}
+            readOnly={readOnly}
+          />
+        </div>
       </div>
     </CollapsibleCard>
   );

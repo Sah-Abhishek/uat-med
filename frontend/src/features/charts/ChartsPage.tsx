@@ -40,7 +40,6 @@ import {
   Columns3,
   Sparkles,
   ChevronsUpDown,
-  Loader2,
   UserPlus,
   Clock,
   ChevronRight,
@@ -52,7 +51,7 @@ const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
   { key: 'HIGH', label: 'High' },
   { key: 'MEDIUM', label: 'Medium' },
   { key: 'LOW', label: 'Low' },
-  { key: 'FINALIZED', label: 'Finalized' },
+  { key: 'DONE', label: 'Done' },
 ];
 
 export function ChartsPage() {
@@ -61,6 +60,7 @@ export function ChartsPage() {
   const isCoderOrAuditor = user.role === 'CODER' || user.role === 'AUDITOR';
 
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [tab, setTab] = useState<'ALL' | Priority>('ALL');
   const [filters, setFilters] = useState<ChartListParams>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -68,7 +68,6 @@ export function ChartsPage() {
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [modifyOpen, setModifyOpen] = useState(false);
   const [selfAllocateOpen, setSelfAllocateOpen] = useState(false);
-  const pageSize = 20;
 
   const summary = useQuery({ queryKey: ['charts', 'summary'], queryFn: getChartsSummary });
 
@@ -81,7 +80,7 @@ export function ChartsPage() {
       sortDir: 'desc',
       ...(tab !== 'ALL' ? { priority: tab } : {}),
     }),
-    [filters, page, tab],
+    [filters, page, pageSize, tab],
   );
 
   const list = useQuery({
@@ -118,7 +117,7 @@ export function ChartsPage() {
     ...t,
     count:
       t.key === 'ALL'
-        ? (pc ? pc.critical + pc.high + pc.medium + pc.low + pc.finalized : undefined)
+        ? (pc ? pc.critical + pc.high + pc.medium + pc.low + pc.done : undefined)
         : pc?.[t.key.toLowerCase() as keyof typeof pc],
   }));
 
@@ -205,7 +204,7 @@ export function ChartsPage() {
                     type="checkbox"
                     checked={allSelected}
                     onChange={toggleAll}
-                    className="accent-primary w-4 h-4"
+                    className="checkbox"
                   />
                 </th>
                 <HeaderCell sortable>Serial #</HeaderCell>
@@ -221,12 +220,44 @@ export function ChartsPage() {
               </tr>
             </thead>
             <tbody>
-              {list.isPending ? (
-                <tr>
-                  <td colSpan={11} className="py-16 text-center text-ink-muted">
-                    <Loader2 className="w-5 h-5 animate-spin inline" />
-                  </td>
-                </tr>
+              {list.isPending || list.isPlaceholderData ? (
+                Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={`skel-${i}`} className="border-b border-line/60">
+                    <td className="table-cell">
+                      <div className="w-4 h-4 rounded bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="h-3 w-8 rounded bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="h-3 w-20 rounded bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="h-3 w-16 rounded bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="h-5 w-16 rounded-pill bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="h-5 w-24 rounded-pill bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="h-5 w-16 rounded-pill bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="w-7 h-7 rounded-full bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="w-7 h-7 rounded-full bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="h-3 w-20 rounded bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="h-3 w-20 rounded bg-surface-sunken animate-pulse" />
+                    </td>
+                  </tr>
+                ))
               ) : list.data?.items.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-20 text-center text-sm text-ink-muted">
@@ -241,7 +272,7 @@ export function ChartsPage() {
                         type="checkbox"
                         checked={selected.has(c.id)}
                         onChange={() => toggle(c.id)}
-                        className="accent-primary w-4 h-4"
+                        className="checkbox"
                       />
                     </td>
                     <td className="table-cell font-mono text-xs">{c.serialNo}</td>
@@ -273,7 +304,17 @@ export function ChartsPage() {
           </table>
         </div>
 
-        <Pagination page={page} pageCount={totalPages} onPageChange={setPage} />
+        <Pagination
+          page={page}
+          pageCount={totalPages}
+          onPageChange={setPage}
+          pageSize={pageSize}
+          total={list.data?.total}
+          onPageSizeChange={(n) => {
+            setPageSize(n);
+            setPage(1);
+          }}
+        />
       </Card>
 
       <FilterModal open={filterOpen} onClose={() => setFilterOpen(false)} value={filters} onApply={(f) => { setFilters(f); setPage(1); }} />
@@ -507,7 +548,7 @@ function ModifyChartsModal({
             <option value="HIGH">High</option>
             <option value="MEDIUM">Medium</option>
             <option value="LOW">Low</option>
-            <option value="FINALIZED">Finalized</option>
+            <option value="DONE">Done</option>
           </Select>
         </div>
 

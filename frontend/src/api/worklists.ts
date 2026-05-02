@@ -40,6 +40,7 @@ export interface CreateWorklistDto {
   processId: number;
   receivedDate: string;
   dateOfService?: string;
+  dateOfServiceTo?: string;
   numberOfCharts?: number;
 }
 

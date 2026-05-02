@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -10,8 +10,9 @@ import {
   Save,
 } from 'lucide-react';
 import { getChart, updateChart, getActiveTimer, type UpdateChartDto } from '@/api/charts';
+import { getWorklist } from '@/api/worklists';
 import { listUsers } from '@/api/users';
-import type { AiEncounterResult, Chart, Priority, UploadedDocument } from '@/api/types';
+import type { AiEncounterResult, Chart, ChartStatus, Priority, UploadedDocument } from '@/api/types';
 import { useAuth } from '@/auth/store';
 import { Button } from '@/components/ui/Button';
 import { HeaderCard } from './chart-detail/HeaderCard';
@@ -144,6 +145,30 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
 
   const cfg = useFieldConfig(chart);
 
+  // Fetch the parent worklist so we can clamp the chart's Date of Service to
+  // the service-date range chosen at worklist creation, and pre-fill the
+  // field from the range start when the chart has none yet.
+  const worklistQ = useQuery({
+    queryKey: ['worklist', chart.worklistId],
+    queryFn: () => getWorklist(chart.worklistId),
+    enabled: !!chart.worklistId,
+  });
+  const dosMin = worklistQ.data?.dateOfService ?? undefined;
+  const dosMax = worklistQ.data?.dateOfServiceTo ?? worklistQ.data?.dateOfService ?? undefined;
+
+  // Seed the Date of Service draft from the worklist's range start once the
+  // worklist data lands — but only if the chart had no DoS persisted and the
+  // user hasn't typed anything yet. Run at most once per chart.
+  const dosSeededRef = useRef(false);
+  useEffect(() => {
+    if (dosSeededRef.current) return;
+    if (chart.dateOfService) return;
+    if (!worklistQ.data?.dateOfService) return;
+    if (draft.dateOfService) return;
+    rawUpdate('dateOfService', worklistQ.data.dateOfService);
+    dosSeededRef.current = true;
+  }, [chart.dateOfService, worklistQ.data?.dateOfService, draft.dateOfService, rawUpdate]);
+
   // Allocation pickers in the Processing Info section need real user lists.
   const codersQ = useQuery({
     queryKey: ['users', 'coders'],
@@ -182,10 +207,21 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     return missing;
   }
 
+  // Map the draft's display label back to the ChartStatus enum the API expects.
+  const chartStatusForApi: ChartStatus | undefined =
+    draft.chartStatus === 'Complete'
+      ? 'COMPLETE'
+      : draft.chartStatus === 'Incomplete'
+      ? 'INCOMPLETE'
+      : draft.chartStatus === 'Open'
+      ? 'OPEN'
+      : undefined;
+
   const saveMut = useMutation({
     mutationFn: () => {
       const payload: UpdateChartDto = {
         priority: (draft.priority || chart.priority) as Priority,
+        chartStatus: chartStatusForApi,
         primaryDiagnosis: draft.primaryDiagnosis || undefined,
         emLevel: draft.em || undefined,
         coderCommentsToClient: draft.coderComments || undefined,
@@ -272,6 +308,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
           cfg={cfg}
           customValues={customValues}
           updateCustomValue={updateCustomValue}
+          dosMin={dosMin}
+          dosMax={dosMax}
         />
         <ProcessingInfoSection
           draft={draft}

@@ -1,8 +1,31 @@
+import { useState } from 'react';
 import { CollapsibleCard } from '@/components/ui/Card';
+import { Toast } from '@/components/ui/Primitives';
 import { FormField, SkeletonGrid } from './shared';
 import { CustomFieldsRenderer } from './CustomFieldsRenderer';
 import type { FormDraft, CustomFieldValues } from './formState';
 import type { FieldConfig } from './useFieldConfig';
+
+/**
+ * Enforce admit ≤ dateOfService ≤ discharge. Returns a user-facing message
+ * naming which field needs to be greater, or null if all populated values
+ * are in order. Empty strings ("") are skipped — only populated values are
+ * compared. ISO `YYYY-MM-DD` strings sort lexically the same as by date.
+ */
+function validateDateOrder(d: {
+  admitDate: string;
+  dateOfService: string;
+  dischargeDate: string;
+}): string | null {
+  const { admitDate: a, dateOfService: dos, dischargeDate: dd } = d;
+  if (a && dos && a > dos)
+    return 'Admit date must be on or before Date of Service — Date of Service should be greater.';
+  if (dos && dd && dos > dd)
+    return 'Date of Service must be on or before Discharge date — Discharge date should be greater.';
+  if (a && dd && a > dd)
+    return 'Admit date must be on or before Discharge date — Discharge date should be greater.';
+  return null;
+}
 
 interface Props {
   draft: FormDraft;
@@ -12,6 +35,9 @@ interface Props {
   cfg: FieldConfig;
   customValues: CustomFieldValues;
   updateCustomValue: (id: number, v: unknown) => void;
+  /** Clamp Date of Service to the parent worklist's service-date range. */
+  dosMin?: string;
+  dosMax?: string;
 }
 
 export function ChartInfoSection({
@@ -22,8 +48,32 @@ export function ChartInfoSection({
   cfg,
   customValues,
   updateCustomValue,
+  dosMin,
+  dosMax,
 }: Props) {
   const dim = isAuditor ? 'opacity-50 pointer-events-none grayscale' : readOnly ? 'pointer-events-none' : '';
+  const [orderAlert, setOrderAlert] = useState<string | null>(null);
+
+  function handleDateChange(
+    field: 'admitDate' | 'dateOfService' | 'dischargeDate',
+    v: string,
+  ) {
+    // Validate against the would-be next state. If it would break the order,
+    // reject the value (don't call update) so the picker re-renders with the
+    // previous one and the user sees a top-right toast naming the issue.
+    const next = {
+      admitDate: draft.admitDate,
+      dateOfService: draft.dateOfService,
+      dischargeDate: draft.dischargeDate,
+      [field]: v,
+    };
+    const msg = validateDateOrder(next);
+    if (msg) {
+      setOrderAlert(msg);
+      return;
+    }
+    update(field, v);
+  }
 
   // Until the per-combo config arrives, render a skeleton instead of flashing
   // every field as visible/optional and then re-arranging once data loads.
@@ -81,8 +131,10 @@ export function ChartInfoSection({
               type="date"
               required={required('dos')}
               value={draft.dateOfService}
-              onChange={(v) => update('dateOfService', v)}
+              onChange={(v) => handleDateChange('dateOfService', v)}
               readOnly={readOnly}
+              min={dosMin}
+              max={dosMax}
             />
           )}
         </div>
@@ -96,7 +148,7 @@ export function ChartInfoSection({
                 type="date"
                 required={required('admitDate')}
                 value={draft.admitDate}
-                onChange={(v) => update('admitDate', v)}
+                onChange={(v) => handleDateChange('admitDate', v)}
                 readOnly={readOnly}
               />
             )}
@@ -106,7 +158,7 @@ export function ChartInfoSection({
                 type="date"
                 required={required('dischargeDate')}
                 value={draft.dischargeDate}
-                onChange={(v) => update('dischargeDate', v)}
+                onChange={(v) => handleDateChange('dischargeDate', v)}
                 readOnly={readOnly}
               />
             )}
@@ -246,6 +298,13 @@ export function ChartInfoSection({
           readOnly={readOnly}
         />
       </div>
+
+      <Toast
+        open={!!orderAlert}
+        message={orderAlert ?? ''}
+        variant="warn"
+        onClose={() => setOrderAlert(null)}
+      />
     </CollapsibleCard>
   );
 }

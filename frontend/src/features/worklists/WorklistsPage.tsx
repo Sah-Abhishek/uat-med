@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import {
   listWorklists,
@@ -14,7 +14,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { IllustrationStatCard } from '@/components/ui/StatCards';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, FancySelect, DatePicker } from '@/components/ui/Field';
+import { Input, Label, FancySelect, DatePicker, RangeDatePicker } from '@/components/ui/Field';
 import {
   listClients,
   listLocations,
@@ -29,10 +29,11 @@ import { Plus, Filter as FilterIcon, Loader2, ChevronsUpDown } from 'lucide-reac
 
 export function WorklistsPage() {
   const canCreate = useCan('worklist.create');
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [modalOpen, setModalOpen] = useState(false);
   const [filters] = useState<WorklistListParams>({});
-  const pageSize = 20;
 
   const summary = useQuery({
     queryKey: ['worklists', 'summary'],
@@ -40,7 +41,7 @@ export function WorklistsPage() {
   });
 
   const list = useQuery({
-    queryKey: ['worklists', { page, filters }],
+    queryKey: ['worklists', { page, pageSize, filters }],
     queryFn: () =>
       listWorklists({
         ...filters,
@@ -66,16 +67,19 @@ export function WorklistsPage() {
           variant="open"
           value={summary.data?.open ?? 0}
           label="Open"
+          loading={summary.isPending}
         />
         <IllustrationStatCard
           variant="in-progress"
           value={summary.data?.inProgress ?? 0}
           label="In Progress"
+          loading={summary.isPending}
         />
         <IllustrationStatCard
           variant="closed"
           value={summary.data?.closed ?? 0}
           label="Closed"
+          loading={summary.isPending}
         />
       </div>
 
@@ -137,11 +141,24 @@ export function WorklistsPage() {
                     ? (wl.closedCharts / wl.totalCharts) * 100
                     : 0;
                   return (
-                    <tr key={wl.id} className="group hover:bg-surface-sunken/40 transition">
+                    <tr
+                      key={wl.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => navigate(`/worklists/${wl.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(`/worklists/${wl.id}`);
+                        }
+                      }}
+                      className="group cursor-pointer hover:bg-surface-sunken/40 transition focus:outline-none focus-visible:bg-surface-sunken/40 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset"
+                    >
                       <td className="table-cell font-bold">
                         <Link
                           to={`/worklists/${wl.id}`}
-                          className="text-ink hover:text-primary transition"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-ink group-hover:text-primary transition"
                         >
                           {wl.worklistNumber}
                         </Link>
@@ -176,7 +193,17 @@ export function WorklistsPage() {
           </table>
         </div>
 
-        <Pagination page={page} pageCount={totalPages} onPageChange={setPage} />
+        <Pagination
+          page={page}
+          pageCount={totalPages}
+          onPageChange={setPage}
+          pageSize={pageSize}
+          total={list.data?.total}
+          onPageSizeChange={(n) => {
+            setPageSize(n);
+            setPage(1);
+          }}
+        />
       </Card>
 
       <AddVolumeModal open={modalOpen} onClose={() => setModalOpen(false)} />
@@ -304,6 +331,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
               value={watch('receivedDate')}
               onChange={(v) => setValue('receivedDate', v, { shouldValidate: true })}
               placeholder="Select received date"
+              max={new Date().toISOString().slice(0, 10)}
             />
             {errors.receivedDate && (
               <p className="mt-1 text-xs text-danger">{errors.receivedDate.message}</p>
@@ -397,10 +425,17 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
           <div>
             <Label>Date of service</Label>
             <input type="hidden" {...register('dateOfService')} />
-            <DatePicker
-              value={watch('dateOfService')}
-              onChange={(v) => setValue('dateOfService', v)}
-              placeholder="Optional"
+            <input type="hidden" {...register('dateOfServiceTo')} />
+            <RangeDatePicker
+              value={{
+                from: watch('dateOfService') ?? null,
+                to: watch('dateOfServiceTo') ?? null,
+              }}
+              onChange={({ from, to }) => {
+                setValue('dateOfService', from ?? undefined);
+                setValue('dateOfServiceTo', to ?? undefined);
+              }}
+              placeholder="Optional — pick a service-date range"
             />
           </div>
           <div>

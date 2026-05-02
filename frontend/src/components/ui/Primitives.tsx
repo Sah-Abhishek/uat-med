@@ -1,6 +1,7 @@
-import { useEffect, type ReactNode, type HTMLAttributes } from 'react';
-import { X, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
-import { cn, initials } from '@/lib/utils';
+import { useEffect, useRef, useState, type ReactNode, type HTMLAttributes } from 'react';
+import { createPortal } from 'react-dom';
+import { X, ChevronLeft, ChevronRight, ChevronDown, Check, AlertCircle, CheckCircle2, Info } from 'lucide-react';
+import { cn, initials, formatNumber } from '@/lib/utils';
 import { Button } from './Button';
 export { PillBadge } from './Chip';
 
@@ -21,10 +22,18 @@ export function Modal({ open, onClose, title, subtitle, size = 'md', children }:
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
+    // The app's <main> is the scroll container (Layout uses h-screen on the
+    // outer flex row + overflow-y-auto on <main>), not <body>. Lock both, so
+    // the page behind the modal can't scroll while it's open.
+    const mainEl = document.querySelector('main') as HTMLElement | null;
+    const prevMain = mainEl?.style.overflow ?? '';
+    const prevBody = document.body.style.overflow;
+    if (mainEl) mainEl.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
+      if (mainEl) mainEl.style.overflow = prevMain;
+      document.body.style.overflow = prevBody;
     };
   }, [open, onClose]);
 
@@ -47,11 +56,12 @@ export function Modal({ open, onClose, title, subtitle, size = 'md', children }:
       <div
         className={cn(
           'relative w-full bg-surface rounded-[20px] shadow-pop dark:shadow-pop-dark overflow-hidden',
+          'flex flex-col max-h-[calc(100vh-2rem)]',
           widthClass,
         )}
       >
         {(title || subtitle) && (
-          <div className="flex items-start justify-between px-6 pt-6 pb-2">
+          <div className="flex items-start justify-between px-6 pt-6 pb-2 shrink-0">
             <div className="min-w-0">
               {title && <h3 className="text-lg font-bold text-ink">{title}</h3>}
               {subtitle && <p className="text-xs text-ink-muted mt-1">{subtitle}</p>}
@@ -65,7 +75,7 @@ export function Modal({ open, onClose, title, subtitle, size = 'md', children }:
             </button>
           </div>
         )}
-        <div className="px-6 pb-6">{children}</div>
+        <div className="px-6 pb-6 overflow-y-auto">{children}</div>
       </div>
     </div>
   );
@@ -133,9 +143,25 @@ interface PaginationProps {
   page: number;
   pageCount: number;
   onPageChange: (p: number) => void;
+  pageSize?: number;
+  total?: number;
+  onPageSizeChange?: (n: number) => void;
+  pageSizeOptions?: number[];
 }
-export function Pagination({ page, pageCount, onPageChange }: PaginationProps) {
-  if (pageCount <= 1) return null;
+export function Pagination({
+  page,
+  pageCount,
+  onPageChange,
+  pageSize,
+  total,
+  onPageSizeChange,
+  pageSizeOptions = [10, 20, 50, 100],
+}: PaginationProps) {
+  const showSizeSelector = pageSize !== undefined && onPageSizeChange !== undefined;
+  const showRange =
+    pageSize !== undefined && total !== undefined && total > 0;
+
+  if (pageCount <= 1 && !showSizeSelector && !showRange) return null;
 
   const pages: Array<number | '…'> = [];
   const windowSize = 1;
@@ -151,42 +177,170 @@ export function Pagination({ page, pageCount, onPageChange }: PaginationProps) {
     }
   }
 
+  const rangeStart = showRange ? (page - 1) * pageSize! + 1 : 0;
+  const rangeEnd = showRange ? Math.min(page * pageSize!, total!) : 0;
+
   return (
-    <div className="flex items-center justify-center gap-1 py-4">
-      <button
-        onClick={() => onPageChange(Math.max(1, page - 1))}
-        disabled={page === 1}
-        className="w-8 h-8 rounded-full flex items-center justify-center text-ink-muted hover:bg-surface-sunken disabled:opacity-30 transition"
-      >
-        <ChevronLeft className="w-4 h-4" />
-      </button>
-      {pages.map((p, i) =>
-        p === '…' ? (
-          <span key={`e${i}`} className="px-2 text-ink-subtle">
-            …
-          </span>
-        ) : (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-line">
+      <div className="text-xs text-ink-muted min-w-[120px]">
+        {showRange && (
+          <>
+            Showing{' '}
+            <span className="font-semibold text-ink">
+              {formatNumber(rangeStart)}–{formatNumber(rangeEnd)}
+            </span>{' '}
+            of <span className="font-semibold text-ink">{formatNumber(total!)}</span>
+          </>
+        )}
+      </div>
+
+      {pageCount > 1 ? (
+        <div className="flex items-center gap-1">
           <button
-            key={p}
-            onClick={() => onPageChange(p)}
-            className={cn(
-              'w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition',
-              p === page
-                ? 'bg-primary text-primary-ink'
-                : 'text-ink-muted hover:bg-surface-sunken',
-            )}
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+            disabled={page === 1}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-ink-muted hover:bg-surface-sunken disabled:opacity-30 transition"
+            aria-label="Previous page"
           >
-            {p}
+            <ChevronLeft className="w-4 h-4" />
           </button>
-        ),
+          {pages.map((p, i) =>
+            p === '…' ? (
+              <span key={`e${i}`} className="px-2 text-ink-subtle">
+                …
+              </span>
+            ) : (
+              <button
+                key={p}
+                onClick={() => onPageChange(p)}
+                aria-current={p === page ? 'page' : undefined}
+                className={cn(
+                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition',
+                  p === page
+                    ? 'bg-primary text-primary-ink'
+                    : 'text-ink-muted hover:bg-surface-sunken',
+                )}
+              >
+                {p}
+              </button>
+            ),
+          )}
+          <button
+            onClick={() => onPageChange(Math.min(pageCount, page + 1))}
+            disabled={page === pageCount}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-ink-muted hover:bg-surface-sunken disabled:opacity-30 transition"
+            aria-label="Next page"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      ) : (
+        <div />
       )}
+
+      {showSizeSelector ? (
+        <div className="flex items-center gap-2 text-xs text-ink-muted">
+          <span>Rows per page</span>
+          <PageSizeSelect
+            value={pageSize!}
+            options={pageSizeOptions}
+            onChange={onPageSizeChange!}
+          />
+        </div>
+      ) : (
+        <div className="min-w-[120px]" />
+      )}
+    </div>
+  );
+}
+
+function PageSizeSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: number;
+  options: number[];
+  onChange: (n: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
       <button
-        onClick={() => onPageChange(Math.min(pageCount, page + 1))}
-        disabled={page === pageCount}
-        className="w-8 h-8 rounded-full flex items-center justify-center text-ink-muted hover:bg-surface-sunken disabled:opacity-30 transition"
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={cn(
+          'inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-pill',
+          'bg-surface border text-xs font-semibold text-ink transition',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
+          open ? 'border-primary' : 'border-line hover:border-primary/60',
+        )}
       >
-        <ChevronRight className="w-4 h-4" />
+        <span className="tabular-nums">{value}</span>
+        <ChevronDown
+          className={cn(
+            'w-3.5 h-3.5 text-ink-muted transition-transform duration-150',
+            open && 'rotate-180',
+          )}
+        />
       </button>
+
+      {open && (
+        <ul
+          role="listbox"
+          className={cn(
+            'absolute right-0 bottom-full mb-2 z-30 min-w-[6rem]',
+            'rounded-lg bg-surface border border-line shadow-pop py-1',
+            'origin-bottom-right animate-[menu-in_120ms_ease-out]',
+          )}
+        >
+          {options.map((n) => {
+            const selected = n === value;
+            return (
+              <li key={n}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(n);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    'w-full flex items-center justify-between gap-3 px-3 py-1.5 text-xs transition',
+                    selected
+                      ? 'bg-primary-soft text-primary-ink font-semibold'
+                      : 'text-ink hover:bg-surface-sunken',
+                  )}
+                >
+                  <span className="tabular-nums">{n}</span>
+                  {selected && <Check className="w-3 h-3 shrink-0" />}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
@@ -386,5 +540,71 @@ export function DualProgressBar({
         />
       </div>
     </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TOAST — top-right pop notification, auto-dismiss
+   ═══════════════════════════════════════════════════════════ */
+type ToastVariant = 'warn' | 'danger' | 'success' | 'info';
+
+interface ToastProps {
+  open: boolean;
+  message: string;
+  variant?: ToastVariant;
+  onClose: () => void;
+  /** Auto-dismiss delay (ms). Set to 0 to require manual close. */
+  durationMs?: number;
+}
+export function Toast({ open, message, variant = 'warn', onClose, durationMs = 4000 }: ToastProps) {
+  useEffect(() => {
+    if (!open || durationMs <= 0) return;
+    const t = setTimeout(onClose, durationMs);
+    return () => clearTimeout(t);
+  }, [open, durationMs, onClose]);
+
+  if (!open || typeof document === 'undefined') return null;
+
+  const tone: Record<ToastVariant, string> = {
+    warn: 'bg-warn-soft border-warn/40',
+    danger: 'bg-danger-soft border-danger/40',
+    success: 'bg-success-soft border-success/40',
+    info: 'bg-info-soft border-info/40',
+  };
+  const iconTone: Record<ToastVariant, string> = {
+    warn: 'text-warn',
+    danger: 'text-danger',
+    success: 'text-success',
+    info: 'text-info',
+  };
+  const Icon = {
+    warn: AlertCircle,
+    danger: AlertCircle,
+    success: CheckCircle2,
+    info: Info,
+  }[variant];
+
+  return createPortal(
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        'fixed top-6 right-6 z-[200] max-w-sm flex items-start gap-3 px-4 py-3',
+        'rounded-card border shadow-pop animate-[toast-in_180ms_ease-out]',
+        tone[variant],
+      )}
+    >
+      <Icon className={cn('w-5 h-5 mt-0.5 shrink-0', iconTone[variant])} />
+      <p className="text-sm font-medium leading-relaxed flex-1 text-ink">{message}</p>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Dismiss"
+        className="text-ink-muted hover:text-ink shrink-0"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>,
+    document.body,
   );
 }

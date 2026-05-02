@@ -89,18 +89,21 @@ export function DashboardPage() {
                 value={milestones.data?.inProgress ?? 0}
                 label="In Progress"
                 icon={<FileInput className="w-4 h-4" />}
+                loading={milestones.isPending}
               />
               <TintedStatCard
                 tint="indigo"
                 value={milestones.data?.readyToCode ?? 0}
                 label="Ready to Code"
                 icon={<FileClock className="w-4 h-4" />}
+                loading={milestones.isPending}
               />
               <TintedStatCard
                 tint="teal"
                 value={milestones.data?.readyToAllocate ?? 0}
                 label="Ready to Allocate"
                 icon={<FileCheck2 className="w-4 h-4" />}
+                loading={milestones.isPending}
               />
             </div>
           </div>
@@ -114,12 +117,14 @@ export function DashboardPage() {
                 value={status.data?.complete ?? 0}
                 label="Complete"
                 sublabel="Today's Count"
+                loading={status.isPending}
               />
               <IllustrationStatCard
                 variant="incomplete"
                 value={status.data?.incomplete ?? 0}
                 label="Incomplete"
                 sublabel="Today's Count"
+                loading={status.isPending}
               />
             </div>
           </div>
@@ -131,10 +136,12 @@ export function DashboardPage() {
               <CoralPillStat
                 value={`${formatNumber(unallocated.data?.worklists.unallocated ?? 0)} of ${formatNumber(unallocated.data?.worklists.total ?? 0)}`}
                 label="Worklists"
+                loading={unallocated.isPending}
               />
               <CoralPillStat
                 value={`${formatNumber(unallocated.data?.charts.unallocated ?? 0)} of ${formatNumber(unallocated.data?.charts.total ?? 0)}`}
                 label="Charts"
+                loading={unallocated.isPending}
               />
             </div>
           </div>
@@ -142,6 +149,7 @@ export function DashboardPage() {
       ) : (
         <SelfOnlyTopRow
           data={self.data}
+          loading={self.isPending}
         />
       )}
 
@@ -222,18 +230,18 @@ export function DashboardPage() {
 }
 
 /* Coder / Auditor — just their personal queue */
-function SelfOnlyTopRow({ data }: { data: ReturnType<typeof useQuery>['data'] extends never ? never : import('@/api/types').DashboardSelf | undefined }) {
+function SelfOnlyTopRow({ data, loading }: { data: ReturnType<typeof useQuery>['data'] extends never ? never : import('@/api/types').DashboardSelf | undefined; loading?: boolean }) {
   const d = data;
   return (
     <div>
       <SectionLabel tone="primary">Your queue</SectionLabel>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <TintedStatCard tint="indigo" value={d?.readyToCode ?? 0} label="Ready to code" icon={<FileClock className="w-4 h-4" />} />
-        <TintedStatCard tint="mint" value={d?.codingDoneToday ?? 0} label="Coding done today" icon={<FileCheck2 className="w-4 h-4" />} />
-        <TintedStatCard tint="sky" value={d?.readyToAudit ?? 0} label="Ready to audit" icon={<FileSearch className="w-4 h-4" />} />
-        <TintedStatCard tint="mint" value={d?.auditDoneToday ?? 0} label="Audit done today" icon={<FileCheck2 className="w-4 h-4" />} />
-        <TintedStatCard tint="mint" value={d?.completeToday ?? 0} label="Complete today" icon={<FileCheck2 className="w-4 h-4" />} />
-        <TintedStatCard tint="butter" value={d?.incompleteToday ?? 0} label="Incomplete today" icon={<FileClock className="w-4 h-4" />} />
+        <TintedStatCard tint="indigo" value={d?.readyToCode ?? 0} label="Ready to code" icon={<FileClock className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="mint" value={d?.codingDoneToday ?? 0} label="Coding done today" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="sky" value={d?.readyToAudit ?? 0} label="Ready to audit" icon={<FileSearch className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="mint" value={d?.auditDoneToday ?? 0} label="Audit done today" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="mint" value={d?.completeToday ?? 0} label="Complete today" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="butter" value={d?.incompleteToday ?? 0} label="Incomplete today" icon={<FileClock className="w-4 h-4" />} loading={loading} />
       </div>
     </div>
   );

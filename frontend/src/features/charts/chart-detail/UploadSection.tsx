@@ -77,7 +77,7 @@ function formatSize(b: number) {
 function fileTypeLabel(type: string) {
   if (type === 'application/pdf') return { label: 'PDF', tone: 'text-danger bg-danger-soft' };
   if (type.includes('word') || type.includes('doc')) return { label: 'DOC', tone: 'text-info bg-info-soft' };
-  if (type.startsWith('image/')) return { label: 'IMG', tone: 'text-primary-ink bg-primary-soft' };
+  if (type.startsWith('image/')) return { label: 'IMG', tone: 'text-primary-ink dark:text-primary bg-primary-soft' };
   return { label: 'FILE', tone: 'text-ink-muted bg-surface-sunken' };
 }
 

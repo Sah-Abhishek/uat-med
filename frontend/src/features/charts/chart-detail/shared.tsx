@@ -53,6 +53,8 @@ interface FormFieldProps {
   readOnly?: boolean;
   placeholder?: string;
   aiTag?: boolean;
+  min?: string;
+  max?: string;
 }
 
 export function FormField({
@@ -65,6 +67,8 @@ export function FormField({
   readOnly,
   placeholder,
   aiTag,
+  min,
+  max,
 }: FormFieldProps) {
   const opts =
     options?.map((o) => (typeof o === 'string' ? { value: o, label: o } : o)) ?? [];
@@ -77,7 +81,7 @@ export function FormField({
           {required && <span className="text-danger"> *</span>}
         </Label>
         {aiTag && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary-ink bg-primary-soft px-1.5 py-0.5 rounded-pill">
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary-ink dark:text-primary bg-primary-soft px-1.5 py-0.5 rounded-pill">
             <Sparkles className="w-2.5 h-2.5" />
             AI Generated
           </span>
@@ -97,6 +101,8 @@ export function FormField({
           onChange={(v) => onChange?.(v)}
           placeholder={placeholder ?? 'Select date'}
           disabled={readOnly}
+          min={min}
+          max={max}
         />
       ) : (
         <Input
@@ -205,7 +211,7 @@ export function MultiSelect({
             value.map((v) => (
               <span
                 key={v}
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-ink bg-primary-soft px-2 py-0.5 rounded-pill"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-ink dark:text-primary bg-primary-soft px-2 py-0.5 rounded-pill"
               >
                 {v}
                 {!readOnly && (
@@ -216,7 +222,7 @@ export function MultiSelect({
                       e.stopPropagation();
                       remove(v);
                     }}
-                    className="text-primary-ink/70 hover:text-primary-ink leading-none cursor-pointer"
+                    className="text-primary-ink/70 hover:text-primary-ink dark:text-primary/70 dark:hover:text-primary leading-none cursor-pointer"
                   >
                     <XIcon className="w-2.5 h-2.5" />
                   </span>
