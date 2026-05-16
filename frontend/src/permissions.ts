@@ -15,6 +15,9 @@ export const PERMISSIONS = {
   'config.edit': ['TEAMLEAD'],
   'dashboard.team': ['TEAMLEAD', 'MANAGER'],
   'reports.run': ['TEAMLEAD', 'MANAGER'],
+  'qa.view': ['TEAMLEAD', 'MANAGER'],
+  'coderRules.manage': ['TEAMLEAD', 'MANAGER'],
+  'admin.codeDecisions.view': ['TEAMLEAD', 'MANAGER'],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

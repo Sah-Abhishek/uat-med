@@ -239,3 +239,61 @@ export const updateHccField = (id: number, dto: Partial<HccFieldDef>) =>
 
 export const deleteHccField = (id: number) =>
   del<{ status: string }>(`/configurations/hcc/fields/${id}`);
+
+/* ── Code Review Reasons ───────────────────────────────── */
+
+export type CodeReviewType = 'PRIMARY' | 'SECONDARY' | 'PROCEDURE' | 'EM_LEVEL' | 'MODIFIER';
+export type CodeReviewAction = 'REJECT' | 'EDIT';
+
+export const CODE_REVIEW_TYPES: CodeReviewType[] = ['PRIMARY', 'SECONDARY', 'PROCEDURE', 'EM_LEVEL', 'MODIFIER'];
+export const CODE_REVIEW_ACTIONS: CodeReviewAction[] = ['REJECT', 'EDIT'];
+
+export const CODE_REVIEW_TYPE_LABEL: Record<CodeReviewType, string> = {
+  PRIMARY: 'Primary Diagnosis',
+  SECONDARY: 'Secondary Diagnosis',
+  PROCEDURE: 'CPT / Procedures',
+  EM_LEVEL: 'ED/EM Level',
+  MODIFIER: 'Modifier',
+};
+
+export const CODE_REVIEW_ACTION_LABEL: Record<CodeReviewAction, string> = {
+  REJECT: 'Reject',
+  EDIT: 'Edit',
+};
+
+export interface CodeReviewReasonRow {
+  id: number;
+  codeType: CodeReviewType;
+  action: CodeReviewAction;
+  text: string;
+  displayOrder: number;
+  isActive: boolean;
+}
+
+export interface CodeReviewReasonInput {
+  id?: number;
+  text: string;
+  displayOrder?: number;
+  isActive?: boolean;
+}
+
+export const getCodeReviewReasons = (scope: { clientId: number; locationId: number }) =>
+  get<{ items: CodeReviewReasonRow[] }>('/configurations/code-review-reasons', scope);
+
+export const updateCodeReviewReasons = (dto: {
+  clientId: number;
+  locationId: number;
+  codeType: CodeReviewType;
+  action: CodeReviewAction;
+  reasons: CodeReviewReasonInput[];
+}) => put<{ items: CodeReviewReasonRow[] }>('/configurations/code-review-reasons', dto);
+
+export const copyCodeReviewReasons = (dto: {
+  sourceClientId: number;
+  sourceLocationId: number;
+  targetClientId: number;
+  targetLocationId: number;
+  codeTypes?: CodeReviewType[];
+  actions?: CodeReviewAction[];
+  includeDisabled?: boolean;
+}) => post<{ copied: number; skipped: number }>('/configurations/code-review-reasons/copy', dto);

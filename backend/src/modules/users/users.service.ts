@@ -104,6 +104,14 @@ export class UsersService {
     return { status: 'ACTIVE' };
   }
 
+  /** Admin-initiated password reset. Logs the user out of every active
+   *  session so they're forced onto the new credential immediately. */
+  async resetPassword(id: number, newPassword: string) {
+    const u = await this.users.findOne({ where: { id } });
+    if (!u) throw new NotFoundException();
+    return this.auth.resetPasswordFor(id, newPassword);
+  }
+
   async attendance(userId: number, month: string) {
     if (!/^\d{4}-\d{2}$/.test(month)) {
       throw new BadRequestException({ error: { code: 'bad_request', message: 'month must be YYYY-MM' } });

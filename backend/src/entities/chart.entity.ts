@@ -26,8 +26,18 @@ export class Chart {
   @Column({ type: 'varchar', length: 40, default: ChartMilestone.READY_TO_ALLOCATE }) @Index()
   milestone: ChartMilestone;
 
+  // Stamped only when `milestone` actually changes (via setMilestone). Distinct
+  // from `updated_at`, which is touched by any save (priority bumps, AI prediction
+  // writes, allocation churn) and therefore can't be used to answer "what
+  // transitioned today?".
+  @Column({ name: 'milestone_changed_at', type: 'timestamptz', nullable: true })
+  milestoneChangedAt?: Date | null;
+
   @Column({ name: 'chart_status', type: 'varchar', length: 16, default: ChartStatus.OPEN }) @Index()
   chartStatus: ChartStatus;
+
+  @Column({ name: 'chart_status_changed_at', type: 'timestamptz', nullable: true })
+  chartStatusChangedAt?: Date | null;
 
   @Column({ type: 'varchar', length: 16, default: Priority.MEDIUM }) @Index()
   priority: Priority;
@@ -56,4 +66,20 @@ export class Chart {
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' }) createdAt: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' }) updatedAt: Date;
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz' }) deletedAt?: Date;
+
+  /** Mutates `milestone` and stamps `milestoneChangedAt` only on real change. */
+  setMilestone(next: ChartMilestone): void {
+    if (this.milestone !== next) {
+      this.milestone = next;
+      this.milestoneChangedAt = new Date();
+    }
+  }
+
+  /** Mutates `chartStatus` and stamps `chartStatusChangedAt` only on real change. */
+  setChartStatus(next: ChartStatus): void {
+    if (this.chartStatus !== next) {
+      this.chartStatus = next;
+      this.chartStatusChangedAt = new Date();
+    }
+  }
 }

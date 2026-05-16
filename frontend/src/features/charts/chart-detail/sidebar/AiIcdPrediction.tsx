@@ -1,4 +1,4 @@
-import { Bot, Sparkles } from 'lucide-react';
+import { Bot, Eye, Sparkles } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
@@ -10,9 +10,12 @@ interface Props {
   hasUploadedDocs: boolean;
   timerRunning: boolean;
   onReview?: () => void;
+  /** QA / read-only viewer (TL dashboard). Bypasses the timer requirement
+   * and renames the button to reflect that nothing can be edited. */
+  readOnly?: boolean;
 }
 
-export function AiIcdPrediction({ prediction, hasUploadedDocs, timerRunning, onReview }: Props) {
+export function AiIcdPrediction({ prediction, hasUploadedDocs, timerRunning, onReview, readOnly }: Props) {
   const empty = !prediction || prediction.codes.length === 0;
 
   return (
@@ -57,12 +60,12 @@ export function AiIcdPrediction({ prediction, hasUploadedDocs, timerRunning, onR
       <Button
         size="sm"
         variant="soft"
-        leftIcon={<Sparkles className="w-3 h-3" />}
-        disabled={!timerRunning || empty}
+        leftIcon={readOnly ? <Eye className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />}
+        disabled={(!readOnly && !timerRunning) || empty}
         onClick={onReview}
         className="w-full mt-4"
       >
-        Review and Edit
+        {readOnly ? "View Coder's Decisions" : 'Review and Edit'}
       </Button>
     </Card>
   );

@@ -18,6 +18,7 @@ import { AuditArea } from '../../entities/audit-area.entity';
 import { AuditFeedbackReason } from '../../entities/audit-feedback-reason.entity';
 import { StandardFieldConfig } from '../../entities/standard-field-config.entity';
 import { CustomFieldConfig } from '../../entities/custom-field-config.entity';
+import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { CustomFieldConfig } from '../../entities/custom-field-config.entity';
       AuditFeedbackReason,
       StandardFieldConfig,
       CustomFieldConfig,
+      CodeReviewReason,
     ]),
   ],
   controllers: [ConfigurationsController],

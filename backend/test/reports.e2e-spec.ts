@@ -24,8 +24,7 @@ describe('Reports (e2e)', () => {
       getTemplate: jest.fn().mockResolvedValue({ id: 14, name: 'Weekly', columns: ['worklistNumber'], filters: {} }),
       updateTemplate: jest.fn().mockResolvedValue({ id: 14 }),
       deleteTemplate: jest.fn().mockResolvedValue({ status: 'deleted' }),
-      startExport: jest.fn().mockReturnValue({ taskId: 'bull-rpt-1', status: 'queued' }),
-      exportStatus: jest.fn().mockReturnValue({ taskId: 'bull-rpt-1', status: 'done', downloadUrl: 'https://example.invalid/x.xlsx' }),
+      exportToExcel: jest.fn().mockResolvedValue(Buffer.from('PK')),
     };
     const built = await buildTestApp({ controllers: [ReportsController], providers: [{ provide: ReportsService, useValue: svc }] });
     app = built.app; moduleRef = built.moduleRef;
@@ -72,15 +71,12 @@ describe('Reports (e2e)', () => {
     const res = await request(app.getHttpServer()).delete('/api/v1/reports/templates/14').set(bearer(asManager(moduleRef)));
     expect(res.status).toBe(200);
   });
-  it('TC-RPT-009: POST /reports/export returns 202', async () => {
+  it('TC-RPT-009: POST /reports/export.xlsx streams an xlsx attachment', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/v1/reports/export').set(bearer(asManager(moduleRef)))
-      .send({ columns: ['worklistNumber'], format: 'xlsx' });
-    expect(res.status).toBe(202);
-  });
-  it('TC-RPT-010: GET /reports/export/:taskId', async () => {
-    const res = await request(app.getHttpServer()).get('/api/v1/reports/export/bull-rpt-1').set(bearer(asManager(moduleRef)));
+      .post('/api/v1/reports/export.xlsx').set(bearer(asManager(moduleRef)))
+      .send({ columns: ['worklistNumber'] });
     expect(res.status).toBe(200);
-    expect(res.body.downloadUrl).toContain('https://');
+    expect(res.headers['content-type']).toContain('spreadsheetml');
+    expect(res.headers['content-disposition']).toContain('attachment');
   });
 });

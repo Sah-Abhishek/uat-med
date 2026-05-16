@@ -28,10 +28,12 @@ import {
   Avatar,
 } from '@/components/ui/Primitives';
 import {
+  AiStatusChip,
   ChartStatusChip,
   MilestoneChip,
   PriorityChip,
 } from '@/components/ui/Chip';
+import { deriveAiStatus } from '@/api/types';
 import { useAuth } from '@/auth/store';
 import { can } from '@/permissions';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
@@ -51,7 +53,8 @@ const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
   { key: 'HIGH', label: 'High' },
   { key: 'MEDIUM', label: 'Medium' },
   { key: 'LOW', label: 'Low' },
-  { key: 'DONE', label: 'Done' },
+  // Stored as FINALIZED in the DB; rendered as "Done" everywhere in the UI.
+  { key: 'FINALIZED', label: 'Done' },
 ];
 
 export function ChartsPage() {
@@ -117,7 +120,7 @@ export function ChartsPage() {
     ...t,
     count:
       t.key === 'ALL'
-        ? (pc ? pc.critical + pc.high + pc.medium + pc.low + pc.done : undefined)
+        ? (pc ? pc.critical + pc.high + pc.medium + pc.low + pc.finalized : undefined)
         : pc?.[t.key.toLowerCase() as keyof typeof pc],
   }));
 
@@ -131,11 +134,21 @@ export function ChartsPage() {
       {summary.data && (
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <SummaryTile label="Ready to Code" value={summary.data.milestones.readyToCode} tone="sky" />
-          <SummaryTile label="Coding Done" value={summary.data.milestones.codingDone} tone="mint" />
+          <SummaryTile label="Coding Done Today" value={summary.data.milestones.codingDoneToday} tone="mint" />
           <SummaryTile label="Ready to Audit" value={summary.data.milestones.readyToAudit} tone="indigo" />
-          <SummaryTile label="Audit Done" value={summary.data.milestones.auditDone} tone="teal" />
+          <SummaryTile label="Audit Done Today" value={summary.data.milestones.auditDoneToday} tone="teal" />
           <SummaryTile label="Complete Today" value={summary.data.statusToday.complete} tone="mint" />
           <SummaryTile label="Incomplete Today" value={summary.data.statusToday.incomplete} tone="coral" />
+        </div>
+      )}
+
+      {/* AI pipeline status tiles — counts are mutually exclusive per chart. */}
+      {summary.data?.aiStatusCounts && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <SummaryTile label="AI Queued" value={summary.data.aiStatusCounts.queued} tone="sky" />
+          <SummaryTile label="AI Processing" value={summary.data.aiStatusCounts.processing} tone="butter" />
+          <SummaryTile label="AI Done" value={summary.data.aiStatusCounts.done} tone="mint" />
+          <SummaryTile label="AI Errored" value={summary.data.aiStatusCounts.errored} tone="coral" />
         </div>
       )}
 
@@ -213,6 +226,7 @@ export function ChartsPage() {
                 <HeaderCell sortable>Priority</HeaderCell>
                 <HeaderCell sortable>Milestone</HeaderCell>
                 <HeaderCell sortable>Status</HeaderCell>
+                <HeaderCell>AI</HeaderCell>
                 <HeaderCell>Coder</HeaderCell>
                 <HeaderCell>Auditor</HeaderCell>
                 <HeaderCell sortable>Date of service</HeaderCell>
@@ -245,6 +259,9 @@ export function ChartsPage() {
                       <div className="h-5 w-16 rounded-pill bg-surface-sunken animate-pulse" />
                     </td>
                     <td className="table-cell">
+                      <div className="h-5 w-20 rounded-pill bg-surface-sunken animate-pulse" />
+                    </td>
+                    <td className="table-cell">
                       <div className="w-7 h-7 rounded-full bg-surface-sunken animate-pulse" />
                     </td>
                     <td className="table-cell">
@@ -260,7 +277,7 @@ export function ChartsPage() {
                 ))
               ) : list.data?.items.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-20 text-center text-sm text-ink-muted">
+                  <td colSpan={12} className="py-20 text-center text-sm text-ink-muted">
                     No charts match the current filters.
                   </td>
                 </tr>
@@ -289,6 +306,7 @@ export function ChartsPage() {
                     <td className="table-cell"><PriorityChip priority={c.priority} /></td>
                     <td className="table-cell"><MilestoneChip milestone={c.milestone} /></td>
                     <td className="table-cell"><ChartStatusChip status={c.chartStatus} /></td>
+                    <td className="table-cell"><AiStatusChip status={deriveAiStatus(c.customFields)} /></td>
                     <td className="table-cell">
                       {c.allocatedCoderId ? <Avatar name={`U ${c.allocatedCoderId}`} size="sm" /> : <span className="text-ink-subtle text-xs">—</span>}
                     </td>

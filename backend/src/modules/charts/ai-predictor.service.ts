@@ -94,16 +94,32 @@ export interface AiEncounterResult {
   physicianQueries?: AiPhysicianQuery[];
 }
 
+export interface EncounterStartResult {
+  encounterId: string;
+  taskId: string;
+  reportIds: string[];
+}
+
+export type EncounterRunStatus = 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE';
+
+export interface EncounterStatus {
+  status: EncounterRunStatus;
+  error?: string;
+}
+
 /**
  * Talks to the ICD Predictor Gateway over HTTPS.
  *
- * Implements only the multi-document Encounter flow described in
- * ICD_Predictor_Postman_Guide.pdf §B:
- *   B1 POST /api/encounters
- *   B2 POST /api/upload/batch
- *   B3 POST /api/encounters/{id}/run
- *   B4 GET  /api/encounters/{id}/status/{task_id}  (polled)
- *   B5 GET  /api/encounters/{id}
+ * Implements the multi-document Encounter flow described in
+ * ICD_Predictor_Postman_Guide.pdf §B as three independent steps so the
+ * caller can move polling out of a long-held HTTP request:
+ *   startEncounter()    → B1 POST /api/encounters
+ *                         B2 POST /api/upload/batch
+ *                         B3 POST /api/encounters/{id}/run
+ *   getEncounterStatus()→ B4 GET  /api/encounters/{id}/status/{task_id}
+ *   finalizeEncounter() → B5 GET  /api/encounters/{id}
+ *
+ * Each call is sub-second, so reverse proxies can no longer 504 us out.
  */
 @Injectable()
 export class AiPredictorService {
@@ -112,18 +128,14 @@ export class AiPredictorService {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly encounterType: string;
-  private readonly pollInterval: number;
-  private readonly pollTimeout: number;
 
   constructor(cfg: ConfigService) {
     this.baseUrl = (cfg.get<string>('ICD_PREDICTOR_BASE_URL') ?? '').replace(/\/$/, '');
     this.token = cfg.get<string>('ICD_PREDICTOR_TOKEN') ?? '';
     this.encounterType = cfg.get<string>('ICD_PREDICTOR_ENCOUNTER_TYPE') ?? 'OUTPATIENT';
-    this.pollInterval = Number(cfg.get<string>('ICD_PREDICTOR_POLL_INTERVAL') ?? 10000);
-    this.pollTimeout = Number(cfg.get<string>('ICD_PREDICTOR_POLL_TIMEOUT') ?? 600000);
   }
 
-  async processEncounter(files: InboundFile[], chart: EncounterChartInfo): Promise<AiEncounterResult> {
+  async startEncounter(files: InboundFile[], chart: EncounterChartInfo): Promise<EncounterStartResult> {
     if (!this.baseUrl || !this.token) {
       throw new ServiceUnavailableException('ICD Predictor gateway is not configured.');
     }
@@ -177,10 +189,34 @@ export class AiPredictorService {
     const taskId = run.task_id;
     if (!taskId) throw new ServiceUnavailableException('ICD gateway did not return a task id.');
 
-    // ── B4: poll task ───────────────────────────────────
-    await this.pollTask(`/api/encounters/${encounterId}/status/${taskId}`, taskId);
+    return { encounterId, taskId, reportIds };
+  }
 
-    // ── B5: fetch final codes ───────────────────────────
+  async getEncounterStatus(encounterId: string, taskId: string): Promise<EncounterStatus> {
+    if (!this.baseUrl || !this.token) {
+      throw new ServiceUnavailableException('ICD Predictor gateway is not configured.');
+    }
+    const data = await this.getJson<{ status?: string; error?: string; detail?: string }>(
+      `/api/encounters/${encounterId}/status/${taskId}`,
+    );
+    const raw = String(data.status ?? '').toUpperCase();
+    if (raw === 'SUCCESS' || raw === 'COMPLETE') return { status: 'SUCCESS' };
+    if (raw === 'FAILURE' || raw === 'ERROR') {
+      return { status: 'FAILURE', error: data.error ?? data.detail ?? 'unknown' };
+    }
+    if (raw === 'STARTED') return { status: 'STARTED' };
+    return { status: 'PENDING' };
+  }
+
+  async finalizeEncounter(
+    encounterId: string,
+    reportIds: string[],
+    fileCount: number,
+  ): Promise<AiEncounterResult> {
+    if (!this.baseUrl || !this.token) {
+      throw new ServiceUnavailableException('ICD Predictor gateway is not configured.');
+    }
+
     this.log.log(`[B5] fetch encounter ${encounterId}`);
     const final = await this.getJson<{
       id?: string;
@@ -231,7 +267,7 @@ export class AiPredictorService {
       encounterId,
       reportIds,
       status: final.status ?? 'COMPLETE',
-      reportCount: final.report_count ?? files.length,
+      reportCount: final.report_count ?? fileCount,
       codes,
       primary,
       secondary,
@@ -311,7 +347,30 @@ export class AiPredictorService {
     const headers = new Headers(init.headers ?? {});
     headers.set('Authorization', `Bearer ${this.token}`);
 
-    const res = await fetch(url, { ...init, headers });
+    // Cap each gateway call so a hung TCP connection can't lock up the
+    // background watcher tick or hold a request thread indefinitely.
+    // Uploads (POST /api/upload/batch) need more headroom than reads.
+    const isUpload = path.includes('/upload/');
+    const timeoutMs = isUpload ? 120_000 : 30_000;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, headers, signal: ctrl.signal });
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        throw new ServiceUnavailableException(
+          `ICD gateway ${init.method} ${path} timed out after ${timeoutMs}ms`,
+        );
+      }
+      throw new ServiceUnavailableException(
+        `ICD gateway ${init.method} ${path} network error: ${(err as Error).message}`,
+      );
+    } finally {
+      clearTimeout(t);
+    }
+
     const text = await res.text();
     if (!res.ok) {
       this.log.error(`ICD gateway ${init.method} ${path} → ${res.status}: ${text.slice(0, 300)}`);
@@ -327,27 +386,6 @@ export class AiPredictorService {
     }
   }
 
-  private async pollTask(path: string, taskId: string): Promise<void> {
-    const start = Date.now();
-    this.log.log(`[B4] poll ${taskId} every ${this.pollInterval}ms (timeout ${this.pollTimeout}ms)`);
-    // First wait, then check — matches the gateway's "STARTED → SUCCESS" cadence.
-    while (true) {
-      const elapsed = Date.now() - start;
-      if (elapsed >= this.pollTimeout) {
-        throw new ServiceUnavailableException(`ICD task ${taskId} timed out after ${Math.round(elapsed / 1000)}s`);
-      }
-      await this.sleep(this.pollInterval);
-
-      const data = await this.getJson<{ status?: string; error?: string; detail?: string }>(path);
-      const status = String(data.status ?? '').toUpperCase();
-      this.log.debug(`[B4] task ${taskId} status=${status} (${Math.round(elapsed / 1000)}s)`);
-      if (status === 'SUCCESS' || status === 'COMPLETE') return;
-      if (status === 'FAILURE' || status === 'ERROR') {
-        throw new ServiceUnavailableException(`ICD pipeline failed: ${data.error ?? data.detail ?? 'unknown'}`);
-      }
-    }
-  }
-
   private normalizeDate(raw?: string): string | undefined {
     if (!raw) return undefined;
     const s = raw.trim();
@@ -359,9 +397,6 @@ export class AiPredictorService {
     return undefined;
   }
 
-  private sleep(ms: number) {
-    return new Promise((r) => setTimeout(r, ms));
-  }
 }
 
 /* ── agent4_full feedback shaping ────────────────────────── */

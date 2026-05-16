@@ -16,6 +16,10 @@ export class CreateWorklistDto {
   @IsOptional() @IsDateString()
   dateOfService?: string;
 
+  @ApiPropertyOptional({ example: '2023-09-26', description: 'End of the date-of-service range; pair with dateOfService.' })
+  @IsOptional() @IsDateString()
+  dateOfServiceTo?: string;
+
   @ApiProperty({ example: '2023-09-27' })
   @IsDateString()
   receivedDate: string;

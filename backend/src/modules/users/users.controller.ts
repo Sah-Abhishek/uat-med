@@ -5,6 +5,7 @@ import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { MarkAttendanceDto } from './dto/attendance.dto';
+import { ResetUserPasswordDto } from './dto/reset-password.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
@@ -18,14 +19,14 @@ export class UsersController {
   constructor(private readonly svc: UsersService) {}
 
   @Get()
-  @Roles(Role.MANAGER)
+  @Roles(Role.TEAMLEAD, Role.MANAGER, Role.CODER, Role.AUDITOR)
   @ApiOperation({ summary: 'Paginated user list. Filter by status for Active/Inactive/Pending tabs.' })
   list(@Query() q: { page?: number; pageSize?: number; status?: UserStatus; role?: Role; search?: string }) {
     return this.svc.list(q);
   }
 
   @Get('stats')
-  @Roles(Role.MANAGER)
+  @Roles(Role.TEAMLEAD, Role.MANAGER, Role.CODER, Role.AUDITOR)
   @ApiOperation({ summary: 'Counts for the three user tabs.' })
   stats() {
     return this.svc.stats();
@@ -87,6 +88,14 @@ export class UsersController {
   @HttpCode(200)
   activate(@Param('id', ParseIntPipe) id: number) {
     return this.svc.activate(id);
+  }
+
+  @Post(':id/password')
+  @Roles(Role.TEAMLEAD, Role.MANAGER)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Admin resets a user\'s password and revokes their active sessions.' })
+  resetPassword(@Param('id', ParseIntPipe) id: number, @Body() dto: ResetUserPasswordDto) {
+    return this.svc.resetPassword(id, dto.newPassword);
   }
 
   @Get(':id/attendance')

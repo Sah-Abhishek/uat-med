@@ -13,6 +13,10 @@ import { UsersPage } from '@/features/users/UsersPage';
 import { UserProfilePage } from '@/features/users/UserProfilePage';
 import { ConfigurationsPage } from '@/features/configurations/ConfigurationsPage';
 import { ReportsPage } from '@/features/reports/ReportsPage';
+import { QaPage } from '@/features/qa/QaPage';
+import { CoderRulesPage } from '@/features/coder-rules/CoderRulesPage';
+import { CodeDecisionsPage } from '@/features/admin/CodeDecisionsPage';
+import { ChartDecisionsDetailPage } from '@/features/admin/ChartDecisionsDetailPage';
 import { NotFoundPage } from '@/components/NotFoundPage';
 
 export const router = createBrowserRouter([
@@ -34,6 +38,10 @@ export const router = createBrowserRouter([
           { path: 'users/:id', element: <UserProfilePage /> },
           { path: 'configurations', element: <ConfigurationsPage /> },
           { path: 'reports', element: <ReportsPage /> },
+          { path: 'qa', element: <QaPage /> },
+          { path: 'coder-rules', element: <CoderRulesPage /> },
+          { path: 'admin/code-decisions', element: <CodeDecisionsPage /> },
+          { path: 'admin/code-decisions/charts/:id', element: <ChartDecisionsDetailPage /> },
           { path: '*', element: <NotFoundPage /> },
         ],
       },

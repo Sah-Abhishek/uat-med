@@ -79,7 +79,7 @@ export function ChartInfoSection({
   // every field as visible/optional and then re-arranging once data loads.
   if (cfg.isLoading) {
     return (
-      <CollapsibleCard title="Chart Info" subtitle="All relevant chart fields" defaultOpen>
+      <CollapsibleCard title="Chart Info" subtitle="All relevant chart fields" defaultOpen={!isAuditor}>
         <div className="pt-3">
           <SkeletonGrid cols={3} count={3} />
           <SkeletonGrid cols={3} count={2} />
@@ -103,7 +103,7 @@ export function ChartInfoSection({
   const row6Visible = visible('procedureCode') || visible('subSpeciality');
 
   return (
-    <CollapsibleCard title="Chart Info" subtitle="All relevant chart fields" defaultOpen>
+    <CollapsibleCard title="Chart Info" subtitle="All relevant chart fields" defaultOpen={!isAuditor}>
       <div className={`pt-3 ${dim}`}>
         {/* Row 1 */}
         <div className="grid grid-cols-3 gap-4 mb-4">

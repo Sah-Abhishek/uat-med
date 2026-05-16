@@ -20,6 +20,10 @@ import { HccModule } from './modules/hcc/hcc.module';
 import { UsersModule } from './modules/users/users.module';
 import { ConfigurationsModule } from './modules/configurations/configurations.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { QaModule } from './modules/qa/qa.module';
+import { AiGatewayModule } from './modules/ai-gateway/ai-gateway.module';
+import { AdminModule } from './modules/admin/admin.module';
+import { CoderRulesModule } from './modules/coder-rules/coder-rules.module';
 
 @Module({
   imports: [
@@ -60,6 +64,9 @@ import { ReportsModule } from './modules/reports/reports.module';
       }]),
     }),
 
+    // AiGatewayModule is @Global() and is depended on by AuthModule
+    // (CoderRegistrationService), so register it first.
+    AiGatewayModule,
     AuthModule,
     BootstrapModule,
     DashboardModule,
@@ -69,6 +76,9 @@ import { ReportsModule } from './modules/reports/reports.module';
     UsersModule,
     ConfigurationsModule,
     ReportsModule,
+    QaModule,
+    CoderRulesModule,
+    AdminModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

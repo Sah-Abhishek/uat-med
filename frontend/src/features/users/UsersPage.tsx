@@ -168,6 +168,7 @@ export function UsersPage() {
           <div className="grid grid-cols-3 gap-3">
             <RoleCountTile
               count={codersCount.data ?? 0}
+              loading={codersCount.isPending}
               label="Active Coders"
               icon={<UserIcon className="w-4 h-4" />}
               bg="bg-tile-sky"
@@ -175,6 +176,7 @@ export function UsersPage() {
             />
             <RoleCountTile
               count={auditorsCount.data ?? 0}
+              loading={auditorsCount.isPending}
               label="Active Auditors"
               icon={<UsersIcon className="w-4 h-4" />}
               bg="bg-tile-mint"
@@ -182,6 +184,7 @@ export function UsersPage() {
             />
             <RoleCountTile
               count={managersCount.data ?? 0}
+              loading={managersCount.isPending}
               label="Active Team Leaders"
               icon={<Contact className="w-4 h-4" />}
               bg="bg-tile-butter"
@@ -193,8 +196,18 @@ export function UsersPage() {
         <div className="col-span-12 lg:col-span-5">
           <SectionLabel tone="danger">Total Users</SectionLabel>
           <div className="grid grid-cols-2 gap-3">
-            <IllustrationStatCard variant="attending" value={attending} label="Attending" />
-            <IllustrationStatCard variant="not-attending" value={notAttending} label="Not-Attending" />
+            <IllustrationStatCard
+              variant="attending"
+              value={attending}
+              label="Attending"
+              loading={stats.isPending}
+            />
+            <IllustrationStatCard
+              variant="not-attending"
+              value={notAttending}
+              label="Not-Attending"
+              loading={stats.isPending}
+            />
           </div>
         </div>
       </div>
@@ -436,21 +449,30 @@ function RoleCountTile({
   icon,
   bg,
   numberColor,
+  loading,
 }: {
   count: number;
   label: string;
   icon: React.ReactNode;
   bg: string;
   numberColor: string;
+  loading?: boolean;
 }) {
   return (
     <div className={cn('relative rounded-card p-5 min-h-[130px]', bg)}>
       <div className="absolute top-4 right-4 w-9 h-9 rounded-full bg-surface/60 flex items-center justify-center text-ink-muted">
         {icon}
       </div>
-      <p className={cn('font-bold leading-none tracking-tightish text-[40px]', numberColor)}>
-        {formatNumber(count)}
-      </p>
+      {loading ? (
+        // Skeleton: a pulsing bar that approximates the rendered number height
+        // so the tile doesn't visually flash from "0" to the real count once
+        // the query resolves.
+        <div className="h-[40px] w-20 rounded-md bg-surface/60 animate-pulse" />
+      ) : (
+        <p className={cn('font-bold leading-none tracking-tightish text-[40px]', numberColor)}>
+          {formatNumber(count)}
+        </p>
+      )}
       <p className={cn('mt-3 text-sm font-semibold', numberColor)}>{label}</p>
     </div>
   );
@@ -607,8 +629,9 @@ function PendingTable({
 function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateUserDto>({
+  const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<CreateUserDto>({
     defaultValues: { email: '', fullName: '', password: '', role: 'CODER' },
   });
 
@@ -646,11 +669,18 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
       <form
         onSubmit={handleSubmit((d) => {
           setError(null);
+          // Empty <input> values come back as '' from react-hook-form, which
+          // fails the backend IsDateString / Length validators — coerce blanks
+          // to undefined so the optional DTO fields stay truly optional.
           mutation.mutate({
             ...d,
             clientId: d.clientId ? Number(d.clientId) : undefined,
             locationId: d.locationId ? Number(d.locationId) : undefined,
             primarySpecialityId: d.primarySpecialityId ? Number(d.primarySpecialityId) : undefined,
+            employeeId: d.employeeId?.trim() || undefined,
+            designation: d.designation?.trim() || undefined,
+            dateOfBirth: d.dateOfBirth || undefined,
+            dateOfJoining: d.dateOfJoining || undefined,
           });
         })}
         className="space-y-4"
@@ -675,12 +705,46 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label required>Password</Label>
-            <Input
-              type="password"
-              placeholder="Min 12 chars"
-              error={errors.password?.message}
-              {...register('password', { required: 'Required', minLength: { value: 12, message: 'Min 12 chars' } })}
-            />
+            <div className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Min 12 chars"
+                  className="input pr-10 font-mono text-xs"
+                  {...register('password', {
+                    required: 'Required',
+                    minLength: { value: 12, message: 'Min 12 chars' },
+                  })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted hover:text-ink"
+                >
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <Button
+                type="button"
+                variant="soft"
+                size="sm"
+                leftIcon={<RefreshCw className="w-3 h-3" />}
+                onClick={() => {
+                  setValue('password', generatePassword(), { shouldValidate: true, shouldDirty: true });
+                  // Reveal the freshly-generated password so the admin can copy it
+                  // without toggling — they need to share it with the user.
+                  setShowPassword(true);
+                }}
+                title="Generate a password that meets the requirements"
+              >
+                Generate
+              </Button>
+            </div>
+            {errors.password?.message && (
+              <p className="mt-1 text-[11px] text-danger">{errors.password.message}</p>
+            )}
           </div>
           <div>
             <Label required>Role</Label>
@@ -692,9 +756,26 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
           </div>
         </div>
 
-        <div>
-          <Label>Designation</Label>
-          <Input {...register('designation')} />
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>Employee ID</Label>
+            <Input placeholder="e.g. EMP-1024" {...register('employeeId')} />
+          </div>
+          <div>
+            <Label>Designation</Label>
+            <Input placeholder="e.g. Senior Coder" {...register('designation')} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>Date of birth</Label>
+            <Input type="date" {...register('dateOfBirth')} />
+          </div>
+          <div>
+            <Label>Date of joining</Label>
+            <Input type="date" {...register('dateOfJoining')} />
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-4">

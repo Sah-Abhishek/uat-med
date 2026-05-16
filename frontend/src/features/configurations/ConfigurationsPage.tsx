@@ -28,6 +28,13 @@ import {
   createHccField,
   updateHccField,
   deleteHccField,
+  getCodeReviewReasons,
+  updateCodeReviewReasons,
+  copyCodeReviewReasons,
+  CODE_REVIEW_TYPES,
+  CODE_REVIEW_ACTIONS,
+  CODE_REVIEW_TYPE_LABEL,
+  CODE_REVIEW_ACTION_LABEL,
   type GeneralConfig,
   type SpecialitiesGeneralDto,
   type PrimarySpecialityEntry,
@@ -40,6 +47,10 @@ import {
   type ChartFieldsConfig,
   type CustomChartField,
   type CreateCustomChartFieldDto,
+  type CodeReviewType,
+  type CodeReviewAction,
+  type CodeReviewReasonRow,
+  type CodeReviewReasonInput,
 } from '@/api/configurations';
 import type { ApiErrorShape, HccFieldDef, ValidationRule } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -60,10 +71,11 @@ import {
   X,
   Check,
   Minus,
+  GripVertical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type MainTab = 'general' | 'specialities' | 'hcc';
+type MainTab = 'general' | 'specialities' | 'hcc' | 'review-reasons';
 type SpecTab = 'general' | 'feedback' | 'auditing' | 'coding' | 'chart-fields';
 
 const STANDARD_CHART_FIELDS: Array<{ key: string; label: string }> = [
@@ -105,6 +117,7 @@ export function ConfigurationsPage() {
               { key: 'general', label: 'General' },
               { key: 'specialities', label: 'Specialities' },
               { key: 'hcc', label: 'HCC' },
+              { key: 'review-reasons', label: 'Review Reasons' },
             ]}
             value={tab}
             onChange={(k) => setTab(k as MainTab)}
@@ -115,6 +128,7 @@ export function ConfigurationsPage() {
           {tab === 'general' && <GeneralTab canEdit={canEdit} />}
           {tab === 'specialities' && <SpecialitiesTab canEdit={canEdit} />}
           {tab === 'hcc' && <HccFieldsEditor canEdit={canEdit} />}
+          {tab === 'review-reasons' && <ReviewReasonsTab canEdit={canEdit} />}
         </div>
       </Card>
     </div>
@@ -2114,5 +2128,506 @@ function SaveBar({
         {saveLabel}
       </Button>
     </div>
+  );
+}
+
+/* ═════════════════ Review Reasons tab ═════════════════ */
+
+interface DraftReason {
+  id?: number;
+  text: string;
+  isActive: boolean;
+}
+
+function ReviewReasonsTab({ canEdit }: { canEdit: boolean }) {
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [locationId, setLocationId] = useState<number | null>(null);
+  const [activeType, setActiveType] = useState<CodeReviewType>(CODE_REVIEW_TYPES[0]);
+  const [activeAction, setActiveAction] = useState<CodeReviewAction>(CODE_REVIEW_ACTIONS[0]);
+  const [copyOpen, setCopyOpen] = useState(false);
+
+  return (
+    <div className="flex gap-6">
+      <ConfigScopeRail
+        canEdit={canEdit}
+        selectedClient={clientId}
+        selectedLocation={locationId}
+        onClientChange={setClientId}
+        onLocationChange={setLocationId}
+      />
+
+      <div className="flex-1 min-w-0 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-ink">Review &amp; Edit Reasons</h3>
+            <p className="text-xs text-ink-muted mt-0.5">
+              Reasons shown to coders/auditors when they Reject or Edit a code in the Review &amp; Edit modal. Lists are scoped per client &amp; location.
+            </p>
+          </div>
+          {canEdit && clientId && locationId && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCopyOpen(true)}
+            >
+              Copy from another scope…
+            </Button>
+          )}
+        </div>
+
+        {!clientId || !locationId ? (
+          <div className="border border-dashed border-line rounded-lg p-12 text-center">
+            <p className="text-sm text-ink-muted">
+              Select a client and location from the left to manage review reasons.
+            </p>
+          </div>
+        ) : (
+          <ReviewReasonsEditor
+            canEdit={canEdit}
+            clientId={clientId}
+            locationId={locationId}
+            activeType={activeType}
+            setActiveType={setActiveType}
+            activeAction={activeAction}
+            setActiveAction={setActiveAction}
+          />
+        )}
+
+        {copyOpen && clientId && locationId && (
+          <CopyReasonsModal
+            targetClientId={clientId}
+            targetLocationId={locationId}
+            onClose={() => setCopyOpen(false)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReviewReasonsEditor({
+  canEdit,
+  clientId,
+  locationId,
+  activeType,
+  setActiveType,
+  activeAction,
+  setActiveAction,
+}: {
+  canEdit: boolean;
+  clientId: number;
+  locationId: number;
+  activeType: CodeReviewType;
+  setActiveType: (t: CodeReviewType) => void;
+  activeAction: CodeReviewAction;
+  setActiveAction: (a: CodeReviewAction) => void;
+}) {
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState<DraftReason[]>([]);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Native HTML5 DnD state. `dragIdx` is the row being dragged; `overIdx`
+  // is the current hover target (drives the drop indicator). `grabbedIdx`
+  // gates `<li draggable>` so a drag only fires when the user grabs the
+  // handle — otherwise clicking the text input would start a drag and
+  // break text editing.
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+  const [grabbedIdx, setGrabbedIdx] = useState<number | null>(null);
+
+  const reasonsQ = useQuery({
+    queryKey: ['configurations', 'code-review-reasons', clientId, locationId],
+    queryFn: () => getCodeReviewReasons({ clientId, locationId }),
+  });
+
+  const allRows: CodeReviewReasonRow[] = reasonsQ.data?.items ?? [];
+
+  // Reset the local draft whenever the active cell or fetched data changes.
+  useEffect(() => {
+    const cellRows = allRows
+      .filter((r) => r.codeType === activeType && r.action === activeAction)
+      .sort((a, b) => a.displayOrder - b.displayOrder || a.id - b.id);
+    setDraft(cellRows.map((r) => ({ id: r.id, text: r.text, isActive: r.isActive })));
+    setSavedAt(null);
+    setError(null);
+  }, [activeType, activeAction, reasonsQ.data]);
+
+  const cellCount = (type: CodeReviewType, action: CodeReviewAction) =>
+    allRows.filter((r) => r.codeType === type && r.action === action && r.isActive).length;
+
+  const m = useMutation({
+    mutationFn: () =>
+      updateCodeReviewReasons({
+        clientId,
+        locationId,
+        codeType: activeType,
+        action: activeAction,
+        reasons: draft
+          .filter((r) => r.text.trim().length > 0)
+          .map<CodeReviewReasonInput>((r, i) => ({
+            id: r.id,
+            text: r.text.trim(),
+            displayOrder: i,
+            isActive: r.isActive,
+          })),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['configurations', 'code-review-reasons', clientId, locationId] });
+      setSavedAt(new Date());
+      setError(null);
+    },
+    onError: (e) => setError((e as unknown as ApiErrorShape).message ?? 'Save failed.'),
+  });
+
+  const addRow = () => setDraft((d) => [...d, { text: '', isActive: true }]);
+  const removeRow = (i: number) => setDraft((d) => d.filter((_, idx) => idx !== i));
+  const updateRow = (i: number, patch: Partial<DraftReason>) =>
+    setDraft((d) => d.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const reorder = (from: number, to: number) => {
+    if (from === to) return;
+    setDraft((d) => {
+      const next = [...d];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+  const resetDrag = () => {
+    setDragIdx(null);
+    setOverIdx(null);
+    setGrabbedIdx(null);
+  };
+
+  if (reasonsQ.isPending) return <Loader2 className="w-5 h-5 animate-spin text-ink-muted" />;
+
+  return (
+    <div className="space-y-4">
+      {/* Two-axis picker: code type × action */}
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full text-sm">
+          <thead className="bg-surface-sunken/40">
+            <tr>
+              <th className="text-left px-4 py-2 text-[11px] uppercase tracking-wide text-ink-muted font-semibold">
+                Code Type
+              </th>
+              {CODE_REVIEW_ACTIONS.map((a) => (
+                <th
+                  key={a}
+                  className="text-left px-4 py-2 text-[11px] uppercase tracking-wide text-ink-muted font-semibold"
+                >
+                  {CODE_REVIEW_ACTION_LABEL[a]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {CODE_REVIEW_TYPES.map((t) => (
+              <tr key={t} className="border-t border-line">
+                <td className="px-4 py-2 font-semibold text-ink">{CODE_REVIEW_TYPE_LABEL[t]}</td>
+                {CODE_REVIEW_ACTIONS.map((a) => {
+                  const isActive = activeType === t && activeAction === a;
+                  return (
+                    <td key={a} className="px-2 py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveType(t);
+                          setActiveAction(a);
+                        }}
+                        className={cn(
+                          'w-full text-left px-3 py-1.5 rounded-md text-xs font-medium border transition',
+                          isActive
+                            ? 'border-primary bg-primary-soft text-primary'
+                            : 'border-line bg-surface text-ink hover:bg-surface-2',
+                        )}
+                      >
+                        <span className="font-mono mr-2">{cellCount(t, a)}</span>
+                        active
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Editor for the selected cell */}
+      <Card>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-bold text-ink">
+            {CODE_REVIEW_TYPE_LABEL[activeType]} · {CODE_REVIEW_ACTION_LABEL[activeAction]}
+          </h4>
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="ghost"
+              leftIcon={<Plus className="w-3 h-3" />}
+              onClick={addRow}
+            >
+              Add reason
+            </Button>
+          )}
+        </div>
+
+        {error && (
+          <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger mb-3">{error}</div>
+        )}
+
+        {draft.length === 0 ? (
+          <div className="border border-dashed border-line rounded-lg p-8 text-center">
+            <p className="text-sm text-ink-muted">
+              No reasons configured yet. {canEdit ? 'Add one to get started.' : 'Ask a Team Lead to add some.'}
+            </p>
+          </div>
+        ) : (
+          <ul
+            className="space-y-1.5"
+            onDragOver={(e) => {
+              // Allow dropping anywhere over the list, including the gaps
+              // between rows. Without this preventDefault the drop event
+              // never fires.
+              if (dragIdx !== null) e.preventDefault();
+            }}
+          >
+            {draft.map((r, i) => {
+              const isDragging = dragIdx === i;
+              const isOver = dragIdx !== null && overIdx === i && dragIdx !== i;
+              // Drop indicator: line on the side the dragged row will land.
+              const dropAbove = isOver && (dragIdx as number) > i;
+              const dropBelow = isOver && (dragIdx as number) < i;
+              return (
+                <li
+                  key={i}
+                  draggable={canEdit && grabbedIdx === i}
+                  onDragStart={(e) => {
+                    if (!canEdit) return;
+                    setDragIdx(i);
+                    e.dataTransfer.effectAllowed = 'move';
+                    // Some browsers require setData to enable drag.
+                    e.dataTransfer.setData('text/plain', String(i));
+                  }}
+                  onDragEnter={() => {
+                    if (dragIdx === null) return;
+                    setOverIdx(i);
+                  }}
+                  onDragOver={(e) => {
+                    if (dragIdx === null) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragIdx !== null) reorder(dragIdx, i);
+                    resetDrag();
+                  }}
+                  onDragEnd={resetDrag}
+                  className={cn(
+                    'group flex items-center gap-2 rounded-lg border bg-surface px-2 py-1.5 transition',
+                    isDragging
+                      ? 'opacity-40 border-dashed border-primary/60'
+                      : 'border-line hover:border-line/80',
+                    dropAbove && 'shadow-[inset_0_2px_0_0] shadow-primary',
+                    dropBelow && 'shadow-[inset_0_-2px_0_0] shadow-primary',
+                  )}
+                >
+                  <button
+                    type="button"
+                    disabled={!canEdit}
+                    onMouseDown={() => canEdit && setGrabbedIdx(i)}
+                    onMouseUp={() => setGrabbedIdx(null)}
+                    onMouseLeave={() => setGrabbedIdx((g) => (g === i ? null : g))}
+                    aria-label="Drag to reorder"
+                    title="Drag to reorder"
+                    className={cn(
+                      'shrink-0 w-6 h-7 rounded flex items-center justify-center text-ink-muted/60 transition',
+                      canEdit
+                        ? 'cursor-grab active:cursor-grabbing hover:text-ink hover:bg-surface-sunken/60'
+                        : 'cursor-not-allowed opacity-40',
+                    )}
+                  >
+                    <GripVertical className="w-4 h-4" />
+                  </button>
+                  <Input
+                    value={r.text}
+                    disabled={!canEdit}
+                    onChange={(e) => updateRow(i, { text: e.target.value })}
+                    placeholder="Reason text…"
+                    className={cn('flex-1', !r.isActive && 'opacity-60 line-through')}
+                  />
+                  <Switch
+                    checked={r.isActive}
+                    disabled={!canEdit}
+                    onChange={(next) => updateRow(i, { isActive: next })}
+                    label={
+                      <span className="text-xs font-medium text-ink-muted">
+                        {r.isActive ? 'Active' : 'Disabled'}
+                      </span>
+                    }
+                    className="shrink-0"
+                  />
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => removeRow(i)}
+                      aria-label="Remove"
+                      className="shrink-0 w-7 h-7 rounded hover:bg-danger-soft/30 flex items-center justify-center text-ink-muted hover:text-danger transition"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {canEdit && (
+          <SaveBar
+            onRevert={() => {
+              const cellRows = allRows
+                .filter((r) => r.codeType === activeType && r.action === activeAction)
+                .sort((a, b) => a.displayOrder - b.displayOrder || a.id - b.id);
+              setDraft(cellRows.map((r) => ({ id: r.id, text: r.text, isActive: r.isActive })));
+              setSavedAt(null);
+            }}
+            onSave={() => {
+              setError(null);
+              m.mutate();
+            }}
+            saving={m.isPending}
+            savedAt={savedAt}
+            saveLabel="Save reasons"
+          />
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function CopyReasonsModal({
+  targetClientId,
+  targetLocationId,
+  onClose,
+}: {
+  targetClientId: number;
+  targetLocationId: number;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [sourceClient, setSourceClient] = useState<number | null>(null);
+  const [sourceLocation, setSourceLocation] = useState<number | null>(null);
+  const [includeDisabled, setIncludeDisabled] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<{ copied: number; skipped: number } | null>(null);
+
+  const clients = useQuery({ queryKey: ['configurations', 'clients'], queryFn: listClients });
+  const locations = useQuery({
+    queryKey: ['configurations', 'locations', sourceClient],
+    queryFn: () => listLocations(sourceClient!),
+    enabled: !!sourceClient,
+  });
+
+  const m = useMutation({
+    mutationFn: () =>
+      copyCodeReviewReasons({
+        sourceClientId: sourceClient!,
+        sourceLocationId: sourceLocation!,
+        targetClientId,
+        targetLocationId,
+        includeDisabled,
+      }),
+    onSuccess: (r) => {
+      setResult(r);
+      qc.invalidateQueries({
+        queryKey: ['configurations', 'code-review-reasons', targetClientId, targetLocationId],
+      });
+    },
+    onError: (e) => setErr((e as unknown as ApiErrorShape).message ?? 'Copy failed.'),
+  });
+
+  const isSameScope =
+    sourceClient === targetClientId && sourceLocation === targetLocationId;
+  const canCopy = !!sourceClient && !!sourceLocation && !isSameScope;
+
+  return (
+    <Modal open onClose={onClose} title="Copy review reasons" size="md">
+      <div className="space-y-3">
+        {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
+        {result && (
+          <div className="text-xs px-3 py-2 rounded bg-success-soft text-success">
+            Copied {result.copied} reason(s); skipped {result.skipped} (already present or disabled).
+          </div>
+        )}
+
+        <p className="text-xs text-ink-muted">
+          Copies the source scope's reasons into this scope. Reasons whose text already exists here
+          are skipped (idempotent — safe to re-run).
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label required>Source client</Label>
+            <Select
+              value={sourceClient ?? ''}
+              onChange={(e) => {
+                setSourceClient(e.target.value ? Number(e.target.value) : null);
+                setSourceLocation(null);
+              }}
+              placeholder="Select…"
+            >
+              {clients.data?.items.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label required>Source location</Label>
+            <Select
+              value={sourceLocation ?? ''}
+              onChange={(e) => setSourceLocation(e.target.value ? Number(e.target.value) : null)}
+              disabled={!sourceClient || locations.isPending}
+              placeholder="Select…"
+            >
+              {locations.data?.items.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </Select>
+          </div>
+        </div>
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={includeDisabled}
+            onChange={(e) => setIncludeDisabled(e.target.checked)}
+            className="accent-primary"
+          />
+          Include disabled reasons from source
+        </label>
+
+        {isSameScope && (
+          <p className="text-xs text-warn">Source and target are the same — pick a different scope.</p>
+        )}
+      </div>
+
+      <ModalFooter>
+        <Button variant="ghost" type="button" onClick={onClose}>Close</Button>
+        <Button
+          type="button"
+          loading={m.isPending}
+          disabled={!canCopy}
+          onClick={() => {
+            setErr(null);
+            setResult(null);
+            m.mutate();
+          }}
+        >
+          Copy reasons
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }

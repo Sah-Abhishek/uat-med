@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { v4 as uuid } from 'uuid';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+import * as ExcelJS from 'exceljs';
 
 import { ReportTemplate } from '../../entities/report-template.entity';
 import { Chart } from '../../entities/chart.entity';
@@ -11,36 +11,59 @@ import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { QueryReportDto } from './dto/query-report.dto';
 import { SaveTemplateDto } from './dto/save-template.dto';
 
-const FIELD_CATALOG = [
-  { key: 'worklistNumber', label: 'Worklist Number', filterable: true, sortable: true },
-  { key: 'serialNo', label: 'S.No', filterable: true, sortable: true },
-  { key: 'chartNo', label: 'Chart Number', filterable: true, sortable: true },
-  { key: 'mrNumber', label: 'MR Number', filterable: true, sortable: true },
-  { key: 'client', label: 'Client', filterable: true, sortable: true },
-  { key: 'location', label: 'Location', filterable: true, sortable: true },
-  { key: 'primarySpeciality', label: 'Primary Speciality', filterable: true, sortable: true },
-  { key: 'process', label: 'Process', filterable: true, sortable: true },
-  { key: 'dos', label: 'Date of Service', filterable: true, sortable: true },
-  { key: 'receivedDate', label: 'Received Date', filterable: true, sortable: true },
-  { key: 'dateOfCompletion', label: 'Date of Completion', filterable: true, sortable: true },
-  { key: 'allocatedCoder', label: 'Allocated Coder', filterable: true, sortable: true },
-  { key: 'allocatedAuditor', label: 'Allocated Auditor', filterable: true, sortable: true },
-  { key: 'milestone', label: 'Milestone', filterable: true, sortable: true },
-  { key: 'chartStatus', label: 'Chart Status', filterable: true, sortable: true },
-  { key: 'priority', label: 'Priority', filterable: true, sortable: true },
-  { key: 'holdReason', label: 'Hold Reason', filterable: true, sortable: true },
-  { key: 'responsibleParty', label: 'Responsible Party', filterable: true, sortable: true },
-  { key: 'primaryHealthPlan', label: 'Primary Health Plan', filterable: true, sortable: true },
-  { key: 'primaryDiagnosis', label: 'Primary Diagnosis', filterable: true, sortable: true },
-  { key: 'secondaryDiagnoses', label: 'Secondary Dx', filterable: false, sortable: false },
-  { key: 'emLevel', label: 'E/M Level', filterable: true, sortable: true },
-  { key: 'qcStatus', label: 'QC Status', filterable: true, sortable: true },
-  { key: 'feedbackCategory', label: 'Feedback Category', filterable: true, sortable: true },
-  { key: 'feedbackType', label: 'Feedback Type', filterable: true, sortable: true },
+/**
+ * Catalog of report fields. Each entry declares:
+ *   - key:        the FE-facing identifier (used as Customize-columns checkbox + filter key)
+ *   - label:      the column header users see in the table and the Excel sheet
+ *   - sql:        the SQL expression that produces the value (after the JOIN block in build())
+ *   - filterable: whether the FE may pass `filters[key]` (we apply a case-insensitive substring match)
+ *   - sortable:   whether the FE may pass `sort[].key`
+ *
+ * Adding a new field is as simple as appending an entry here — the runQuery,
+ * filtering, sorting, and Excel export all read from this single source of truth.
+ */
+interface FieldDef {
+  key: string;
+  label: string;
+  sql: string;
+  filterable: boolean;
+  sortable: boolean;
+  /** Treat the value as a date when set; ExcelJS will format it accordingly. */
+  type?: 'date' | 'number';
+}
+
+const FIELDS: FieldDef[] = [
+  { key: 'worklistNumber',    label: 'Worklist Number',    sql: 'wl.worklist_number',                       filterable: true,  sortable: true },
+  { key: 'serialNo',          label: 'S.No',               sql: 'c.serial_no',                              filterable: true,  sortable: true,  type: 'number' },
+  { key: 'chartNo',           label: 'Chart Number',       sql: 'c.chart_no',                               filterable: true,  sortable: true },
+  { key: 'mrNumber',          label: 'MR Number',          sql: 'c.mr_number',                              filterable: true,  sortable: true },
+  { key: 'client',            label: 'Client',             sql: 'cl.name',                                  filterable: true,  sortable: true },
+  { key: 'location',          label: 'Location',           sql: 'lo.name',                                  filterable: true,  sortable: true },
+  { key: 'primarySpeciality', label: 'Primary Speciality', sql: 'ps.name',                                  filterable: true,  sortable: true },
+  { key: 'process',           label: 'Process',            sql: 'pr.name',                                  filterable: true,  sortable: true },
+  { key: 'dos',               label: 'Date of Service',    sql: 'c.dos',                                    filterable: true,  sortable: true,  type: 'date' },
+  { key: 'receivedDate',      label: 'Received Date',      sql: 'wl.received_date',                         filterable: true,  sortable: true,  type: 'date' },
+  { key: 'dateOfCompletion',  label: 'Date of Completion', sql: `CASE WHEN c.chart_status = 'COMPLETE' THEN c.updated_at ELSE NULL END`, filterable: true, sortable: true, type: 'date' },
+  { key: 'allocatedCoder',    label: 'Allocated Coder',    sql: 'uc.full_name',                             filterable: true,  sortable: true },
+  { key: 'allocatedAuditor',  label: 'Allocated Auditor',  sql: 'ua.full_name',                             filterable: true,  sortable: true },
+  { key: 'milestone',         label: 'Milestone',          sql: 'c.milestone',                              filterable: true,  sortable: true },
+  { key: 'chartStatus',       label: 'Chart Status',       sql: 'c.chart_status',                           filterable: true,  sortable: true },
+  { key: 'priority',          label: 'Priority',           sql: 'c.priority',                               filterable: true,  sortable: true },
+  { key: 'holdReason',        label: 'Hold Reason',        sql: 'hr.name',                                  filterable: true,  sortable: true },
+  { key: 'responsibleParty',  label: 'Responsible Party',  sql: 'rp.name',                                  filterable: true,  sortable: true },
+  { key: 'primaryHealthPlan', label: 'Primary Health Plan',sql: 'php.name',                                 filterable: true,  sortable: true },
+  { key: 'primaryDiagnosis',  label: 'Primary Diagnosis',  sql: 'c.primary_diagnosis',                      filterable: true,  sortable: true },
+  { key: 'secondaryDiagnoses',label: 'Secondary Dx',       sql: 'c.secondary_diagnoses',                    filterable: false, sortable: false },
+  { key: 'emLevel',           label: 'E/M Level',          sql: 'c.em_level',                               filterable: true,  sortable: true },
+  { key: 'qcStatus',          label: 'QC Status',          sql: `c.custom_fields->>'qcStatus'`,             filterable: true,  sortable: false },
+  { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `c.custom_fields->>'feedbackCategory'`,     filterable: true,  sortable: false },
+  { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields->>'feedbackType'`,         filterable: true,  sortable: false },
 ];
 
-// In-memory task store for exports (replace with Redis/BullMQ job state in production).
-const exportTasks = new Map<string, { status: string; rowsExported?: number; downloadUrl?: string }>();
+const FIELD_BY_KEY = new Map(FIELDS.map(f => [f.key, f]));
+
+/** Cap on rows we'll stream into a single Excel file synchronously. */
+const EXPORT_ROW_LIMIT = 50_000;
 
 @Injectable()
 export class ReportsService {
@@ -49,29 +72,118 @@ export class ReportsService {
     @InjectRepository(Chart) private readonly charts: Repository<Chart>,
   ) {}
 
-  fields() { return FIELD_CATALOG; }
+  fields() {
+    return FIELDS.map(({ key, label, filterable, sortable, type }) => ({
+      key, label, filterable, sortable, type,
+    }));
+  }
 
-  async runQuery(dto: QueryReportDto, _user: AuthenticatedUser) {
-    const valid = new Set(FIELD_CATALOG.map(f => f.key));
-    const columns = dto.columns.filter(c => valid.has(c));
-    const qb = this.charts.createQueryBuilder('c');
-
-    // Basic filter translation; a real impl joins per-field.
-    if (dto.filters?.client) qb.innerJoin('worklists', 'w', 'w.id = c.worklist_id').andWhere('w.client_id = :c', { c: dto.filters.client });
-    if (Array.isArray(dto.filters?.milestone)) qb.andWhere('c.milestone IN (:...ms)', { ms: dto.filters.milestone });
-    if (dto.filters?.receivedDate?.from) qb.andWhere('w.received_date >= :rf', { rf: dto.filters.receivedDate.from });
-    if (dto.filters?.receivedDate?.to) qb.andWhere('w.received_date <= :rt', { rt: dto.filters.receivedDate.to });
-
-    if (dto.sort?.length) {
-      dto.sort.forEach((s, i) => qb[i === 0 ? 'orderBy' : 'addOrderBy'](`c.${s.key}`, s.dir === 'desc' ? 'DESC' : 'ASC'));
+  /**
+   * Tabular report query. Returns rows as `string[]` aligned with `columns`.
+   * Honours every filterable field in the catalog (case-insensitive substring
+   * match), every sortable field, and paginates with `page` / `pageSize`.
+   */
+  async runQuery(dto: QueryReportDto, user: AuthenticatedUser) {
+    const columns = (dto.columns ?? []).filter(c => FIELD_BY_KEY.has(c));
+    if (!columns.length) {
+      return { columns: [], rows: [], total: 0, page: dto.page ?? 1, pageSize: dto.pageSize ?? 50 };
     }
 
-    qb.skip(((dto.page ?? 1) - 1) * (dto.pageSize ?? 50)).take(dto.pageSize ?? 50);
+    const qb = this.buildBaseQuery(user);
+    this.applyFilters(qb, dto.filters);
 
-    const [items, total] = await qb.getManyAndCount();
-    const rows = items.map((c: any) => columns.map(col => c[col] ?? null));
-    return { columns, rows, total, page: dto.page ?? 1, pageSize: dto.pageSize ?? 50 };
+    // Paginated count + page slice
+    const total = await qb.clone().getCount();
+
+    // Build the projection from the catalog so the SQL matches the FE-facing
+    // column keys exactly.
+    const select = columns.map(k => `${FIELD_BY_KEY.get(k)!.sql} AS "${k}"`);
+    qb.select(select);
+    qb.addSelect('c.id', 'id');
+
+    this.applySort(qb, dto.sort);
+
+    const page = Math.max(1, dto.page ?? 1);
+    const pageSize = Math.min(500, Math.max(1, dto.pageSize ?? 50));
+    qb.offset((page - 1) * pageSize).limit(pageSize);
+
+    const records = await qb.getRawMany<Record<string, unknown>>();
+    const rows = records.map(r => columns.map(k => normalizeCell(r[k])));
+
+    return { columns, rows, total, page, pageSize };
   }
+
+  /**
+   * Synchronously builds an XLSX workbook for the given report query and
+   * returns it as a Buffer the controller streams to the client. Respects the
+   * caller's filters; ignores pagination (capped at EXPORT_ROW_LIMIT to keep
+   * the response bounded).
+   */
+  async exportToExcel(dto: QueryReportDto, user: AuthenticatedUser): Promise<Buffer> {
+    const columns = (dto.columns ?? []).filter(c => FIELD_BY_KEY.has(c));
+    if (!columns.length) {
+      throw new NotFoundException('No valid columns selected for export.');
+    }
+
+    const qb = this.buildBaseQuery(user);
+    this.applyFilters(qb, dto.filters);
+
+    const select = columns.map(k => `${FIELD_BY_KEY.get(k)!.sql} AS "${k}"`);
+    qb.select(select);
+    this.applySort(qb, dto.sort);
+    qb.limit(EXPORT_ROW_LIMIT);
+
+    const records = await qb.getRawMany<Record<string, unknown>>();
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Valerion Reports';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Report', {
+      views: [{ state: 'frozen', ySplit: 1 }], // freeze header row when scrolling
+    });
+
+    ws.columns = columns.map(key => {
+      const f = FIELD_BY_KEY.get(key)!;
+      return {
+        header: f.label,
+        key,
+        width: Math.min(40, Math.max(12, f.label.length + 4)),
+        style: f.type === 'date'
+          ? { numFmt: 'yyyy-mm-dd' }
+          : f.type === 'number'
+          ? { numFmt: '0' }
+          : undefined,
+      };
+    });
+
+    // Style header row
+    const header = ws.getRow(1);
+    header.font = { bold: true };
+    header.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFEFEFEF' },
+    };
+    header.alignment = { vertical: 'middle' };
+
+    for (const r of records) {
+      const row: Record<string, unknown> = {};
+      for (const k of columns) {
+        const f = FIELD_BY_KEY.get(k)!;
+        const v = r[k];
+        row[k] = f.type === 'date' && v ? new Date(v as string) : normalizeCell(v);
+      }
+      ws.addRow(row);
+    }
+
+    // ExcelJS types `writeBuffer` as `Promise<ArrayBuffer>` in some setups,
+    // but at runtime it returns a Node Buffer. Casting via unknown keeps the
+    // controller's `res.send(buffer)` happy on every path.
+    return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
+  }
+
+  /* ── Templates ───────────────────────────────────────── */
 
   async listTemplates(page: number, pageSize: number, user: AuthenticatedUser) {
     const qb = this.templates.createQueryBuilder('t')
@@ -105,7 +217,9 @@ export class ReportsService {
   async updateTemplate(id: number, dto: SaveTemplateDto, user: AuthenticatedUser) {
     const t = await this.templates.findOne({ where: { id } });
     if (!t) throw new NotFoundException();
-    if (t.ownerId !== user.id && user.role !== Role.TEAMLEAD) throw new ForbiddenException();
+    if (t.ownerId !== user.id && user.role !== Role.TEAMLEAD && user.role !== Role.MANAGER) {
+      throw new ForbiddenException();
+    }
     Object.assign(t, dto);
     return this.templates.save(t);
   }
@@ -113,24 +227,107 @@ export class ReportsService {
   async deleteTemplate(id: number, user: AuthenticatedUser) {
     const t = await this.templates.findOne({ where: { id } });
     if (!t) throw new NotFoundException();
-    if (t.ownerId !== user.id && user.role !== Role.TEAMLEAD) throw new ForbiddenException();
+    if (t.ownerId !== user.id && user.role !== Role.TEAMLEAD && user.role !== Role.MANAGER) {
+      throw new ForbiddenException();
+    }
     await this.templates.delete(id);
     return { status: 'deleted' };
   }
 
-  startExport(_dto: QueryReportDto) {
-    const taskId = `bull-rpt-${uuid()}`;
-    exportTasks.set(taskId, { status: 'queued' });
-    // In production, enqueue a BullMQ job here.
-    setTimeout(() => {
-      exportTasks.set(taskId, { status: 'done', rowsExported: 0, downloadUrl: `https://example.invalid/reports/${taskId}.xlsx` });
-    }, 100);
-    return { taskId, status: 'queued' };
+  /* ── Internals ───────────────────────────────────────── */
+
+  /**
+   * The single JOIN graph used by both runQuery and exportToExcel — keeps
+   * SELECT projections in lockstep regardless of which entry point is hit.
+   */
+  private buildBaseQuery(user: AuthenticatedUser): SelectQueryBuilder<Chart> {
+    const qb = this.charts.createQueryBuilder('c')
+      .leftJoin('worklists',           'wl',  'wl.id = c.worklist_id')
+      .leftJoin('clients',             'cl',  'cl.id = wl.client_id')
+      .leftJoin('locations',           'lo',  'lo.id = wl.location_id')
+      .leftJoin('primary_specialities','ps',  'ps.id = wl.primary_speciality_id')
+      .leftJoin('processes',           'pr',  'pr.id = wl.process_id')
+      .leftJoin('users',               'uc',  'uc.id = c.allocated_coder_id')
+      .leftJoin('users',               'ua',  'ua.id = c.allocated_auditor_id')
+      .leftJoin('hold_reasons',        'hr',  'hr.id = c.hold_reason_id')
+      .leftJoin('responsible_parties', 'rp',  'rp.id = c.responsible_party_id')
+      .leftJoin('primary_health_plans','php', 'php.id = c.primary_health_plan_id')
+      .where('c.deleted_at IS NULL');
+
+    // Role scoping: coder/auditor can never reach this endpoint via FE, but
+    // belt-and-braces here in case the controller guard is loosened.
+    if (user.role === Role.CODER) {
+      qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
+    } else if (user.role === Role.AUDITOR) {
+      qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
+    }
+    return qb;
   }
 
-  exportStatus(taskId: string) {
-    const t = exportTasks.get(taskId);
-    if (!t) throw new NotFoundException();
-    return { taskId, ...t };
+  /**
+   * Apply filters from the catalog. String fields get a case-insensitive
+   * substring match (ILIKE %v%). Arrays become IN-clauses. Date ranges accept
+   * either { from, to } or a single { from } / { to }.
+   */
+  private applyFilters(qb: SelectQueryBuilder<Chart>, filters: Record<string, any> | undefined) {
+    if (!filters) return;
+    let i = 0;
+    for (const [key, raw] of Object.entries(filters)) {
+      const f = FIELD_BY_KEY.get(key);
+      if (!f || !f.filterable) continue;
+      if (raw === '' || raw == null) continue;
+
+      const expr = f.sql;
+
+      if (Array.isArray(raw)) {
+        if (!raw.length) continue;
+        const param = `f${i++}`;
+        qb.andWhere(`${expr} IN (:...${param})`, { [param]: raw });
+        continue;
+      }
+
+      if (typeof raw === 'object' && (('from' in raw) || ('to' in raw))) {
+        if (raw.from) {
+          const p = `f${i++}`;
+          qb.andWhere(`${expr} >= :${p}`, { [p]: raw.from });
+        }
+        if (raw.to) {
+          const p = `f${i++}`;
+          qb.andWhere(`${expr} <= :${p}`, { [p]: raw.to });
+        }
+        continue;
+      }
+
+      const p = `f${i++}`;
+      qb.andWhere(`CAST(${expr} AS TEXT) ILIKE :${p}`, { [p]: `%${String(raw)}%` });
+    }
   }
+
+  private applySort(qb: SelectQueryBuilder<Chart>, sort: Array<{ key: string; dir: 'asc' | 'desc' }> | undefined) {
+    if (!sort?.length) {
+      qb.orderBy('c.created_at', 'DESC');
+      return;
+    }
+    sort.forEach((s, idx) => {
+      const f = FIELD_BY_KEY.get(s.key);
+      if (!f || !f.sortable) return;
+      const dir = s.dir === 'desc' ? 'DESC' : 'ASC';
+      const action = idx === 0 ? 'orderBy' : 'addOrderBy';
+      qb[action](f.sql, dir);
+    });
+  }
+}
+
+/**
+ * Postgres returns dates as Date objects, jsonb as parsed objects/arrays, and
+ * bigints as strings. Coerce each to something the FE table can render and
+ * Excel will format predictably.
+ */
+function normalizeCell(v: unknown): string | number | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (Array.isArray(v)) return v.join(', ');
+  if (typeof v === 'object') return JSON.stringify(v);
+  if (typeof v === 'bigint') return Number(v);
+  return v as string | number;
 }

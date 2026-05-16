@@ -1,0 +1,305 @@
+{
+  "info": {
+    "name": "Valerion — Golden Dataset (Review) API",
+    "_postman_id": "8a3f2c10-0001-4a00-8000-000000000001",
+    "description": "Coder review + corrections endpoints. Corrections populate the golden dataset (Postgres coder_corrections + Qdrant correction_memory).\n\nUsage:\n1. Import this collection.\n2. Create an environment with: base_url, admin_secret, coder_id, report_id, encounter_id, predicted_code_id.\n3. Run 'Auth › Get token' first — it stores {{token}} automatically.\n4. Run the other requests in order.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",          "value": "http://localhost:7500" },
+    { "key": "admin_secret",      "value": "" },
+    { "key": "token",             "value": "" },
+    { "key": "coder_id",          "value": "11111111-2222-3333-4444-555555555555" },
+    { "key": "report_id",         "value": "" },
+    { "key": "encounter_id",      "value": "" },
+    { "key": "predicted_code_id", "value": "" },
+    { "key": "correction_id",     "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Get token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.environment.set('token', data.access_token);",
+                  "pm.collectionVariables.set('token', data.access_token);",
+                  "pm.test('200 OK', () => pm.response.code === 200);",
+                  "pm.test('access_token present', () => !!data.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Admin-Secret", "value": "{{admin_secret}}" },
+              { "key": "Content-Type",   "value": "application/json" }
+            ],
+            "url": { "raw": "{{base_url}}/auth/token", "host": ["{{base_url}}"], "path": ["auth", "token"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_id\": \"postman-tester\",\n  \"hospital_name\": \"Test Hospital\",\n  \"daily_limit\": 500\n}"
+            }
+          }
+        },
+        {
+          "name": "Whoami",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/auth/me", "host": ["{{base_url}}"], "path": ["auth", "me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Verification — corrections",
+      "item": [
+        {
+          "name": "Get correction by id (GET /admin/corrections/{id})",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw":  "{{base_url}}/admin/corrections/{{correction_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "corrections", "{{correction_id}}"]
+            }
+          }
+        },
+        {
+          "name": "List corrections (GET /admin/corrections — filters)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw":  "{{base_url}}/admin/corrections?coder_id={{coder_id}}&limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "corrections"],
+              "query": [
+                { "key": "coder_id",     "value": "{{coder_id}}" },
+                { "key": "report_id",    "value": "",            "disabled": true },
+                { "key": "encounter_id", "value": "",            "disabled": true },
+                { "key": "action_type",  "value": "EDIT",        "disabled": true },
+                { "key": "since",        "value": "2026-05-15T00:00:00Z", "disabled": true },
+                { "key": "limit",        "value": "50" },
+                { "key": "offset",       "value": "0" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — coder registration",
+      "item": [
+        {
+          "name": "Register coder (POST /admin/users)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json();",
+                  "  pm.environment.set('coder_id', data.id);",
+                  "  pm.test('coder_id captured', () => !!data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "url": { "raw": "{{base_url}}/admin/users", "host": ["{{base_url}}"], "path": ["admin", "users"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\":  \"Jane Doe\",\n  \"email\": \"jane@hospital-a.example\",\n  \"role\":  \"CODER\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Review queue",
+      "item": [
+        {
+          "name": "List queue (paginated)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw":  "{{base_url}}/api/review/queue?page=1&page_size=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "queue"],
+              "query": [
+                { "key": "page",      "value": "1" },
+                { "key": "page_size", "value": "20" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get codes",
+      "item": [
+        {
+          "name": "Codes for report",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw":  "{{base_url}}/api/review/report/{{report_id}}/codes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "report", "{{report_id}}", "codes"]
+            }
+          }
+        },
+        {
+          "name": "Codes for encounter",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw":  "{{base_url}}/api/review/encounter/{{encounter_id}}/codes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "encounter", "{{encounter_id}}", "codes"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Submit corrections",
+      "item": [
+        {
+          "name": "Submit — report (ACCEPT example)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "url": {
+              "raw":  "{{base_url}}/api/review/report/{{report_id}}/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "report", "{{report_id}}", "submit"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coder_id\": \"{{coder_id}}\",\n  \"actions\": [\n    {\n      \"predicted_code_id\": \"{{predicted_code_id}}\",\n      \"action\": \"ACCEPT\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Submit — report (EDIT example)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "url": {
+              "raw":  "{{base_url}}/api/review/report/{{report_id}}/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "report", "{{report_id}}", "submit"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coder_id\": \"{{coder_id}}\",\n  \"actions\": [\n    {\n      \"predicted_code_id\": \"{{predicted_code_id}}\",\n      \"action\": \"EDIT\",\n      \"correct_code\": \"I10\",\n      \"correct_description\": \"Essential (primary) hypertension\",\n      \"reason\": \"Code in note is I10 not I11; HTN without heart involvement.\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Submit — report (DELETE example)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "url": {
+              "raw":  "{{base_url}}/api/review/report/{{report_id}}/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "report", "{{report_id}}", "submit"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coder_id\": \"{{coder_id}}\",\n  \"actions\": [\n    {\n      \"predicted_code_id\": \"{{predicted_code_id}}\",\n      \"action\": \"DELETE\",\n      \"reason\": \"Symptom code not separately reportable when underlying dx is coded.\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Submit — report (ADD example)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "url": {
+              "raw":  "{{base_url}}/api/review/report/{{report_id}}/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "report", "{{report_id}}", "submit"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coder_id\": \"{{coder_id}}\",\n  \"actions\": [\n    {\n      \"action\": \"ADD\",\n      \"correct_code\": \"Z79.4\",\n      \"correct_description\": \"Long term (current) use of insulin\",\n      \"code_type\": \"secondary\",\n      \"sequence_pos\": 3,\n      \"reason\": \"Patient on insulin per medication list — required per guidelines.\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Submit — report (mixed batch)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "url": {
+              "raw":  "{{base_url}}/api/review/report/{{report_id}}/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "report", "{{report_id}}", "submit"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coder_id\": \"{{coder_id}}\",\n  \"actions\": [\n    { \"predicted_code_id\": \"<id-1>\", \"action\": \"ACCEPT\" },\n    {\n      \"predicted_code_id\": \"<id-2>\",\n      \"action\": \"EDIT\",\n      \"correct_code\": \"I10\",\n      \"correct_description\": \"Essential (primary) hypertension\",\n      \"reason\": \"Code in note is I10 not I11; HTN without heart involvement.\"\n    },\n    {\n      \"predicted_code_id\": \"<id-3>\",\n      \"action\": \"DELETE\",\n      \"reason\": \"Symptom code not separately reportable when underlying dx is coded.\"\n    },\n    {\n      \"action\": \"ADD\",\n      \"correct_code\": \"Z79.4\",\n      \"correct_description\": \"Long term (current) use of insulin\",\n      \"code_type\": \"secondary\",\n      \"reason\": \"Patient on insulin per medication list — required per guidelines.\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Submit — encounter (EDIT example)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "url": {
+              "raw":  "{{base_url}}/api/review/encounter/{{encounter_id}}/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "review", "encounter", "{{encounter_id}}", "submit"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coder_id\": \"{{coder_id}}\",\n  \"actions\": [\n    {\n      \"predicted_code_id\": \"{{predicted_code_id}}\",\n      \"action\": \"EDIT\",\n      \"correct_code\": \"I10\",\n      \"correct_description\": \"Essential (primary) hypertension\",\n      \"reason\": \"Encounter-level edit — code in chart conflicts with predicted value.\"\n    }\n  ]\n}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

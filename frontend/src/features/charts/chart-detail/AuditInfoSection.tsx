@@ -5,6 +5,11 @@ import type { FormDraft } from './formState';
 import type { AuditCell } from './formState';
 import { cn } from '@/lib/utils';
 
+interface CoderOption {
+  id: string;
+  fullName: string;
+}
+
 interface Props {
   draft: FormDraft;
   update: (k: keyof FormDraft, v: unknown) => void;
@@ -12,10 +17,31 @@ interface Props {
   updateAudit: (rowKey: string, field: keyof AuditCell, value: string | string[]) => void;
   /** When true, the whole section is disabled. Source rule: only auditor can edit and only while timer is running. */
   disabled?: boolean;
+  /** Drives default-open: this card opens by default for auditors. */
+  isAuditor?: boolean;
   feedbackTypes?: string[];
+  /** Per-row feedback category options, keyed by AUDIT_ROWS.key. Sourced from the
+   * /configurations Feedback Categories tab and scoped to the chart's client + location. */
+  feedbackOptionsByRow?: Record<string, string[]>;
+  /** Coders the auditor can hand the chart back to when picking "Feedback Provided". */
+  coders?: CoderOption[];
+  codersLoading?: boolean;
 }
 
-export function AuditInfoSection({ draft, update, audit, updateAudit, disabled, feedbackTypes }: Props) {
+export function AuditInfoSection({
+  draft,
+  update,
+  audit,
+  updateAudit,
+  disabled,
+  isAuditor,
+  feedbackTypes,
+  feedbackOptionsByRow,
+  coders = [],
+  codersLoading,
+}: Props) {
+  /** Strip everything except digits — Total / Correct codes are integer counts. */
+  const onlyDigits = (s: string) => s.replace(/\D+/g, '');
   const totalSum = Object.values(audit).reduce(
     (s, r) => s + (parseInt(r.totalCodes, 10) || 0),
     0,
@@ -26,7 +52,7 @@ export function AuditInfoSection({ draft, update, audit, updateAudit, disabled, 
   );
 
   return (
-    <CollapsibleCard title="Audit Information">
+    <CollapsibleCard title="Audit Information" defaultOpen={!!isAuditor}>
       <div
         className={cn(
           'pt-3',
@@ -71,7 +97,9 @@ export function AuditInfoSection({ draft, update, audit, updateAudit, disabled, 
                     <Input
                       value={cell.totalCodes}
                       readOnly={disabled}
-                      onChange={(e) => updateAudit(row.key, 'totalCodes', e.target.value)}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      onChange={(e) => updateAudit(row.key, 'totalCodes', onlyDigits(e.target.value))}
                     />
                   )}
                 </BodyCell>
@@ -79,7 +107,9 @@ export function AuditInfoSection({ draft, update, audit, updateAudit, disabled, 
                   <Input
                     value={typeof cell.correctCodes === 'string' ? cell.correctCodes : ''}
                     readOnly={disabled}
-                    onChange={(e) => updateAudit(row.key, 'correctCodes', e.target.value)}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    onChange={(e) => updateAudit(row.key, 'correctCodes', onlyDigits(e.target.value))}
                   />
                 </BodyCell>
                 <BodyCell>
@@ -87,7 +117,7 @@ export function AuditInfoSection({ draft, update, audit, updateAudit, disabled, 
                     <MultiSelect
                       value={Array.isArray(cell.feedbackCategory) ? cell.feedbackCategory : []}
                       onChange={(v) => updateAudit(row.key, 'feedbackCategory', v)}
-                      options={['Coding error', 'Incorrect modifier', 'Missing documentation']}
+                      options={feedbackOptionsByRow?.[row.key] ?? []}
                       readOnly={!feedbackEnabled}
                     />
                   ) : (
@@ -96,7 +126,7 @@ export function AuditInfoSection({ draft, update, audit, updateAudit, disabled, 
                       type="select"
                       value={typeof cell.feedbackCategory === 'string' ? cell.feedbackCategory : ''}
                       onChange={(v) => updateAudit(row.key, 'feedbackCategory', v)}
-                      options={['Coding error', 'Missing detail', 'Other']}
+                      options={feedbackOptionsByRow?.[row.key] ?? []}
                       readOnly={!feedbackEnabled}
                     />
                   )}
@@ -155,8 +185,16 @@ export function AuditInfoSection({ draft, update, audit, updateAudit, disabled, 
               type="select"
               value={draft.auditAllocateCoder}
               onChange={(v) => update('auditAllocateCoder', v)}
-              options={[]}
-              readOnly={disabled || draft.auditorQcStatus !== 'Feedback Provided'}
+              options={
+                codersLoading
+                  ? []
+                  : [
+                      { value: '', label: 'None' },
+                      ...coders.map((u) => ({ value: u.id, label: u.fullName })),
+                    ]
+              }
+              readOnly={disabled || draft.auditorQcStatus !== 'Feedback Provided' || codersLoading}
+              placeholder={codersLoading ? 'Loading coders…' : 'Select coder…'}
             />
           )}
         </div>

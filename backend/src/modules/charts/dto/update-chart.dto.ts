@@ -9,6 +9,10 @@ class ProcedureDto {
 }
 
 export class UpdateChartDto {
+  // ── Identifiers ────────────────────────────────────────
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(64) chartNo?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(64) mrNumber?: string;
+
   // ── Workflow metadata ──────────────────────────────────
   @ApiPropertyOptional({ enum: Priority }) @IsOptional() @IsEnum(Priority) priority?: Priority;
 

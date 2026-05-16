@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Repository } from 'typeorm';
+import { CodeReviewAction, CodeReviewType } from '../../common/enums';
+import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Client } from '../../entities/client.entity';
 import { Location } from '../../entities/location.entity';
 import { PrimarySpeciality } from '../../entities/primary-speciality.entity';
@@ -25,7 +27,7 @@ const BUILTIN_AUDIT_AREAS = [
   'ED/EM Level',
   'Modifier',
   'POA Indicator',
-  'Drug Value',
+  'DRG Value',
 ];
 
 export interface NamedRow { id?: number; name: string; isActive?: boolean }
@@ -82,6 +84,8 @@ export class ConfigurationsService {
     @InjectRepository(AuditFeedbackReason) private readonly auditReasonsRepo: Repository<AuditFeedbackReason>,
     @InjectRepository(StandardFieldConfig) private readonly stdFieldsRepo: Repository<StandardFieldConfig>,
     @InjectRepository(CustomFieldConfig) private readonly customFieldsRepo: Repository<CustomFieldConfig>,
+    @InjectRepository(CodeReviewReason) private readonly codeReviewReasonsRepo: Repository<CodeReviewReason>,
+    private readonly dataSource: DataSource,
   ) {}
 
   /* ── General settings (in-memory) ─────────────────────── */
@@ -303,7 +307,23 @@ export class ConfigurationsService {
 
   /** Lazily seed the 7 built-in audit areas if missing for this location. */
   private async ensureBuiltinAuditAreas(locationId: number) {
-    const existing = await this.auditAreasRepo.find({ where: { locationId } });
+    let existing = await this.auditAreasRepo.find({ where: { locationId } });
+
+    // Migrate legacy seed name: "Drug Value" was renamed to "DRG Value" to
+    // match the chart-side label. Rename in place when the new name is free;
+    // otherwise drop the legacy row so the unique (location, name) index holds.
+    const legacy = existing.find((a) => a.name === 'Drug Value');
+    if (legacy) {
+      const collision = existing.find((a) => a.name === 'DRG Value');
+      if (collision) {
+        await this.auditReasonsRepo.delete({ auditAreaId: legacy.id });
+        await this.auditAreasRepo.delete({ id: legacy.id });
+      } else {
+        await this.auditAreasRepo.update({ id: legacy.id }, { name: 'DRG Value' });
+      }
+      existing = await this.auditAreasRepo.find({ where: { locationId } });
+    }
+
     const existingNames = new Set(existing.map((a) => a.name));
     const toCreate = BUILTIN_AUDIT_AREAS.filter((n) => !existingNames.has(n));
     if (toCreate.length === 0) return;
@@ -645,5 +665,220 @@ export class ConfigurationsService {
   deleteHccField(id: number) {
     this.customHccFields = this.customHccFields.filter((f) => f.id !== id);
     return { status: 'deleted' };
+  }
+
+  /* ── Code Review Reasons (per client+location, per codeType+action) ── */
+
+  private requireCodeType(value: string): CodeReviewType {
+    if (!Object.values(CodeReviewType).includes(value as CodeReviewType)) {
+      throw new BadRequestException({
+        error: { code: 'invalid_argument', message: `Invalid codeType: ${value}` },
+      });
+    }
+    return value as CodeReviewType;
+  }
+
+  private requireAction(value: string): CodeReviewAction {
+    if (!Object.values(CodeReviewAction).includes(value as CodeReviewAction)) {
+      throw new BadRequestException({
+        error: { code: 'invalid_argument', message: `Invalid action: ${value}` },
+      });
+    }
+    return value as CodeReviewAction;
+  }
+
+  async getCodeReviewReasons(scope: { clientId?: number; locationId?: number }) {
+    const { clientId, locationId } = this.requireScope(scope);
+    await this.requireLocation(clientId, locationId);
+
+    const rows = await this.codeReviewReasonsRepo.find({
+      where: { clientId, locationId },
+      order: { codeType: 'ASC', action: 'ASC', displayOrder: 'ASC', id: 'ASC' },
+    });
+
+    return {
+      items: rows.map((r) => ({
+        id: Number(r.id),
+        codeType: r.codeType,
+        action: r.action,
+        text: r.text,
+        displayOrder: r.displayOrder,
+        isActive: r.isActive,
+      })),
+    };
+  }
+
+  /**
+   * Replaces the full list of reasons for ONE (codeType, action) cell
+   * within a (client, location) scope. Rows in the DB but missing from
+   * the payload are hard-deleted; rows with an id are updated; rows
+   * without an id are inserted. Wrapped in a transaction so a partial
+   * failure cannot leave a half-saved cell.
+   */
+  async updateCodeReviewReasons(body: {
+    clientId?: number;
+    locationId?: number;
+    codeType?: string;
+    action?: string;
+    reasons?: Array<{ id?: number; text: string; displayOrder?: number; isActive?: boolean }>;
+  }) {
+    const { clientId, locationId } = this.requireScope(body);
+    await this.requireLocation(clientId, locationId);
+    const codeType = this.requireCodeType(body.codeType ?? '');
+    const action = this.requireAction(body.action ?? '');
+
+    const incoming = (body.reasons ?? [])
+      .map((r) => ({
+        id: typeof r.id === 'number' ? Number(r.id) : undefined,
+        text: (r.text ?? '').trim(),
+        displayOrder: typeof r.displayOrder === 'number' ? r.displayOrder : 0,
+        isActive: r.isActive !== false,
+      }))
+      .filter((r) => r.text.length > 0);
+
+    const seenTexts = new Set<string>();
+    for (const r of incoming) {
+      const key = r.text.toLowerCase();
+      if (seenTexts.has(key)) {
+        throw new BadRequestException({
+          error: { code: 'duplicate', message: `Duplicate reason text: "${r.text}"` },
+        });
+      }
+      seenTexts.add(key);
+    }
+
+    await this.dataSource.transaction(async (mgr) => {
+      const repo = mgr.getRepository(CodeReviewReason);
+      const existing = await repo.find({ where: { clientId, locationId, codeType, action } });
+      const incomingIds = incoming.filter((r) => r.id !== undefined).map((r) => r.id!);
+      const toDelete = existing.filter((e) => !incomingIds.includes(Number(e.id)));
+      if (toDelete.length) await repo.delete({ id: In(toDelete.map((d) => d.id)) });
+
+      for (const r of incoming) {
+        if (r.id !== undefined) {
+          await repo.update(
+            { id: r.id, clientId, locationId, codeType, action },
+            { text: r.text, displayOrder: r.displayOrder, isActive: r.isActive },
+          );
+        } else {
+          await repo.save(
+            repo.create({
+              clientId,
+              locationId,
+              codeType,
+              action,
+              text: r.text,
+              displayOrder: r.displayOrder,
+              isActive: r.isActive,
+            }),
+          );
+        }
+      }
+    });
+
+    return this.getCodeReviewReasons({ clientId, locationId });
+  }
+
+  /**
+   * Copies active reasons from a source (client, location) to a target
+   * (client, location). Idempotent: skips rows whose (codeType, action,
+   * lower(text)) already exists in the target. Optional filters narrow
+   * which cells to copy.
+   */
+  async copyCodeReviewReasons(body: {
+    sourceClientId?: number;
+    sourceLocationId?: number;
+    targetClientId?: number;
+    targetLocationId?: number;
+    codeTypes?: string[];
+    actions?: string[];
+    includeDisabled?: boolean;
+  }) {
+    const source = this.requireScope({ clientId: body.sourceClientId, locationId: body.sourceLocationId });
+    const target = this.requireScope({ clientId: body.targetClientId, locationId: body.targetLocationId });
+    if (source.clientId === target.clientId && source.locationId === target.locationId) {
+      throw new BadRequestException({
+        error: { code: 'invalid_argument', message: 'Source and target must differ.' },
+      });
+    }
+    await this.requireLocation(source.clientId, source.locationId);
+    await this.requireLocation(target.clientId, target.locationId);
+
+    const codeTypes = (body.codeTypes ?? Object.values(CodeReviewType)).map((t) => this.requireCodeType(t));
+    const actions = (body.actions ?? Object.values(CodeReviewAction)).map((a) => this.requireAction(a));
+
+    let copied = 0;
+    let skipped = 0;
+
+    await this.dataSource.transaction(async (mgr) => {
+      const repo = mgr.getRepository(CodeReviewReason);
+      const sourceRows = await repo.find({
+        where: {
+          clientId: source.clientId,
+          locationId: source.locationId,
+          codeType: In(codeTypes),
+          action: In(actions),
+        },
+      });
+      const targetRows = await repo.find({
+        where: {
+          clientId: target.clientId,
+          locationId: target.locationId,
+          codeType: In(codeTypes),
+          action: In(actions),
+        },
+      });
+
+      const targetKeys = new Set(targetRows.map((r) => `${r.codeType}|${r.action}|${r.text.toLowerCase()}`));
+
+      for (const s of sourceRows) {
+        if (!body.includeDisabled && !s.isActive) {
+          skipped++;
+          continue;
+        }
+        const key = `${s.codeType}|${s.action}|${s.text.toLowerCase()}`;
+        if (targetKeys.has(key)) {
+          skipped++;
+          continue;
+        }
+        await repo.save(
+          repo.create({
+            clientId: target.clientId,
+            locationId: target.locationId,
+            codeType: s.codeType,
+            action: s.action,
+            text: s.text,
+            displayOrder: s.displayOrder,
+            isActive: s.isActive,
+          }),
+        );
+        targetKeys.add(key);
+        copied++;
+      }
+    });
+
+    return { copied, skipped };
+  }
+
+  /** Used by the charts service to validate that a submitted dropdown
+   * value matches an active reason for the chart's (client, location,
+   * codeType, action). */
+  async findActiveReasonText(opts: {
+    clientId: number;
+    locationId: number;
+    codeType: CodeReviewType;
+    action: CodeReviewAction;
+    text: string;
+  }) {
+    return this.codeReviewReasonsRepo.findOne({
+      where: {
+        clientId: opts.clientId,
+        locationId: opts.locationId,
+        codeType: opts.codeType,
+        action: opts.action,
+        text: opts.text,
+        isActive: true,
+      },
+    });
   }
 }

@@ -51,7 +51,7 @@ export interface AuditCell {
   feedbackCategory: string | string[];
 }
 
-const empty: FormDraft = {
+export const EMPTY_FORM_DRAFT: FormDraft = {
   chartNo: '',
   mrNo: '',
   dateOfService: '',
@@ -67,7 +67,10 @@ const empty: FormDraft = {
   drgValue: '',
   procedureCode: '',
   subSpecialty: '',
-  chartStatus: 'Open',
+  // Empty draft slot renders as the "Open" placeholder in the chart-status
+  // select. The user only sees / picks "Complete" or "Incomplete"; saving an
+  // empty value writes ChartStatus.OPEN on the API.
+  chartStatus: '',
   responsibleParty: [],
   holdReason: [],
   coderComments: '',
@@ -86,7 +89,7 @@ const empty: FormDraft = {
 export type FormUpdater = (k: keyof FormDraft, v: unknown) => void;
 
 export function useFormDraft(initial?: Partial<FormDraft>) {
-  const [draft, setDraft] = useState<FormDraft>({ ...empty, ...initial });
+  const [draft, setDraft] = useState<FormDraft>({ ...EMPTY_FORM_DRAFT, ...initial });
 
   const update: FormUpdater = useCallback((k, v) => {
     setDraft((prev) => {

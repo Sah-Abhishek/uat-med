@@ -20,8 +20,14 @@ export class RolesGuard implements CanActivate {
     if (user.role === Role.TEAMLEAD) return true;
 
     if (!required.includes(user.role)) {
+      // Surface the mismatch so a stale JWT (e.g. token issued before a role
+      // change) is obvious from the response body alone — saves a debugging
+      // round-trip to inspect the token claim.
       throw new ForbiddenException({
-        error: { code: 'forbidden', message: 'Insufficient role for this endpoint.' },
+        error: {
+          code: 'forbidden',
+          message: `Insufficient role for this endpoint. Token role: ${user.role ?? '(none)'}; required: ${required.join(' | ')}.`,
+        },
       });
     }
     return true;

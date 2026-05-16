@@ -141,6 +141,22 @@ export type FieldConfig = ReturnType<typeof useFieldConfig>;
  * `dos` vs `dateOfService`). Centralise the mapping so save-time validation can
  * resolve the right draft slot.
  */
+/**
+ * A handful of chart fields are gated by the chart's status — they're
+ * disabled in the UI for certain statuses and therefore can't be filled.
+ * When that's the case, save-time validation must also stop treating them
+ * as MANDATORY, otherwise a chart that's Complete but configured to require
+ * "Coder comments to client" can never be saved.
+ *
+ *   - holdReason            : only enabled while the chart is Incomplete.
+ *   - coderCommentsToClient : disabled once the chart is Complete.
+ */
+export function isFieldDisabledByStatus(fieldKey: string, chartStatus: string): boolean {
+  if (fieldKey === 'holdReason') return chartStatus !== 'Incomplete';
+  if (fieldKey === 'coderCommentsToClient') return chartStatus === 'Complete';
+  return false;
+}
+
 export const STANDARD_FIELD_MAP: Array<{
   key: string;
   draftKey: string;

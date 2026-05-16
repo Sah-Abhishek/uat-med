@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import type {
+  AiStatus,
   ChartMilestone,
   ChartStatus,
   Priority,
@@ -54,18 +55,26 @@ export function WorklistStatusChip({ status }: { status: WorklistStatus }) {
   return <span className={cn('chip', WORKLIST_STATUS_STYLES[status])}>{WORKLIST_STATUS_LABEL[status]}</span>;
 }
 
-/* ── Priority (CRITICAL | HIGH | MEDIUM | LOW | DONE) ── */
+/* ── Priority (CRITICAL | HIGH | MEDIUM | LOW | FINALIZED) ── */
 const PRIORITY_STYLES: Record<Priority, string> = {
   CRITICAL: 'bg-danger-soft text-danger',
   HIGH: 'bg-warn-soft text-warn',
   MEDIUM: 'bg-info-soft text-info',
   LOW: 'bg-surface-sunken text-ink-muted',
-  DONE: 'bg-success-soft text-success',
+  FINALIZED: 'bg-success-soft text-success',
+};
+const PRIORITY_LABEL: Record<Priority, string> = {
+  CRITICAL: 'Critical',
+  HIGH: 'High',
+  MEDIUM: 'Medium',
+  LOW: 'Low',
+  // Backend value is FINALIZED; users know this state as "Done".
+  FINALIZED: 'Done',
 };
 export function PriorityChip({ priority }: { priority: Priority }) {
   return (
-    <span className={cn('chip capitalize', PRIORITY_STYLES[priority])}>
-      {priority.toLowerCase()}
+    <span className={cn('chip', PRIORITY_STYLES[priority])}>
+      {PRIORITY_LABEL[priority]}
     </span>
   );
 }
@@ -97,6 +106,28 @@ export function MilestoneChip({ milestone }: { milestone: ChartMilestone }) {
       {MILESTONE_LABEL[milestone]}
     </span>
   );
+}
+
+/* ── AI pipeline status (NONE | QUEUED | PROCESSING | DONE | ERRORED) ─── */
+const AI_STATUS_STYLES: Record<AiStatus, string> = {
+  NONE: 'bg-surface-sunken text-ink-subtle',
+  QUEUED: 'bg-info-soft text-info',
+  PROCESSING: 'bg-warn-soft text-warn',
+  DONE: 'bg-success-soft text-success',
+  ERRORED: 'bg-danger-soft text-danger',
+};
+const AI_STATUS_LABEL: Record<AiStatus, string> = {
+  NONE: '—',
+  QUEUED: 'Queued',
+  PROCESSING: 'Processing',
+  DONE: 'Done',
+  ERRORED: 'Errored',
+};
+export function AiStatusChip({ status }: { status: AiStatus }) {
+  if (status === 'NONE') {
+    return <span className="text-ink-subtle text-xs">—</span>;
+  }
+  return <span className={cn('chip', AI_STATUS_STYLES[status])}>{AI_STATUS_LABEL[status]}</span>;
 }
 
 /* ── Generic pill badge (mint "X Selected", etc.) ─────────── */

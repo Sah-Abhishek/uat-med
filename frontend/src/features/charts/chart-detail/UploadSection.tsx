@@ -16,8 +16,10 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Field';
+import { AiStatusChip } from '@/components/ui/Chip';
 import { cn } from '@/lib/utils';
 import { processChartDocuments } from '@/api/charts';
+import { deriveAiStatus } from '@/api/types';
 import type { AiEncounterResult, AiReportType, UploadedDocument } from '@/api/types';
 
 interface StagedDoc {
@@ -45,6 +47,12 @@ interface Props {
   chartId: string;
   /** Persisted list owned by the parent — server is source of truth, hydrated from chart.customFields.uploadedDocs. */
   uploadedDocs: UploadedDocument[];
+  /**
+   * Full customFields blob; we read pendingPrediction / aiPrediction /
+   * aiPredictionError out of it to render the live AI status pill instead of
+   * a hardcoded "Ready" label.
+   */
+  customFields?: Record<string, unknown> | null;
   onView: (docId: string) => void;
   /** Called once the ICD Predictor pipeline returns. */
   onProcessed?: (result: AiEncounterResult) => void;
@@ -81,7 +89,7 @@ function fileTypeLabel(type: string) {
   return { label: 'FILE', tone: 'text-ink-muted bg-surface-sunken' };
 }
 
-export function UploadSection({ chartId, uploadedDocs, onView, onProcessed }: Props) {
+export function UploadSection({ chartId, uploadedDocs, customFields, onView, onProcessed }: Props) {
   const [open, setOpen] = useState(true);
   const [docs, setDocs] = useState<StagedDoc[]>([]);
   const [imageGroups, setImageGroups] = useState<ImageGroup[]>([]);
@@ -403,50 +411,59 @@ export function UploadSection({ chartId, uploadedDocs, onView, onProcessed }: Pr
           )}
 
           {/* ── AI status + uploaded list ── */}
-          {hasUploaded && (
-            <div className="mt-5 pt-5 border-t border-line">
-              <div className="flex items-center gap-2 mb-3">
-                {status === 'error' ? (
-                  <AlertCircle className="w-4 h-4 text-danger" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4 text-success" />
-                )}
-                <span className="text-sm font-semibold text-ink">AI Status</span>
-                <span className="text-[11px] font-semibold text-success bg-success-soft px-2 py-0.5 rounded-pill">
-                  Ready
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                {uploadedDocs.map((d) => {
-                  const meta = fileTypeLabel(d.mimeType);
-                  return (
-                    <div
-                      key={d.id}
-                      className="flex items-center gap-3 rounded-lg border border-line px-3 py-2 hover:bg-surface-2/40 transition"
-                    >
-                      <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', meta.tone)}>
-                        {meta.label}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-ink truncate">{d.filename}</p>
-                        <p className="text-[11px] text-ink-subtle">
-                          {formatSize(d.size)} · {d.reportType}
-                          {d.reportId ? ` · ${d.reportId.slice(0, 8)}` : ''}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onView(d.id)}
-                        className="text-xs font-semibold text-primary-ink dark:text-primary bg-primary-soft hover:bg-primary/30 dark:hover:bg-primary/20 px-2 py-1 rounded-pill flex items-center gap-1"
+          {hasUploaded && (() => {
+            const aiStatus = deriveAiStatus(customFields ?? undefined);
+            const Icon =
+              status === 'error' || aiStatus === 'ERRORED'
+                ? AlertCircle
+                : aiStatus === 'QUEUED' || aiStatus === 'PROCESSING'
+                ? Loader2
+                : CheckCircle2;
+            const iconClass =
+              status === 'error' || aiStatus === 'ERRORED'
+                ? 'w-4 h-4 text-danger'
+                : aiStatus === 'QUEUED' || aiStatus === 'PROCESSING'
+                ? 'w-4 h-4 text-warn animate-spin'
+                : 'w-4 h-4 text-success';
+            return (
+              <div className="mt-5 pt-5 border-t border-line">
+                <div className="flex items-center gap-2 mb-3">
+                  <Icon className={iconClass} />
+                  <span className="text-sm font-semibold text-ink">AI Status</span>
+                  <AiStatusChip status={aiStatus} />
+                </div>
+                <div className="space-y-1.5">
+                  {uploadedDocs.map((d) => {
+                    const meta = fileTypeLabel(d.mimeType);
+                    return (
+                      <div
+                        key={d.id}
+                        className="flex items-center gap-3 rounded-lg border border-line px-3 py-2 hover:bg-surface-2/40 transition"
                       >
-                        <Eye className="w-3 h-3" /> View
-                      </button>
-                    </div>
-                  );
-                })}
+                        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', meta.tone)}>
+                          {meta.label}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-ink truncate">{d.filename}</p>
+                          <p className="text-[11px] text-ink-subtle">
+                            {formatSize(d.size)} · {d.reportType}
+                            {d.reportId ? ` · ${d.reportId.slice(0, 8)}` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onView(d.id)}
+                          className="text-xs font-semibold text-primary-ink dark:text-primary bg-primary-soft hover:bg-primary/30 dark:hover:bg-primary/20 px-2 py-1 rounded-pill flex items-center gap-1"
+                        >
+                          <Eye className="w-3 h-3" /> View
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
     </div>

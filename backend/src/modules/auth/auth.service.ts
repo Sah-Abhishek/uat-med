@@ -14,6 +14,7 @@ import { Role } from '../../common/enums/roles.enum';
 import { UserStatus } from '../../common/enums';
 import { SignupDto } from './dto/signup.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { CoderRegistrationService } from '../ai-gateway/coder-registration.service';
 
 const BCRYPT_COST = 12;
 
@@ -36,6 +37,7 @@ export class AuthService {
     @InjectRepository(UserSignupRequest) private readonly signups: Repository<UserSignupRequest>,
     private readonly jwt: JwtService,
     private readonly cfg: ConfigService,
+    private readonly coderRegistration: CoderRegistrationService,
   ) {}
 
   async validatePassword(email: string, password: string): Promise<User> {
@@ -123,6 +125,21 @@ export class AuthService {
     return { status: 'ok', revoked: result.affected ?? 0 };
   }
 
+  /**
+   * Admin-initiated password reset. Bypasses the current-password check used
+   * by the regular change-password flow — caller authorisation is enforced at
+   * the controller via @Roles. Revokes every active refresh token for the
+   * user so existing sessions can't survive on the previous credential.
+   */
+  async resetPasswordFor(userId: number, newPassword: string): Promise<{ status: 'ok'; revoked: number }> {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException();
+    user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_COST);
+    await this.users.save(user);
+    const out = await this.logoutAll(userId);
+    return { status: 'ok', revoked: out.revoked };
+  }
+
   async me(userId: number) {
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException();
@@ -166,14 +183,64 @@ export class AuthService {
     return { status: 'ok' };
   }
 
-  /** Helper used by test fixtures and seeds. */
+  /**
+   * Create a user — or revive a previously-deactivated one.
+   *
+   * The `users` table has a unique index on `email` and no soft-delete column,
+   * so a deactivated user keeps occupying their email row. Without this
+   * branch, an admin who deactivates someone and then tries to recreate them
+   * (with a different role, say) would crash on the constraint with the raw
+   * "Unique constraint violation" message.
+   *
+   * Behaviour:
+   *   - No existing row → insert as before.
+   *   - Existing row, status = INACTIVE → reactivate and overwrite the
+   *     submitted fields. Same `id` so chart_allocation / audit_log history
+   *     stays linked to the same person.
+   *   - Existing row, status = ACTIVE or PENDING → throw a clean 409.
+   */
   async createUserWithPassword(fields: {
     email: string; fullName: string; password: string; role: Role;
     clientId?: number; locationId?: number; primarySpecialityId?: number;
+    employeeId?: string; designation?: string;
+    dateOfBirth?: string; dateOfJoining?: string;
   }): Promise<User> {
+    const email = fields.email.trim().toLowerCase();
+    const existing = await this.users.findOne({ where: { email } });
+
+    if (existing && existing.status !== UserStatus.INACTIVE) {
+      throw new ConflictException({
+        error: {
+          code: 'email_in_use',
+          message: `A user with email ${email} already exists.`,
+        },
+      });
+    }
+
     const passwordHash = await bcrypt.hash(fields.password, BCRYPT_COST);
-    return this.users.save(this.users.create({
-      email: fields.email,
+
+    if (existing) {
+      // Reactivate + overwrite — admin is intentionally repurposing the slot.
+      existing.fullName = fields.fullName;
+      existing.passwordHash = passwordHash;
+      existing.role = fields.role;
+      existing.status = UserStatus.ACTIVE;
+      existing.clientId = fields.clientId;
+      existing.locationId = fields.locationId;
+      existing.primarySpecialityId = fields.primarySpecialityId;
+      if (fields.employeeId !== undefined)   existing.employeeId   = fields.employeeId;
+      if (fields.designation !== undefined)  existing.designation  = fields.designation;
+      if (fields.dateOfBirth !== undefined)  existing.dateOfBirth  = fields.dateOfBirth;
+      if (fields.dateOfJoining !== undefined) existing.dateOfJoining = fields.dateOfJoining;
+      const saved = await this.users.save(existing);
+      // Reactivation may have flipped role (e.g. VIEWER → CODER) — sync covers
+      // that case too. No-op if the user already has a public_id.
+      await this.coderRegistration.syncOne(saved);
+      return saved;
+    }
+
+    const created = await this.users.save(this.users.create({
+      email,
       fullName: fields.fullName,
       passwordHash,
       role: fields.role,
@@ -181,6 +248,12 @@ export class AuthService {
       clientId: fields.clientId,
       locationId: fields.locationId,
       primarySpecialityId: fields.primarySpecialityId,
+      employeeId: fields.employeeId,
+      designation: fields.designation,
+      dateOfBirth: fields.dateOfBirth,
+      dateOfJoining: fields.dateOfJoining,
     }));
+    await this.coderRegistration.syncOne(created);
+    return created;
   }
 }

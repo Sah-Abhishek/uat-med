@@ -5,28 +5,29 @@ import {
   runReportQuery,
   listReportTemplates,
   createReportTemplate,
+  updateReportTemplate,
   deleteReportTemplate,
-  startReportExport,
-  getExportStatus,
+  downloadReportXlsx,
   type QueryReportDto,
 } from '@/api/reports';
-import type { ApiErrorShape, ExportFormat, ReportField } from '@/api/types';
+import type { ApiErrorShape, ReportField, ReportTemplate } from '@/api/types';
+import { useAuth } from '@/auth/store';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CollapsibleCard } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Label, SearchInput } from '@/components/ui/Field';
 import { Modal, ModalFooter, Pagination } from '@/components/ui/Primitives';
-import { formatNumber } from '@/lib/utils';
+import { formatDate, formatNumber } from '@/lib/utils';
 import {
   Settings2,
-  Download,
   Save,
-  BookMarked,
   Loader2,
   Play,
   FileSpreadsheet,
-  FileText,
   Trash2,
+  BookmarkPlus,
+  CheckCircle2,
+  X,
 } from 'lucide-react';
 
 interface QueryState {
@@ -39,23 +40,39 @@ interface QueryState {
 const DEFAULT_COLUMNS = [
   'worklistNumber',
   'chartNo',
+  'client',
+  'allocatedCoder',
   'priority',
   'milestone',
   'chartStatus',
+  'receivedDate',
 ];
 const PAGE_SIZE = 50;
 
+/** Returns true when two filter records contain the same string entries. */
+function filtersEqual(a: Record<string, string>, b: Record<string, string>) {
+  const ak = Object.keys(a).filter(k => a[k] !== '' && a[k] != null);
+  const bk = Object.keys(b).filter(k => b[k] !== '' && b[k] != null);
+  if (ak.length !== bk.length) return false;
+  return ak.every(k => a[k] === b[k]);
+}
+
+function arrayEqual<T>(a: T[], b: T[]) {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
 export function ReportsPage() {
+  const currentUser = useAuth(s => s.user);
   const [state, setState] = useState<QueryState>({
     columns: DEFAULT_COLUMNS,
     filters: {},
     sort: [],
     page: 1,
   });
+  const [activeTemplate, setActiveTemplate] = useState<ReportTemplate | null>(null);
   const [customizeOpen, setCustomizeOpen] = useState(false);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
-  const [exportTaskId, setExportTaskId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const fields = useQuery({ queryKey: ['reports', 'fields'], queryFn: getReportFields });
 
@@ -64,7 +81,7 @@ export function ReportsPage() {
     queryFn: () =>
       runReportQuery({
         columns: state.columns,
-        filters: state.filters,
+        filters: cleanFilters(state.filters),
         sort: state.sort,
         page: state.page,
         pageSize: PAGE_SIZE,
@@ -75,86 +92,99 @@ export function ReportsPage() {
 
   const totalPages = query.data ? Math.max(1, Math.ceil(query.data.total / PAGE_SIZE)) : 1;
 
-  const exportMutation = useMutation({
-    mutationFn: (format: ExportFormat) =>
-      startReportExport({
-        columns: state.columns,
-        filters: state.filters,
-        format,
-      }),
-    onSuccess: (res) => setExportTaskId(res.taskId),
+  const downloadMutation = useMutation({
+    mutationFn: () =>
+      downloadReportXlsx(
+        {
+          columns: state.columns,
+          filters: cleanFilters(state.filters),
+          sort: state.sort,
+        },
+        activeTemplate?.name,
+      ),
+    onError: (e) => setDownloadError((e as unknown as ApiErrorShape).message ?? 'Excel export failed.'),
   });
+
+  /** True when the active template's saved spec differs from the current builder state. */
+  const isDirty = useMemo(() => {
+    if (!activeTemplate) return false;
+    const tplFilters = (activeTemplate.filters ?? {}) as Record<string, string>;
+    return (
+      !arrayEqual(activeTemplate.columns, state.columns) ||
+      !filtersEqual(tplFilters, state.filters)
+    );
+  }, [activeTemplate, state.columns, state.filters]);
+
+  function loadTemplate(t: ReportTemplate) {
+    setActiveTemplate(t);
+    setState({
+      columns: t.columns,
+      filters: { ...((t.filters ?? {}) as Record<string, string>) },
+      sort: [],
+      page: 1,
+    });
+  }
+
+  function discardChanges() {
+    if (!activeTemplate) return;
+    setState({
+      columns: activeTemplate.columns,
+      filters: { ...((activeTemplate.filters ?? {}) as Record<string, string>) },
+      sort: [],
+      page: 1,
+    });
+  }
+
+  function newReport() {
+    setActiveTemplate(null);
+    setState({ columns: DEFAULT_COLUMNS, filters: {}, sort: [], page: 1 });
+  }
 
   return (
     <div className="p-8 max-w-[1600px] space-y-5">
       <PageHeader
         title="Reports"
-        subtitle="Reports"
-        actions={
-          <>
-            <Button variant="soft" leftIcon={<BookMarked className="w-3.5 h-3.5" />} onClick={() => setTemplatesOpen(true)}>
-              Templates
-            </Button>
-            <Button variant="soft" leftIcon={<Save className="w-3.5 h-3.5" />} onClick={() => setSaveTemplateOpen(true)}>
-              Save as template
-            </Button>
-            <Button
-              variant="soft"
-              leftIcon={<FileSpreadsheet className="w-3.5 h-3.5" />}
-              loading={exportMutation.isPending}
-              onClick={() => exportMutation.mutate('xlsx')}
-            >
-              Export XLSX
-            </Button>
-            <Button
-              variant="soft"
-              leftIcon={<FileText className="w-3.5 h-3.5" />}
-              onClick={() => exportMutation.mutate('csv')}
-            >
-              Export CSV
-            </Button>
-          </>
-        }
+        subtitle="Build, save, and export tabular reports across charts."
       />
 
-      {exportTaskId && (
-        <ExportProgressBanner taskId={exportTaskId} onClose={() => setExportTaskId(null)} />
+      {downloadError && (
+        <div className="card p-3 flex items-center gap-3 border-danger/30">
+          <X className="w-4 h-4 text-danger" />
+          <div className="text-sm text-danger flex-1">{downloadError}</div>
+          <Button variant="ghost" size="sm" onClick={() => setDownloadError(null)}>Dismiss</Button>
+        </div>
       )}
 
-      {/* Filters */}
-      <CollapsibleCard title="Filters" defaultOpen>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-3">
-          {(fields.data ?? []).filter((f) => f.filterable).slice(0, 8).map((f) => (
-            <div key={f.key}>
-              <Label>{f.label}</Label>
-              <Input
-                value={state.filters[f.key] ?? ''}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    page: 1,
-                    filters: { ...s.filters, [f.key]: e.target.value },
-                  }))
-                }
-                placeholder="Any"
-              />
-            </div>
-          ))}
-        </div>
-        <div className="flex justify-end gap-2 mt-5">
-          <Button
-            variant="ghost"
-            onClick={() => setState((s) => ({ ...s, filters: {}, page: 1 }))}
-          >
-            Clear
-          </Button>
-          <Button leftIcon={<Play className="w-3.5 h-3.5" />} onClick={() => query.refetch()}>
-            Run
-          </Button>
-        </div>
-      </CollapsibleCard>
+      {/* ── Saved templates table ─────────────────────────── */}
+      <SavedTemplatesSection
+        currentUserId={currentUser?.id}
+        currentUserRole={currentUser?.role}
+        activeTemplateId={activeTemplate?.id ?? null}
+        onLoad={loadTemplate}
+        onNew={newReport}
+      />
 
-      {/* Results */}
+      {/* ── Active template banner ────────────────────────── */}
+      {activeTemplate && (
+        <ActiveTemplateBanner
+          template={activeTemplate}
+          isDirty={isDirty}
+          onDiscard={discardChanges}
+          onUpdate={() => setSaveTemplateOpen(true)}
+          onClose={newReport}
+        />
+      )}
+
+      {/* ── Filters ────────────────────────────────────────── */}
+      <FiltersSection
+        fields={fields.data ?? []}
+        values={state.filters}
+        onChange={(filters) => setState(s => ({ ...s, filters, page: 1 }))}
+        onClear={() => setState(s => ({ ...s, filters: {}, page: 1 }))}
+        onRun={() => query.refetch()}
+      />
+
+      {/* ── Results ────────────────────────────────────────── */}
       <Card padding="none">
         <div className="flex items-center justify-between px-6 py-5 border-b border-line">
           <div>
@@ -162,16 +192,44 @@ export function ReportsPage() {
               Results ({formatNumber(query.data?.total ?? 0)})
             </h2>
             <p className="text-xs text-ink-muted mt-0.5">
-              {state.columns.length} column{state.columns.length === 1 ? '' : 's'} · page {state.page} of {totalPages}
+              {state.columns.length} column{state.columns.length === 1 ? '' : 's'}
+              {' · '}page {state.page} of {totalPages}
+              {activeTemplate && (
+                <>
+                  {' · '}
+                  template <span className="font-semibold text-ink">{activeTemplate.name}</span>
+                  {isDirty && <span className="ml-1 text-warn">(unsaved changes)</span>}
+                </>
+              )}
             </p>
           </div>
-          <Button
-            variant="soft"
-            leftIcon={<Settings2 className="w-3.5 h-3.5" />}
-            onClick={() => setCustomizeOpen(true)}
-          >
-            Customize columns
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="soft"
+              leftIcon={<Settings2 className="w-3.5 h-3.5" />}
+              onClick={() => setCustomizeOpen(true)}
+            >
+              Customize columns
+            </Button>
+            <Button
+              variant="soft"
+              leftIcon={<BookmarkPlus className="w-3.5 h-3.5" />}
+              onClick={() => setSaveTemplateOpen(true)}
+            >
+              {activeTemplate && isDirty ? 'Save changes' : 'Save as template'}
+            </Button>
+            <Button
+              leftIcon={<FileSpreadsheet className="w-3.5 h-3.5" />}
+              loading={downloadMutation.isPending}
+              disabled={!query.data || query.data.total === 0}
+              onClick={() => {
+                setDownloadError(null);
+                downloadMutation.mutate();
+              }}
+            >
+              Export to Excel
+            </Button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -203,7 +261,11 @@ export function ReportsPage() {
                   <tr key={i} className="hover:bg-surface-sunken/40 transition">
                     {row.map((cell, j) => (
                       <td key={j} className="table-cell">
-                        {cell == null ? <span className="text-ink-subtle">—</span> : String(cell)}
+                        {cell == null || cell === '' ? (
+                          <span className="text-ink-subtle">—</span>
+                        ) : (
+                          String(cell)
+                        )}
                       </td>
                     ))}
                   </tr>
@@ -228,87 +290,261 @@ export function ReportsPage() {
         onApply={(cols) => setState((s) => ({ ...s, columns: cols, page: 1 }))}
       />
 
-      <TemplatesModal
-        open={templatesOpen}
-        onClose={() => setTemplatesOpen(false)}
-        onLoad={(tpl) => {
-          setState({
-            columns: tpl.columns,
-            filters: (tpl.filters as Record<string, string>) ?? {},
-            sort: [],
-            page: 1,
-          });
-          setTemplatesOpen(false);
-        }}
-      />
-
       <SaveTemplateModal
         open={saveTemplateOpen}
         onClose={() => setSaveTemplateOpen(false)}
         state={state}
+        activeTemplate={activeTemplate}
+        onSaved={(t) => setActiveTemplate(t)}
       />
     </div>
   );
 }
 
-/* ── Export progress banner ────────────────────────── */
-function ExportProgressBanner({ taskId, onClose }: { taskId: string; onClose: () => void }) {
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('queued');
-  const [err, setErr] = useState<string | null>(null);
+/** Strips empty strings/undefined values so the backend doesn't filter on "" (which never matches). */
+function cleanFilters(f: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(f)) {
+    if (v != null && v !== '') out[k] = v;
+  }
+  return out;
+}
 
-  useEffect(() => {
-    let mounted = true;
-    const poll = async () => {
-      try {
-        const res = await getExportStatus(taskId);
-        if (!mounted) return;
-        setStatus(res.status);
-        if (res.status === 'done' && res.downloadUrl) {
-          setDownloadUrl(res.downloadUrl);
-          window.open(res.downloadUrl, '_blank');
-        } else if (res.status === 'failed') {
-          setErr(res.errorMessage ?? 'Export failed');
-        } else {
-          setTimeout(poll, 2500);
-        }
-      } catch (e) {
-        setErr((e as Error).message);
-      }
-    };
-    poll();
-    return () => { mounted = false; };
-  }, [taskId]);
+/* ── Saved Templates section (inline table) ─────────────── */
+function SavedTemplatesSection({
+  currentUserId,
+  currentUserRole,
+  activeTemplateId,
+  onLoad,
+  onNew,
+}: {
+  currentUserId: string | undefined;
+  currentUserRole: string | undefined;
+  activeTemplateId: number | string | null;
+  onLoad: (t: ReportTemplate) => void;
+  onNew: () => void;
+}) {
+  const qc = useQueryClient();
+  const templates = useQuery({
+    queryKey: ['reports', 'templates'],
+    queryFn: () => listReportTemplates(1, 50),
+  });
+
+  const delMutation = useMutation({
+    mutationFn: (id: string | number) => deleteReportTemplate(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports', 'templates'] }),
+  });
+
+  const canManageAny = currentUserRole === 'TEAMLEAD' || currentUserRole === 'MANAGER';
 
   return (
-    <div className="card p-4 flex items-center gap-3 border-primary/30">
-      {err ? (
+    <CollapsibleCard
+      title="Saved Templates"
+      subtitle="Load a saved report definition or start from a blank one."
+      defaultOpen
+      actions={
+        <Button size="sm" variant="ghost" onClick={onNew}>
+          New report
+        </Button>
+      }
+    >
+      <div className="overflow-x-auto -mx-6">
+        <table className="w-full">
+          <thead>
+            <tr>
+              <th className="table-head">Name</th>
+              <th className="table-head">Columns</th>
+              <th className="table-head">Filters</th>
+              <th className="table-head">Visibility</th>
+              <th className="table-head">Updated</th>
+              <th className="table-head w-32 text-right pr-6">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {templates.isPending ? (
+              <tr>
+                <td colSpan={6} className="py-10 text-center">
+                  <Loader2 className="w-4 h-4 animate-spin inline text-ink-muted" />
+                </td>
+              </tr>
+            ) : (templates.data?.items.length ?? 0) === 0 ? (
+              <tr>
+                <td colSpan={6} className="py-10 text-center text-sm text-ink-muted">
+                  No saved templates yet. Configure filters + columns and click <span className="font-semibold">Save as template</span>.
+                </td>
+              </tr>
+            ) : (
+              templates.data?.items.map((t) => {
+                const isActive = String(t.id) === String(activeTemplateId);
+                const isOwn = String(t.ownerId) === String(currentUserId);
+                const filterCount = Object.keys((t.filters ?? {}) as object).filter(
+                  (k) => (t.filters as Record<string, unknown>)?.[k] != null && (t.filters as Record<string, unknown>)?.[k] !== '',
+                ).length;
+                return (
+                  <tr
+                    key={t.id}
+                    className={
+                      'transition ' +
+                      (isActive ? 'bg-primary-soft/40' : 'hover:bg-surface-sunken/40')
+                    }
+                  >
+                    <td className="table-cell font-semibold text-ink">
+                      <div className="flex items-center gap-2">
+                        {isActive && <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />}
+                        <span className="truncate">{t.name}</span>
+                      </div>
+                    </td>
+                    <td className="table-cell text-ink-muted text-xs">
+                      {t.columns.length} column{t.columns.length === 1 ? '' : 's'}
+                    </td>
+                    <td className="table-cell text-ink-muted text-xs">
+                      {filterCount === 0 ? '—' : `${filterCount} filter${filterCount === 1 ? '' : 's'}`}
+                    </td>
+                    <td className="table-cell">
+                      <span
+                        className={
+                          'chip ' +
+                          (t.isShared
+                            ? 'bg-info-soft text-info'
+                            : 'bg-surface-sunken text-ink-muted')
+                        }
+                      >
+                        {t.isShared ? 'Shared' : 'Private'}
+                      </span>
+                    </td>
+                    <td className="table-cell text-ink-muted text-xs">
+                      {formatDate(t.updatedAt)}
+                    </td>
+                    <td className="table-cell text-right pr-6">
+                      <div className="inline-flex items-center gap-1">
+                        <Button size="sm" variant={isActive ? 'soft' : 'primary'} onClick={() => onLoad(t)}>
+                          {isActive ? 'Loaded' : 'Load'}
+                        </Button>
+                        {(isOwn || canManageAny) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Delete template "${t.name}"?`)) {
+                                delMutation.mutate(t.id);
+                              }
+                            }}
+                            className="w-7 h-7 rounded-full text-danger hover:bg-danger-soft flex items-center justify-center"
+                            title="Delete template"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </CollapsibleCard>
+  );
+}
+
+/* ── Active template banner ─────────────────────────────── */
+function ActiveTemplateBanner({
+  template,
+  isDirty,
+  onDiscard,
+  onUpdate,
+  onClose,
+}: {
+  template: ReportTemplate;
+  isDirty: boolean;
+  onDiscard: () => void;
+  onUpdate: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="card flex items-center gap-3 px-4 py-3 border-primary/30">
+      <BookmarkPlus className="w-4 h-4 text-primary-ink dark:text-primary" />
+      <div className="text-sm text-ink flex-1 min-w-0">
+        Editing template <span className="font-semibold">{template.name}</span>
+        {isDirty && <span className="ml-2 text-warn font-medium">unsaved changes</span>}
+      </div>
+      {isDirty && (
         <>
-          <div className="text-sm text-danger">Export failed: {err}</div>
-          <Button variant="ghost" size="sm" onClick={onClose}>Dismiss</Button>
-        </>
-      ) : downloadUrl ? (
-        <>
-          <Download className="w-4 h-4 text-success" />
-          <div className="text-sm text-ink flex-1">
-            Export ready.{' '}
-            <a href={downloadUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-              Download file
-            </a>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
-        </>
-      ) : (
-        <>
-          <Loader2 className="w-4 h-4 animate-spin text-primary" />
-          <div className="text-sm text-ink flex-1">Export {status}… (task {taskId.slice(0, 12)})</div>
+          <Button size="sm" variant="ghost" onClick={onDiscard}>Discard</Button>
+          <Button size="sm" leftIcon={<Save className="w-3 h-3" />} onClick={onUpdate}>
+            Save changes
+          </Button>
         </>
       )}
+      <button
+        type="button"
+        onClick={onClose}
+        className="w-7 h-7 rounded-full text-ink-muted hover:bg-surface-sunken flex items-center justify-center"
+        title="Close template"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
 
-/* ── Customize Columns modal ───────────────────────── */
+/* ── Filters card ───────────────────────────────────────── */
+function FiltersSection({
+  fields,
+  values,
+  onChange,
+  onClear,
+  onRun,
+}: {
+  fields: ReportField[];
+  values: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+  onClear: () => void;
+  onRun: () => void;
+}) {
+  const filterable = useMemo(() => fields.filter((f) => f.filterable), [fields]);
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? filterable : filterable.slice(0, 8);
+
+  return (
+    <CollapsibleCard
+      title="Filters"
+      subtitle="Substring match, case-insensitive. Leave blank to include everything."
+      defaultOpen
+    >
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-3">
+        {visible.map((f) => (
+          <div key={f.key}>
+            <Label>{f.label}</Label>
+            <Input
+              value={values[f.key] ?? ''}
+              onChange={(e) =>
+                onChange({ ...values, [f.key]: e.target.value })
+              }
+              placeholder="Any"
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between mt-5">
+        <div>
+          {filterable.length > 8 && (
+            <Button variant="ghost" size="sm" onClick={() => setShowAll((s) => !s)}>
+              {showAll ? 'Show fewer filters' : `Show all ${filterable.length} filters`}
+            </Button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onClear}>Clear</Button>
+          <Button leftIcon={<Play className="w-3.5 h-3.5" />} onClick={onRun}>Run</Button>
+        </div>
+      </div>
+    </CollapsibleCard>
+  );
+}
+
+/* ── Customize Columns modal ────────────────────────────── */
 function CustomizeColumnsModal({
   open,
   onClose,
@@ -340,10 +576,21 @@ function CustomizeColumnsModal({
     setSelected(next);
   }
 
+  function selectAll() {
+    setSelected(new Set(fields.map((f) => f.key)));
+  }
+  function selectNone() {
+    setSelected(new Set());
+  }
+
   return (
-    <Modal open={open} onClose={onClose} title="Customize report" subtitle="Select columns to include" size="lg">
+    <Modal open={open} onClose={onClose} title="Customize columns" subtitle="Pick the fields to include in the table and the Excel export." size="lg">
       <div className="space-y-4">
-        <SearchInput placeholder="Search fields…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="flex items-center gap-3">
+          <SearchInput placeholder="Search fields…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Button size="sm" variant="ghost" onClick={selectAll}>All</Button>
+          <Button size="sm" variant="ghost" onClick={selectNone}>None</Button>
+        </div>
         <div className="max-h-[400px] overflow-y-auto border border-line rounded-lg">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-surface-sunken">
@@ -372,10 +619,22 @@ function CustomizeColumnsModal({
             </tbody>
           </table>
         </div>
-        <p className="text-[11px] text-ink-muted">{selected.size} columns selected</p>
+        <p className="text-[11px] text-ink-muted">{selected.size} of {fields.length} columns selected</p>
         <ModalFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => { onApply(Array.from(selected)); onClose(); }}>
+          <Button
+            disabled={selected.size === 0}
+            onClick={() => {
+              // Preserve the user's current column order; append newly-checked fields
+              // in catalog order, drop any that were unchecked.
+              const ordered = [
+                ...currentColumns.filter((k) => selected.has(k)),
+                ...fields.filter((f) => selected.has(f.key) && !currentColumns.includes(f.key)).map((f) => f.key),
+              ];
+              onApply(ordered);
+              onClose();
+            }}
+          >
             Apply
           </Button>
         </ModalFooter>
@@ -384,105 +643,149 @@ function CustomizeColumnsModal({
   );
 }
 
-/* ── Templates modal ───────────────────────────────── */
-function TemplatesModal({
-  open,
-  onClose,
-  onLoad,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onLoad: (tpl: Awaited<ReturnType<typeof listReportTemplates>>['items'][number]) => void;
-}) {
-  const qc = useQueryClient();
-  const templates = useQuery({
-    queryKey: ['reports', 'templates'],
-    queryFn: listReportTemplates,
-    enabled: open,
-  });
-
-  const delMutation = useMutation({
-    mutationFn: (id: string) => deleteReportTemplate(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports', 'templates'] }),
-  });
-
-  return (
-    <Modal open={open} onClose={onClose} title="Saved templates" size="md">
-      {templates.isPending ? (
-        <div className="py-8 text-center"><Loader2 className="w-5 h-5 animate-spin inline text-ink-muted" /></div>
-      ) : templates.data?.items.length === 0 ? (
-        <p className="py-8 text-center text-sm text-ink-muted">No saved templates yet.</p>
-      ) : (
-        <div className="space-y-2">
-          {templates.data?.items.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 p-3 border border-line rounded-lg">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-ink">{t.name}</p>
-                <p className="text-[11px] text-ink-muted">
-                  {t.columns.length} columns{t.isShared && ' · shared'}
-                </p>
-              </div>
-              <Button size="sm" onClick={() => onLoad(t)}>Load</Button>
-              <button
-                onClick={() => delMutation.mutate(t.id)}
-                className="w-8 h-8 rounded-full text-danger hover:bg-danger-soft flex items-center justify-center"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-/* ── Save template modal ───────────────────────────── */
+/* ── Save / Update template modal ───────────────────────── */
 function SaveTemplateModal({
   open,
   onClose,
   state,
+  activeTemplate,
+  onSaved,
 }: {
   open: boolean;
   onClose: () => void;
   state: QueryState;
+  activeTemplate: ReportTemplate | null;
+  onSaved: (t: ReportTemplate) => void;
 }) {
   const qc = useQueryClient();
   const [name, setName] = useState('');
   const [isShared, setIsShared] = useState(false);
+  const [mode, setMode] = useState<'update' | 'new'>('new');
   const [err, setErr] = useState<string | null>(null);
 
-  const m = useMutation({
+  // Reset form to a sensible default each time the modal opens.
+  useEffect(() => {
+    if (!open) return;
+    setErr(null);
+    if (activeTemplate) {
+      setName(activeTemplate.name);
+      setIsShared(activeTemplate.isShared);
+      setMode('update');
+    } else {
+      setName('');
+      setIsShared(false);
+      setMode('new');
+    }
+  }, [open, activeTemplate]);
+
+  const create = useMutation({
     mutationFn: () =>
       createReportTemplate({
         name,
         columns: state.columns,
-        filters: state.filters,
+        filters: cleanFilters(state.filters),
         isShared,
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
+      const list = await qc.fetchQuery({
+        queryKey: ['reports', 'templates'],
+        queryFn: () => listReportTemplates(1, 50),
+      });
+      const created = list.items.find((t) => t.name === name);
+      if (created) onSaved(created);
       qc.invalidateQueries({ queryKey: ['reports', 'templates'] });
-      setName('');
       onClose();
     },
-    onError: (e) => setErr((e as unknown as ApiErrorShape).message),
+    onError: (e) => setErr((e as unknown as ApiErrorShape).message ?? 'Save failed.'),
   });
 
+  const update = useMutation({
+    mutationFn: () =>
+      updateReportTemplate(activeTemplate!.id, {
+        name,
+        columns: state.columns,
+        filters: cleanFilters(state.filters),
+        isShared,
+      }),
+    onSuccess: (t) => {
+      onSaved(t);
+      qc.invalidateQueries({ queryKey: ['reports', 'templates'] });
+      onClose();
+    },
+    onError: (e) => setErr((e as unknown as ApiErrorShape).message ?? 'Save failed.'),
+  });
+
+  const submitting = create.isPending || update.isPending;
+  const canUpdate = !!activeTemplate;
+
   return (
-    <Modal open={open} onClose={onClose} title="Save as template" size="sm">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={canUpdate ? 'Save template' : 'Save as template'}
+      subtitle="Templates remember the columns and filters you've configured."
+      size="sm"
+    >
       <div className="space-y-4">
         {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
+
+        {canUpdate && (
+          <div className="flex gap-2 p-1 bg-surface-sunken rounded-lg text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => setMode('update')}
+              className={`flex-1 py-2 rounded-md transition ${mode === 'update' ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted'}`}
+            >
+              Update "{activeTemplate.name}"
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('new')}
+              className={`flex-1 py-2 rounded-md transition ${mode === 'new' ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted'}`}
+            >
+              Save as new
+            </button>
+          </div>
+        )}
+
         <div>
           <Label required>Template name</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Weekly closed charts" />
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Weekly closed charts"
+          />
         </div>
+
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={isShared} onChange={(e) => setIsShared(e.target.checked)} className="accent-primary" />
-          Share with team
+          <input
+            type="checkbox"
+            checked={isShared}
+            onChange={(e) => setIsShared(e.target.checked)}
+            className="accent-primary"
+          />
+          Share with team (visible to all coders, auditors, leads)
         </label>
+
+        <p className="text-[11px] text-ink-muted">
+          Saving {state.columns.length} column{state.columns.length === 1 ? '' : 's'}
+          {' and '}
+          {Object.values(cleanFilters(state.filters)).length} filter{Object.values(cleanFilters(state.filters)).length === 1 ? '' : 's'}.
+        </p>
+
         <ModalFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={!name.trim()} loading={m.isPending} onClick={() => m.mutate()}>Save</Button>
+          <Button
+            disabled={!name.trim()}
+            loading={submitting}
+            onClick={() => {
+              setErr(null);
+              if (canUpdate && mode === 'update') update.mutate();
+              else create.mutate();
+            }}
+          >
+            {canUpdate && mode === 'update' ? 'Update template' : 'Save template'}
+          </Button>
         </ModalFooter>
       </div>
     </Modal>

@@ -29,6 +29,7 @@ export class Worklist {
   @ManyToOne(() => Process) @JoinColumn({ name: 'process_id' }) process: Process;
 
   @Column({ name: 'date_of_service', type: 'date', nullable: true }) dateOfService?: string;
+  @Column({ name: 'date_of_service_to', type: 'date', nullable: true }) dateOfServiceTo?: string;
   @Column({ name: 'received_date', type: 'date' }) @Index() receivedDate: string;
 
   @Column({ name: 'total_charts', type: 'int', default: 0 }) totalCharts: number;

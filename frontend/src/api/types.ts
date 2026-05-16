@@ -6,6 +6,12 @@
 export type Role = 'TEAMLEAD' | 'MANAGER' | 'AUDITOR' | 'CODER';
 export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'PENDING';
 
+/** Minimal lookup shape — backend joins enough for the UI to render labels. */
+export interface NamedRef {
+  id: number;
+  name: string;
+}
+
 export interface User {
   id: string;
   employeeId: string | null;
@@ -17,6 +23,10 @@ export interface User {
   primarySpecialityId: number | null;
   clientId: number | null;
   locationId: number | null;
+  /** Populated by GET /users/:id — null on list endpoints that skip the joins. */
+  primarySpeciality?: NamedRef | null;
+  client?: NamedRef | null;
+  location?: NamedRef | null;
   dateOfBirth: string | null;
   dateOfJoining: string | null;
   avatarUrl: string | null;
@@ -123,7 +133,8 @@ export type ChartMilestone =
 
 export type ChartStatus = 'OPEN' | 'COMPLETE' | 'INCOMPLETE' | 'HOLD';
 
-export type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'DONE';
+// Backend enum value is FINALIZED; the UI shows it as "Done" via Chip labels.
+export type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'FINALIZED';
 
 export interface Procedure {
   code: string;
@@ -143,11 +154,17 @@ export interface Chart {
   allocatedCoderId: string | null;
   allocatedAuditorId: string | null;
   dateOfService: string | null;
+  admitDate: string | null;
   dischargeDate: string | null;
   primaryDiagnosis: string | null;
   secondaryDiagnoses: string[] | null;
   procedures: Procedure[] | null;
   emLevel: string | null;
+  /** Numeric DRG value — TypeORM serialises numeric columns as strings. */
+  drgValue: string | number | null;
+  coderCommentsToClient: string | null;
+  rejectionDenialComments: string | null;
+  deficiencyComments: string | null;
   customFields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -235,18 +252,40 @@ export interface ChartSummary {
     high: number;
     medium: number;
     low: number;
-    done: number;
+    finalized: number;
   };
   milestones: {
     readyToCode: number;
-    codingDone: number;
+    codingDoneToday: number;
     readyToAudit: number;
-    auditDone: number;
+    auditDoneToday: number;
   };
   statusToday: {
     complete: number;
     incomplete: number;
   };
+  aiStatusCounts: {
+    queued: number;
+    processing: number;
+    done: number;
+    errored: number;
+  };
+}
+
+/* ── AI pipeline state derived from a chart's customFields ── */
+export type AiStatus = 'NONE' | 'QUEUED' | 'PROCESSING' | 'DONE' | 'ERRORED';
+
+/**
+ * Resolve the user-visible AI state for a chart. Order matters: an in-flight
+ * pending row takes precedence over any prior result, then errors over success.
+ */
+export function deriveAiStatus(customFields: Record<string, unknown> | undefined | null): AiStatus {
+  if (!customFields) return 'NONE';
+  const pending = customFields.pendingPrediction as { gatewayStatus?: string } | undefined;
+  if (pending) return pending.gatewayStatus === 'STARTED' ? 'PROCESSING' : 'QUEUED';
+  if (customFields.aiPredictionError) return 'ERRORED';
+  if (customFields.aiPrediction) return 'DONE';
+  return 'NONE';
 }
 
 /* ── Chart feedback ──────────────────────────────────────── */
@@ -340,6 +379,36 @@ export interface DashboardSelf {
   incompleteToday: number;
   inProgressChart: { id: string; chartNo: string } | null;
   inProgressStartedAt: string | null;
+}
+
+export interface DateCount { date: string; count: number; }
+export interface DateValue { date: string; value: number; }
+
+export interface AllocationStats {
+  chartsByMilestone: Array<{ milestone: ChartMilestone; count: number }>;
+  chartCompletion: { complete: number; incomplete: number; open: number; hold: number };
+  qualityControl: {
+    feedbackProvided: number;
+    agree: number;
+    feedbackRejected: number;
+    feedbackImplemented: number;
+    unaudited: number;
+  };
+  worklistByStatus: { open: number; inProgress: number; closed: number };
+  progressToDate: DateCount[];
+}
+
+export interface UnallocatedVolume {
+  byWorklist: Array<{ worklist: string; count: number }>;
+  bySpeciality: Array<{ speciality: string; count: number }>;
+  byReceivedDate: DateCount[];
+  byDateOfService: DateCount[];
+}
+
+export interface ProductivityStats {
+  volumePerDay: DateCount[];
+  avgCodingMinutes: DateValue[];
+  reworkCount: number;
 }
 
 /* ── Attendance ──────────────────────────────────────────── */

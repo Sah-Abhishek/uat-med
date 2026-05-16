@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  AlertTriangle,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -20,13 +21,27 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { getActiveTimer } from '@/api/charts';
+import { IS_PRODUCTION_DEPLOYMENT, DEPLOYMENT } from '@/config/deployment';
+import {
+  getActiveTimer,
+  getPredictedCodes,
+  listCodeDecisions,
+  submitCodeDecisions,
+  type CodeDecisionInput,
+  type CodeDecisionType,
+  type PredictedCodeWithId,
+} from '@/api/charts';
+import {
+  getCodeReviewReasons,
+  type CodeReviewReasonRow,
+} from '@/api/configurations';
+import { AddRuleModal } from '@/features/coder-rules/AddRuleModal';
 import type {
   AiEncounterResult,
   AiPredictedCode,
   UploadedDocument,
 } from '@/api/types';
-import { Input } from '@/components/ui/Field';
+import { FancySelect, Input, Textarea } from '@/components/ui/Field';
 import { cn } from '@/lib/utils';
 import { AiSummaryPanel } from './AiSummaryPanel';
 
@@ -35,10 +50,38 @@ interface Props {
   onClose: () => void;
   prediction: AiEncounterResult | null;
   docs?: UploadedDocument[];
+  chartId: string;
+  clientId?: number;
+  locationId?: number;
+  onSubmitted?: () => void;
+  /** QA / Team Lead viewer. Loads previously-submitted decisions, hydrates
+   * the on-screen state from them, and locks every control — no submit, no
+   * decision buttons, no edits. */
+  readOnly?: boolean;
 }
 
 type Decision = 'pending' | 'accepted' | 'rejected' | 'edited' | 'added';
+// 'ADMIT CODE' kept in the type for now — the section is currently disabled
+// in buildItems() because admit code and primary diagnosis are the same
+// thing. Re-enable by uncommenting the admit lines below.
 type Category = 'ADMIT CODE' | 'PRIMARY' | 'SECONDARY' | 'PROCEDURE';
+const REASON_MIN_CHARS = 20;
+
+/**
+ * Maps the on-screen Category onto the API's CodeReviewType. ADMIT CODE
+ * is a UI mirror of the first PRIMARY, so we treat it as PRIMARY for
+ * persistence (and skip it in the submit payload to avoid a duplicate
+ * (chart, type, code) row — the PRIMARY row is the source of truth).
+ */
+function categoryToCodeType(c: Category): CodeDecisionType | null {
+  switch (c) {
+    case 'PRIMARY': return 'PRIMARY';
+    case 'SECONDARY': return 'SECONDARY';
+    case 'PROCEDURE': return 'PROCEDURE';
+    case 'ADMIT CODE': return null; // mirror of PRIMARY
+    default: return null;
+  }
+}
 
 interface CodeItem {
   key: string;
@@ -47,19 +90,26 @@ interface CodeItem {
   description: string;
   confidence?: number;
   reasoning?: string;
+  /** Orchestrator UUID — only present when the items were sourced from
+   * /charts/:id/predicted-codes. Required for the orchestrator forward. */
+  predictedCodeId?: string;
 }
 
 interface CodeState {
   decision: Decision;
   editedCode: string;
   editedDescription: string;
+  /** Free-text reason; required (≥20 chars) on Reject/Edit. */
   rejectReason: string;
+  /** Dropdown reason; required on Reject/Edit. Picked from Settings. */
+  reasonDropdown: string;
 }
 
-const CATEGORY_ORDER: Category[] = ['ADMIT CODE', 'PRIMARY', 'SECONDARY', 'PROCEDURE'];
+// 'ADMIT CODE' intentionally omitted — admit code === primary diagnosis.
+const CATEGORY_ORDER: Category[] = [/* 'ADMIT CODE', */ 'PRIMARY', 'SECONDARY', 'PROCEDURE'];
 
 const CATEGORY_DOT: Record<Category, string> = {
-  'ADMIT CODE': 'bg-success',
+  'ADMIT CODE': 'bg-success', // unused while admit is hidden; kept so the type stays satisfied.
   PRIMARY: 'bg-info',
   SECONDARY: 'bg-success',
   PROCEDURE: 'bg-success',
@@ -74,9 +124,10 @@ const LEGEND: { d: Decision; label: string; cls: string }[] = [
 ];
 
 /**
- * The encounter API returns no distinct admit slot. We mirror the first
- * primary code into the ADMIT CODE section so the UI matches the design,
- * while keeping the rest of the categories backed by their own arrays.
+ * Builds the reviewable code list. Admit code and primary diagnosis are
+ * the same thing in this workflow, so the ADMIT CODE mirror has been
+ * disabled — the first PRIMARY row is the source of truth. Restore by
+ * uncommenting the `admit` block below.
  */
 function buildItems(prediction: AiEncounterResult | null): CodeItem[] {
   if (!prediction) return [];
@@ -88,15 +139,70 @@ function buildItems(prediction: AiEncounterResult | null): CodeItem[] {
     confidence: c.confidence,
     reasoning: c.justification,
   });
-  const admit = prediction.primary[0]
-    ? [mk(prediction.primary[0], 'ADMIT CODE', 0)]
-    : [];
-  return [
-    ...admit,
+  // const admit = prediction.primary[0]
+  //   ? [mk(prediction.primary[0], 'ADMIT CODE', 0)]
+  //   : [];
+  const all: CodeItem[] = [
+    // ...admit,
     ...prediction.primary.map((c, i) => mk(c, 'PRIMARY', i)),
     ...prediction.secondary.map((c, i) => mk(c, 'SECONDARY', i)),
     ...prediction.procedures.map((c, i) => mk(c, 'PROCEDURE', i)),
   ];
+  return dedupeByCategoryCode(all);
+}
+
+/** AI sometimes returns the same code more than once in the same category
+ * (different sequence positions or duplicate hits). Show each unique
+ * (category, code) pair just once — first occurrence wins. Same code
+ * across DIFFERENT categories is allowed (rare but valid clinically). */
+function dedupeByCategoryCode(items: CodeItem[]): CodeItem[] {
+  const seen = new Set<string>();
+  const out: CodeItem[] = [];
+  for (const it of items) {
+    const key = `${it.category}|${it.code}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  return out;
+}
+
+/** Builds items from the orchestrator's codes-with-IDs response — the
+ * preferred source because each item carries `predictedCodeId` (the UUID
+ * the orchestrator needs back on submit). Falls back to buildItems() when
+ * this fetch fails. */
+function buildItemsFromPredictedCodes(rows: PredictedCodeWithId[]): CodeItem[] {
+  const categoryFor = (codeType: string): Category | null => {
+    const t = codeType?.toLowerCase();
+    if (t === 'primary')   return 'PRIMARY';
+    if (t === 'secondary') return 'SECONDARY';
+    if (t === 'procedure' || t === 'cpt') return 'PROCEDURE';
+    return null;
+  };
+  const out: CodeItem[] = [];
+  // Sort so the modal's category order is stable: Primary → Secondary → Procedure.
+  const order: Record<Category, number> = {
+    'ADMIT CODE': 0, PRIMARY: 1, SECONDARY: 2, PROCEDURE: 3,
+  };
+  const tagged = rows
+    .map((r, i) => ({ r, i, cat: categoryFor(r.code_type) }))
+    .filter((x): x is { r: PredictedCodeWithId; i: number; cat: Category } => x.cat !== null)
+    .sort((a, b) =>
+      order[a.cat] - order[b.cat] ||
+      (a.r.sequence_pos ?? a.i) - (b.r.sequence_pos ?? b.i),
+    );
+  for (const { r, i, cat } of tagged) {
+    out.push({
+      key: `${cat}-${i}-${r.icd_code}-${r.id}`,
+      category: cat,
+      code: r.icd_code,
+      description: r.description,
+      confidence: r.confidence,
+      reasoning: (r.evidence_json as any)?.justification,
+      predictedCodeId: r.id,
+    });
+  }
+  return dedupeByCategoryCode(out);
 }
 
 function fmtTimer(secs: number) {
@@ -108,8 +214,30 @@ function fmtTimer(secs: number) {
 
 type TopTab = 'documents' | 'ai-summary';
 
-export function ReviewEditModal({ open, onClose, prediction, docs = [] }: Props) {
-  const items = useMemo(() => buildItems(prediction), [prediction]);
+export function ReviewEditModal({
+  open,
+  onClose,
+  prediction,
+  docs = [],
+  chartId,
+  clientId,
+  locationId,
+  onSubmitted,
+  readOnly = false,
+}: Props) {
+  // Prefer the orchestrator codes-with-IDs response (each item carries
+  // `predictedCodeId` for the submit forward). Fall back to the AI
+  // prediction blob if the fetch hasn't returned yet or fails.
+  const predictedCodesQ = useQuery({
+    queryKey: ['chart-predicted-codes', chartId],
+    queryFn: () => getPredictedCodes(chartId),
+    enabled: open && !!chartId,
+  });
+  const aiItems = useMemo(() => {
+    const rows = predictedCodesQ.data?.codes;
+    if (rows && rows.length > 0) return buildItemsFromPredictedCodes(rows);
+    return buildItems(prediction);
+  }, [predictedCodesQ.data, prediction]);
   const [state, setState] = useState<Record<string, CodeState>>({});
   const [selectedIdx, setSelectedIdx] = useState(0);
   // Two-level left pane: top picks Documents vs AI Summary, sub picks
@@ -117,25 +245,100 @@ export function ReviewEditModal({ open, onClose, prediction, docs = [] }: Props)
   const [topTab, setTopTab] = useState<TopTab>('documents');
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  // Codes the coder added that the AI didn't suggest. Persisted into
+  // chart_code_decisions and forwarded to the orchestrator as ADD actions.
+  const [addedItems, setAddedItems] = useState<CodeItem[]>([]);
+  const [addCodeOpen, setAddCodeOpen] = useState(false);
+  const [addRuleOpen, setAddRuleOpen] = useState(false);
+  // AI items first (in their natural category order), user-added items
+  // after — added codes show up at the end of their respective category
+  // section because CategoryRow filters by `it.category`. Declared after
+  // addedItems to keep the closure reference order valid.
+  const items = useMemo(() => [...aiItems, ...addedItems], [aiItems, addedItems]);
 
-  // Hydrate per-row state when the modal opens or the prediction changes.
+  // Reset transient UI + clear added codes whenever the modal opens. Stays
+  // in [open] only — we don't want to wipe user decisions if the items
+  // array changes mid-session (which now happens when the user adds a code).
   useEffect(() => {
     if (!open) return;
-    const next: Record<string, CodeState> = {};
-    for (const it of items) {
-      next[it.key] = {
-        decision: 'pending',
-        editedCode: it.code,
-        editedDescription: it.description,
-        rejectReason: '',
-      };
-    }
-    setState(next);
     setSelectedIdx(0);
     setEditing(false);
+    setSubmitError(null);
+    setConfirmOpen(false);
+    setAddedItems([]);
+    setAddCodeOpen(false);
+    setAddRuleOpen(false);
     setActiveDocId(docs[0]?.id ?? null);
     setTopTab(docs.length > 0 ? 'documents' : 'ai-summary');
-  }, [open, items, docs]);
+  }, [open, docs]);
+
+  // Merge state for items: seed any new keys with a 'pending' default, drop
+  // entries for items that no longer exist (e.g. an added code was removed).
+  // This preserves prior decisions across items-array changes — critical
+  // so adding a code doesn't blow away in-progress reviews on AI codes.
+  useEffect(() => {
+    if (!open) return;
+    setState((prev) => {
+      const next: Record<string, CodeState> = {};
+      for (const it of items) {
+        next[it.key] = prev[it.key] ?? {
+          decision: 'pending',
+          editedCode: it.code,
+          editedDescription: it.description,
+          rejectReason: '',
+          reasonDropdown: '',
+        };
+      }
+      return next;
+    });
+  }, [open, items]);
+
+  // Configurable reason lists for this chart's (client, location). Loaded
+  // once when the modal opens; the SelectedCard filters by codeType + action.
+  const reasonsQ = useQuery({
+    queryKey: ['code-review-reasons', clientId, locationId],
+    queryFn: () => getCodeReviewReasons({ clientId: clientId!, locationId: locationId! }),
+    enabled: open && !!clientId && !!locationId,
+  });
+  const reasonRows: CodeReviewReasonRow[] = reasonsQ.data?.items ?? [];
+
+  // In read-only QA mode, pull whatever decisions were previously submitted
+  // for this chart so we can show the coder/auditor's verdict + reason text
+  // alongside each code instead of a fresh "pending" board.
+  const decisionsQ = useQuery({
+    queryKey: ['chart-code-decisions', chartId],
+    queryFn: () => listCodeDecisions(chartId),
+    enabled: open && readOnly && !!chartId,
+  });
+  useEffect(() => {
+    if (!open || !readOnly) return;
+    const rows = decisionsQ.data?.items;
+    if (!rows?.length) return;
+    setState((prev) => {
+      const next = { ...prev };
+      for (const it of items) {
+        const codeType = categoryToCodeType(it.category);
+        if (!codeType) continue;
+        const match = rows.find((r) => r.codeType === codeType && r.codeValue === it.code);
+        if (!match) continue;
+        const verdict =
+          match.decision === 'ACCEPTED' ? 'accepted' :
+          match.decision === 'REJECTED' ? 'rejected' :
+          'edited';
+        next[it.key] = {
+          ...next[it.key],
+          decision: verdict as Decision,
+          editedCode: match.editedCode ?? next[it.key]?.editedCode ?? it.code,
+          editedDescription: match.editedDescription ?? next[it.key]?.editedDescription ?? it.description,
+          rejectReason: match.reasonText ?? '',
+          reasonDropdown: match.reasonDropdown ?? '',
+        };
+      }
+      return next;
+    });
+  }, [open, readOnly, decisionsQ.data, items]);
 
   // Live timer pill mirrors the chart's running session. Cached by react-query
   // with the same key the header uses, so no extra network round-trip.
@@ -157,11 +360,22 @@ export function ReviewEditModal({ open, onClose, prediction, docs = [] }: Props)
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      // Esc closes the confirm dialog first, then the main modal.
+      if (confirmOpen) {
+        setConfirmOpen(false);
+        return;
+      }
+      onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, confirmOpen]);
+
+  const qc = useQueryClient();
+  const submitMut = useMutation({
+    mutationFn: (decisions: CodeDecisionInput[]) => submitCodeDecisions(chartId, decisions),
+  });
 
   if (!open) return null;
 
@@ -177,6 +391,100 @@ export function ReviewEditModal({ open, onClose, prediction, docs = [] }: Props)
     update(selected.key, { decision: d });
   };
 
+  // Build the API payload, dropping ADMIT CODE rows (UI mirror of the
+  // first PRIMARY) and rows still pending.
+  const buildPayload = (): CodeDecisionInput[] => {
+    const out: CodeDecisionInput[] = [];
+    for (const it of items) {
+      const codeType = categoryToCodeType(it.category);
+      if (!codeType) continue;
+      const st = state[it.key];
+      if (!st || st.decision === 'pending') continue;
+      const verdict =
+        st.decision === 'accepted' ? 'ACCEPTED' :
+        st.decision === 'rejected' ? 'REJECTED' :
+        st.decision === 'edited' ? 'EDITED' :
+        'ADDED';
+      const requiresDropdown = verdict === 'REJECTED' || verdict === 'EDITED';
+      const requiresReasonText = requiresDropdown || verdict === 'ADDED';
+      out.push({
+        codeType,
+        codeValue: it.code,
+        predictedCodeId: it.predictedCodeId,
+        originalDescription: it.description,
+        decision: verdict,
+        editedCode: verdict === 'EDITED' || verdict === 'ADDED' ? st.editedCode : undefined,
+        editedDescription:
+          verdict === 'EDITED' || verdict === 'ADDED' ? st.editedDescription : undefined,
+        reasonDropdown: requiresDropdown ? st.reasonDropdown.trim() : undefined,
+        reasonText: requiresReasonText ? st.rejectReason.trim() : undefined,
+      });
+    }
+    return out;
+  };
+
+  const invalidReasons = items
+    .map((it) => {
+      const st = state[it.key];
+      if (!st) return null;
+      const isReject = st.decision === 'rejected';
+      const isEdit = st.decision === 'edited';
+      const isAdd = st.decision === 'added';
+      if (!isReject && !isEdit && !isAdd) return null;
+      if (!categoryToCodeType(it.category)) return null;
+      const dropdownOk = (isReject || isEdit) ? st.reasonDropdown.trim().length > 0 : true;
+      const textOk = st.rejectReason.trim().length >= REASON_MIN_CHARS;
+      if (dropdownOk && textOk) return null;
+      return it.code;
+    })
+    .filter((v): v is string => v !== null);
+
+  const payloadCount = buildPayload().length;
+  const submitDisabled =
+    submitMut.isPending ||
+    payloadCount === 0 ||
+    invalidReasons.length > 0 ||
+    !clientId ||
+    !locationId;
+
+  // Header button no longer submits — it opens the confirmation dialog,
+  // which renders the summary and only then fires the API on user
+  // confirmation.
+  const openConfirm = () => {
+    setSubmitError(null);
+    if (buildPayload().length === 0) return;
+    setConfirmOpen(true);
+  };
+
+  const onConfirmSubmit = async () => {
+    setSubmitError(null);
+    const payload = buildPayload();
+    if (payload.length === 0) {
+      setConfirmOpen(false);
+      return;
+    }
+    try {
+      await submitMut.mutateAsync(payload);
+      // Refresh both the orchestrator codes and the local audit so the
+      // chart detail page (AI ICD card) and the next modal-open both see
+      // the post-submit state — edited code-values, removed deletes, the
+      // new ADD rows, etc.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['chart-predicted-codes', chartId] }),
+        qc.invalidateQueries({ queryKey: ['chart-code-decisions', chartId] }),
+      ]);
+      onSubmitted?.();
+      setConfirmOpen(false);
+      onClose();
+    } catch (err) {
+      const msg =
+        (err as any)?.response?.data?.error?.message ??
+        (err as any)?.message ??
+        'Failed to submit decisions.';
+      setSubmitError(msg);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-stretch p-3 sm:p-5"
@@ -190,22 +498,53 @@ export function ReviewEditModal({ open, onClose, prediction, docs = [] }: Props)
         <header className="flex items-center justify-between px-5 py-3 bg-[#1A1F2B] text-white">
           <div className="flex items-center gap-4">
             <span className="text-[11px] uppercase tracking-[0.18em] font-semibold text-white/70">
-              Review &amp; Edit
+              {readOnly ? "Coder's Decisions · Read-only" : 'Review & Edit'}
             </span>
-            <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/10 text-warn text-xs font-mono">
-              <Clock className="w-3.5 h-3.5" />
-              {fmtTimer(elapsed)}
-            </span>
+            {readOnly ? (
+              <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-info/15 border border-info/30 text-info text-xs font-mono">
+                QA View
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/10 text-warn text-xs font-mono">
+                <Clock className="w-3.5 h-3.5" />
+                {fmtTimer(elapsed)}
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center gap-2 h-9 px-4 rounded-pill bg-success text-white text-sm font-semibold hover:brightness-110 transition"
-            >
-              <Check className="w-3.5 h-3.5" />
-              Review &amp; Submit
-            </button>
+          <div className="flex items-center gap-3">
+            {!readOnly && submitError && (
+              <span className="hidden md:inline text-xs text-danger bg-danger-soft/30 border border-danger/30 px-2 py-1 rounded">
+                {submitError}
+              </span>
+            )}
+            {!readOnly && invalidReasons.length > 0 && (
+              <span
+                className="hidden md:inline text-[11px] text-warn"
+                title={`Missing reason on: ${invalidReasons.join(', ')}`}
+              >
+                {invalidReasons.length} code(s) need a reason ({REASON_MIN_CHARS}+ chars &amp; dropdown)
+              </span>
+            )}
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={openConfirm}
+                disabled={submitDisabled}
+                title={
+                  !clientId || !locationId
+                    ? 'Chart is missing client/location'
+                    : invalidReasons.length > 0
+                      ? 'Provide reason text (≥20 chars) and dropdown for every Reject/Edit'
+                      : payloadCount === 0
+                        ? 'Mark at least one code as Accept / Reject / Edit'
+                        : 'Open submission summary'
+                }
+                className="inline-flex items-center gap-2 h-9 px-4 rounded-pill bg-success text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Check className="w-3.5 h-3.5" />
+                {submitMut.isPending ? 'Submitting…' : 'Review & Submit'}
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -239,8 +578,295 @@ export function ReviewEditModal({ open, onClose, prediction, docs = [] }: Props)
             editing={editing}
             setEditing={setEditing}
             reviewedCount={reviewedCount}
+            reasonRows={reasonRows}
+            readOnly={readOnly}
+            onAddCode={() => setAddCodeOpen(true)}
+            onAddRule={() => setAddRuleOpen(true)}
+            onRemoveItem={(key) => {
+              setAddedItems((prev) => prev.filter((it) => it.key !== key));
+              setSelectedIdx(0);
+            }}
           />
         </div>
+      </div>
+
+      {confirmOpen && (
+        <ConfirmSubmitModal
+          payload={buildPayload()}
+          submitting={submitMut.isPending}
+          error={submitError}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={onConfirmSubmit}
+        />
+      )}
+
+      {addCodeOpen && (
+        <AddCodeModal
+          onClose={() => setAddCodeOpen(false)}
+          onAdd={(item, reason) => {
+            // Seed state for the new item BEFORE appending it, so the
+            // items-merge effect sees prev[item.key] already set and
+            // preserves our decision='added' + reason instead of
+            // defaulting to 'pending'.
+            setState((prev) => ({
+              ...prev,
+              [item.key]: {
+                decision: 'added',
+                editedCode: item.code,
+                editedDescription: item.description,
+                rejectReason: reason,
+                reasonDropdown: '',
+              },
+            }));
+            setAddedItems((prev) => [...prev, item]);
+            setAddCodeOpen(false);
+            // Jump selection to the freshly-added item so the user sees it.
+            setTimeout(() => setSelectedIdx(items.length), 0);
+          }}
+        />
+      )}
+      {addRuleOpen && (
+        <AddRuleModal onClose={() => setAddRuleOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+/* ── Confirm submission modal ───────────────────────────── */
+
+const VERDICT_META: Record<
+  CodeDecisionInput['decision'],
+  { label: string; chip: string; dot: string }
+> = {
+  ACCEPTED: {
+    label: 'Accepted',
+    chip: 'bg-success-soft/60 text-success border-success/30',
+    dot: 'bg-success',
+  },
+  REJECTED: {
+    label: 'Rejected',
+    chip: 'bg-danger-soft/60 text-danger border-danger/30',
+    dot: 'bg-danger',
+  },
+  EDITED: {
+    label: 'Edited',
+    chip: 'bg-info-soft/60 text-info border-info/30',
+    dot: 'bg-info',
+  },
+  ADDED: {
+    label: 'Added',
+    chip: 'bg-violet-100/60 text-violet-700 border-violet-300/40 dark:bg-violet-500/15 dark:text-violet-300',
+    dot: 'bg-violet-500',
+  },
+};
+
+const CODE_TYPE_LABEL: Record<CodeDecisionType, string> = {
+  PRIMARY: 'Primary Diagnosis',
+  SECONDARY: 'Secondary Diagnosis',
+  PROCEDURE: 'CPT / Procedure',
+  EM_LEVEL: 'ED/EM Level',
+  MODIFIER: 'Modifier',
+};
+
+function ConfirmSubmitModal({
+  payload,
+  submitting,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  payload: CodeDecisionInput[];
+  submitting: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  // Tally + group for the summary panes.
+  const counts: Record<CodeDecisionInput['decision'], number> = {
+    ACCEPTED: 0, REJECTED: 0, EDITED: 0, ADDED: 0,
+  };
+  for (const d of payload) counts[d.decision]++;
+
+  const grouped = new Map<CodeDecisionType, CodeDecisionInput[]>();
+  for (const d of payload) {
+    const list = grouped.get(d.codeType) ?? [];
+    list.push(d);
+    grouped.set(d.codeType, list);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-stretch p-3 sm:p-6"
+      onClick={() => {
+        if (!submitting) onCancel();
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="m-auto bg-surface rounded-xl shadow-2xl w-[min(720px,96vw)] max-h-[90vh] flex flex-col overflow-hidden border border-line"
+      >
+        <header className="flex items-center justify-between px-5 py-3 border-b border-line bg-surface-sunken/40">
+          <div>
+            <h3 className="text-sm font-bold text-ink">Confirm submission</h3>
+            <p className="text-[11px] text-ink-muted mt-0.5">
+              Review {payload.length} decision{payload.length === 1 ? '' : 's'} before sending. This cannot be undone for these codes.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            aria-label="Close"
+            className="w-8 h-8 rounded-md hover:bg-surface-2 flex items-center justify-center text-ink-muted disabled:opacity-50"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </header>
+
+        {!IS_PRODUCTION_DEPLOYMENT && (
+          <div className="px-4 py-3 border-b border-warn/30 bg-warn/10 flex items-start gap-3">
+            <AlertTriangle className="w-4 h-4 text-warn mt-0.5 shrink-0" />
+            <div className="text-[12px] leading-relaxed text-ink">
+              <div className="font-semibold text-warn mb-0.5">
+                {DEPLOYMENT.toUpperCase()} environment — corrections will NOT be sent to the AI
+              </div>
+              <p className="text-ink-muted">
+                Because this is a non-production deployment, your accepted, edited,
+                rejected and added codes will be saved locally but{' '}
+                <strong>will not be forwarded to the AI training system</strong>.
+                This protects the golden dataset from being polluted by test data.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Tallies */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-4 border-b border-line">
+          {(['ACCEPTED', 'REJECTED', 'EDITED', 'ADDED'] as const).map((v) => {
+            const meta = VERDICT_META[v];
+            return (
+              <div
+                key={v}
+                className="rounded-lg border border-line bg-surface-sunken/40 px-3 py-2 flex items-center justify-between"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span className={cn('w-1.5 h-1.5 rounded-full', meta.dot)} />
+                  <span className="text-[11px] uppercase tracking-wide font-semibold text-ink-muted">
+                    {meta.label}
+                  </span>
+                </span>
+                <span className="text-lg font-bold font-mono text-ink">{counts[v]}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Decision list */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+          {payload.length === 0 ? (
+            <p className="text-sm text-ink-muted text-center py-6">
+              Nothing to submit yet.
+            </p>
+          ) : (
+            Array.from(grouped.entries()).map(([codeType, list]) => (
+              <section key={codeType}>
+                <h4 className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-2">
+                  {CODE_TYPE_LABEL[codeType]} ({list.length})
+                </h4>
+                <ul className="space-y-1.5">
+                  {list.map((d, i) => {
+                    const meta = VERDICT_META[d.decision];
+                    return (
+                      <li
+                        key={`${codeType}-${d.codeValue}-${i}`}
+                        className="rounded-lg border border-line bg-surface px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border',
+                              meta.chip,
+                            )}
+                          >
+                            {meta.label}
+                          </span>
+                          <span className="font-mono font-semibold text-sm text-ink">
+                            {d.decision === 'EDITED' && d.editedCode && d.editedCode !== d.codeValue ? (
+                              <>
+                                <span className="text-ink-muted line-through mr-1">{d.codeValue}</span>
+                                <span>{d.editedCode}</span>
+                              </>
+                            ) : (
+                              d.codeValue
+                            )}
+                          </span>
+                          {d.originalDescription && (
+                            <span className="text-xs text-ink-muted truncate flex-1 min-w-0" title={d.originalDescription}>
+                              · {d.originalDescription}
+                            </span>
+                          )}
+                        </div>
+                        {d.decision === 'EDITED' && d.editedDescription &&
+                          d.editedDescription !== d.originalDescription && (
+                          <div className="mt-1.5 ml-1 text-[11px] text-info">
+                            New description: <span className="text-ink">{d.editedDescription}</span>
+                          </div>
+                        )}
+                        {(d.reasonDropdown || d.reasonText) && (
+                          <div className="mt-1.5 ml-1 text-[11px] text-ink-muted space-y-0.5">
+                            {d.reasonDropdown && (
+                              <div>
+                                <span className="font-semibold">Reason:</span>{' '}
+                                <span className="text-ink">{d.reasonDropdown}</span>
+                              </div>
+                            )}
+                            {d.reasonText && (
+                              <div className="line-clamp-2">
+                                <span className="font-semibold">Notes:</span>{' '}
+                                <span className="text-ink">{d.reasonText}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ))
+          )}
+        </div>
+
+        {error && (
+          <div className="px-4 py-2 border-t border-line text-xs text-danger bg-danger-soft/30">
+            {error}
+          </div>
+        )}
+
+        <footer className="flex items-center justify-between gap-3 px-4 py-3 border-t border-line bg-surface-sunken/40">
+          <span className="text-[11px] text-ink-muted">
+            Submitting will lock these decisions to the chart.
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={submitting}
+              className="h-9 px-4 rounded-pill border border-line text-sm font-semibold text-ink hover:bg-surface-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={submitting || payload.length === 0}
+              className="inline-flex items-center gap-2 h-9 px-5 rounded-pill bg-success text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Check className="w-3.5 h-3.5" />
+              {submitting ? 'Submitting…' : 'Confirm & Submit'}
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );
@@ -432,6 +1058,11 @@ function CodesPane({
   editing,
   setEditing,
   reviewedCount,
+  reasonRows,
+  readOnly,
+  onAddCode,
+  onAddRule,
+  onRemoveItem,
 }: {
   items: CodeItem[];
   state: Record<string, CodeState>;
@@ -444,6 +1075,11 @@ function CodesPane({
   editing: boolean;
   setEditing: (v: boolean) => void;
   reviewedCount: number;
+  reasonRows: CodeReviewReasonRow[];
+  readOnly: boolean;
+  onAddCode: () => void;
+  onAddRule: () => void;
+  onRemoveItem: (key: string) => void;
 }) {
   const groups = CATEGORY_ORDER
     .map((cat) => ({ cat, list: items.filter((it) => it.category === cat) }))
@@ -460,20 +1096,24 @@ function CodesPane({
               {items.length} code{items.length === 1 ? '' : 's'} · {reviewedCount} reviewed
             </p>
           </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 px-3 h-8 rounded-md border border-line text-xs font-semibold text-ink hover:bg-surface-2 transition"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Code
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 px-3 h-8 rounded-md border border-line text-xs font-semibold text-ink hover:bg-surface-2 transition"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Rule
-            </button>
-          </div>
+          {!readOnly && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onAddCode}
+                className="inline-flex items-center gap-1 px-3 h-8 rounded-md border border-line text-xs font-semibold text-ink hover:bg-surface-2 transition"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Code
+              </button>
+              <button
+                type="button"
+                onClick={onAddRule}
+                className="inline-flex items-center gap-1 px-3 h-8 rounded-md border border-line text-xs font-semibold text-ink hover:bg-surface-2 transition"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Rule
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -509,6 +1149,9 @@ function CodesPane({
             setDecision={setDecision}
             editing={editing}
             setEditing={setEditing}
+            reasonRows={reasonRows}
+            readOnly={readOnly}
+            onRemove={() => onRemoveItem(selected.key)}
           />
         )}
       </div>
@@ -627,6 +1270,9 @@ function SelectedCard({
   setDecision,
   editing,
   setEditing,
+  reasonRows,
+  readOnly,
+  onRemove,
 }: {
   item: CodeItem;
   st: CodeState;
@@ -634,7 +1280,27 @@ function SelectedCard({
   setDecision: (d: Decision) => void;
   editing: boolean;
   setEditing: (v: boolean) => void;
+  reasonRows: CodeReviewReasonRow[];
+  readOnly: boolean;
+  onRemove: () => void;
 }) {
+  const codeType = categoryToCodeType(item.category);
+  // Reason form shows under any non-pending decision that needs a reason.
+  // ADDED uses the same form (text field only — no dropdown for ADD since
+  // we haven't seeded ADD reason lists yet).
+  const isAdded = st.decision === 'added';
+  const showReasonForm = !editing && (st.decision === 'rejected' || st.decision === 'edited' || isAdded);
+  const action = st.decision === 'rejected' ? 'REJECT' : 'EDIT';
+  const filteredReasons =
+    codeType !== null
+      ? reasonRows
+          .filter((r) => r.codeType === codeType && r.action === action && r.isActive)
+          .sort((a, b) => a.displayOrder - b.displayOrder || a.text.localeCompare(b.text))
+      : [];
+  const reasonChars = st.rejectReason.trim().length;
+  const dropdownMissing = showReasonForm && !isAdded && !st.reasonDropdown.trim();
+  const textShort = showReasonForm && reasonChars < REASON_MIN_CHARS;
+
   return (
     <div className="rounded-xl border border-line bg-surface-sunken/30 p-4">
       <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
@@ -674,56 +1340,172 @@ function SelectedCard({
         </p>
       )}
 
-      {st.decision === 'rejected' && !editing && (
-        <Input
-          placeholder="Reason for rejection…"
-          value={st.rejectReason}
-          onChange={(e) => update({ rejectReason: e.target.value })}
-          className="mt-3"
-        />
+      {showReasonForm && (
+        <div className="mt-4 rounded-xl border border-line bg-surface p-3 space-y-3">
+          {/* Dropdown row only renders for REJECT/EDIT — ADD has no
+              dropdown reason list configured today. */}
+          {!isAdded && (
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted inline-flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    'w-1.5 h-1.5 rounded-full',
+                    st.decision === 'rejected' ? 'bg-danger' : 'bg-info',
+                  )}
+                />
+                Reason {st.decision === 'rejected' ? '(reject)' : '(edit)'}
+                {!readOnly && <span className="text-danger normal-case">*</span>}
+              </label>
+              {!readOnly && (
+                <span className="text-[10px] text-ink-muted/70 font-mono">
+                  {filteredReasons.length} option{filteredReasons.length === 1 ? '' : 's'}
+                </span>
+              )}
+            </div>
+            {readOnly ? (
+              <div className="text-sm text-ink px-3 py-2 rounded-lg border border-line bg-surface-sunken/40">
+                {st.reasonDropdown || <span className="text-ink-muted">— No reason recorded —</span>}
+              </div>
+            ) : filteredReasons.length === 0 ? (
+              <div className="text-xs px-3 py-2 rounded-lg border border-warn/30 bg-warn-soft/30 text-warn">
+                No reasons configured for this code type. Ask a Team Lead to add some in
+                Configurations → Review Reasons.
+              </div>
+            ) : (
+              <FancySelect
+                value={st.reasonDropdown}
+                onChange={(v) => update({ reasonDropdown: v })}
+                options={filteredReasons.map((r) => ({ value: r.text, label: r.text }))}
+                placeholder="Select a reason…"
+                className={cn(dropdownMissing && '[&>button]:border-danger/60')}
+              />
+            )}
+            {!readOnly && dropdownMissing && filteredReasons.length > 0 && (
+              <p className="mt-1 text-[11px] text-danger">Reason is required.</p>
+            )}
+          </div>
+          )}
+
+          <div>
+            <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+              Notes {!readOnly && <span className="text-danger normal-case">*</span>}
+            </label>
+            {readOnly ? (
+              <div className="text-sm text-ink px-3 py-2 rounded-lg border border-line bg-surface-sunken/40 whitespace-pre-wrap leading-relaxed">
+                {st.rejectReason || <span className="text-ink-muted">— No notes recorded —</span>}
+              </div>
+            ) : (
+              <>
+                <Textarea
+                  placeholder={`Describe the ${st.decision === 'rejected' ? 'rejection' : st.decision === 'edited' ? 'edit' : 'addition'} (min ${REASON_MIN_CHARS} characters)…`}
+                  value={st.rejectReason}
+                  onChange={(e) => update({ rejectReason: e.target.value })}
+                  rows={3}
+                  error={textShort ? `Minimum ${REASON_MIN_CHARS} characters.` : undefined}
+                />
+                <div className="flex items-center justify-between mt-1">
+                  <div className="flex-1 h-1 bg-surface-sunken rounded-full overflow-hidden mr-3">
+                    <div
+                      className={cn(
+                        'h-full transition-all',
+                        textShort ? 'bg-danger/70' : 'bg-success',
+                      )}
+                      style={{ width: `${Math.min(100, (reasonChars / REASON_MIN_CHARS) * 100)}%` }}
+                    />
+                  </div>
+                  <span className={cn(
+                    'text-[11px] font-mono shrink-0',
+                    textShort ? 'text-danger' : 'text-success',
+                  )}>
+                    {reasonChars} / {REASON_MIN_CHARS}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
-      <div className="grid grid-cols-3 gap-2 mt-4">
-        {editing ? (
+      {readOnly ? (
+        <ReadOnlyVerdictRow decision={st.decision} />
+      ) : isAdded ? (
+        <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-violet-300/40 bg-violet-50/40 dark:bg-violet-500/10 px-3 py-2">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+            <Plus className="w-3 h-3" />
+            Added by you
+          </span>
           <button
             type="button"
-            onClick={() => {
-              setEditing(false);
-              setDecision('edited');
-            }}
-            className="col-span-3 inline-flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg border border-info/30 bg-info-soft/50 text-info hover:bg-info-soft transition"
+            onClick={onRemove}
+            className="inline-flex items-center gap-1 px-3 h-7 rounded-md border border-line text-xs font-semibold text-ink-muted hover:bg-danger-soft/40 hover:text-danger hover:border-danger/30 transition"
           >
-            <Save className="w-3.5 h-3.5" /> Save Edit
+            <X className="w-3 h-3" /> Remove
           </button>
-        ) : (
-          <>
-            <DecisionButton
-              tone="success"
-              active={st.decision === 'accepted'}
-              icon={<Check className="w-3.5 h-3.5" />}
-              onClick={() => setDecision(st.decision === 'accepted' ? 'pending' : 'accepted')}
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-2 mt-4">
+          {editing ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setDecision('edited');
+              }}
+              className="col-span-3 inline-flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg border border-info/30 bg-info-soft/50 text-info hover:bg-info-soft transition"
             >
-              Accept
-            </DecisionButton>
-            <DecisionButton
-              tone="danger"
-              active={st.decision === 'rejected'}
-              icon={<X className="w-3.5 h-3.5" />}
-              onClick={() => setDecision(st.decision === 'rejected' ? 'pending' : 'rejected')}
-            >
-              Reject
-            </DecisionButton>
-            <DecisionButton
-              tone="info"
-              active={false}
-              icon={<Pencil className="w-3.5 h-3.5" />}
-              onClick={() => setEditing(true)}
-            >
-              Edit
-            </DecisionButton>
-          </>
-        )}
-      </div>
+              <Save className="w-3.5 h-3.5" /> Save Edit
+            </button>
+          ) : (
+            <>
+              <DecisionButton
+                tone="success"
+                active={st.decision === 'accepted'}
+                icon={<Check className="w-3.5 h-3.5" />}
+                onClick={() => setDecision(st.decision === 'accepted' ? 'pending' : 'accepted')}
+              >
+                Accept
+              </DecisionButton>
+              <DecisionButton
+                tone="danger"
+                active={st.decision === 'rejected'}
+                icon={<X className="w-3.5 h-3.5" />}
+                onClick={() => setDecision(st.decision === 'rejected' ? 'pending' : 'rejected')}
+              >
+                Reject
+              </DecisionButton>
+              <DecisionButton
+                tone="info"
+                active={false}
+                icon={<Pencil className="w-3.5 h-3.5" />}
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </DecisionButton>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReadOnlyVerdictRow({ decision }: { decision: Decision }) {
+  const tone =
+    decision === 'accepted'
+      ? { label: 'Accepted by coder', cls: 'bg-success-soft/60 text-success border-success/30', icon: <Check className="w-3.5 h-3.5" /> }
+      : decision === 'rejected'
+        ? { label: 'Rejected by coder', cls: 'bg-danger-soft/60 text-danger border-danger/30', icon: <X className="w-3.5 h-3.5" /> }
+        : decision === 'edited'
+          ? { label: 'Edited by coder', cls: 'bg-info-soft/60 text-info border-info/30', icon: <Pencil className="w-3.5 h-3.5" /> }
+          : { label: 'Pending — coder did not act on this code', cls: 'bg-surface-sunken text-ink-muted border-line', icon: null };
+  return (
+    <div className={cn(
+      'mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill border text-xs font-semibold',
+      tone.cls,
+    )}>
+      {tone.icon}
+      {tone.label}
     </div>
   );
 }
@@ -764,6 +1546,186 @@ function DecisionButton({
       {icon}
       {children}
     </button>
+  );
+}
+
+/* ── Add Code modal ──────────────────────────────────────── */
+
+type AddCodeCategory = 'PRIMARY' | 'SECONDARY' | 'PROCEDURE';
+const ADD_CODE_CATEGORY_LABEL: Record<AddCodeCategory, string> = {
+  PRIMARY: 'Primary Diagnosis',
+  SECONDARY: 'Secondary Diagnosis',
+  PROCEDURE: 'CPT / Procedure',
+};
+
+function AddCodeModal({
+  onClose,
+  onAdd,
+}: {
+  onClose: () => void;
+  onAdd: (item: CodeItem, reason: string) => void;
+}) {
+  const [code, setCode] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState<AddCodeCategory>('PRIMARY');
+  const [reason, setReason] = useState('');
+
+  // Esc to close.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const trimmedCode = code.trim();
+  const trimmedDesc = description.trim();
+  const trimmedReason = reason.trim();
+  const codeMissing = trimmedCode.length === 0;
+  const descMissing = trimmedDesc.length === 0;
+  const reasonShort = trimmedReason.length < REASON_MIN_CHARS;
+  const canSubmit = !codeMissing && !descMissing && !reasonShort;
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    const item: CodeItem = {
+      key: `ADDED-${category}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${trimmedCode}`,
+      category,
+      code: trimmedCode,
+      description: trimmedDesc,
+    };
+    onAdd(item, trimmedReason);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-stretch p-3 sm:p-6"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="m-auto bg-surface rounded-xl shadow-2xl w-[min(560px,96vw)] max-h-[90vh] flex flex-col overflow-hidden border border-line"
+      >
+        <header className="flex items-center justify-between px-5 py-3 border-b border-line bg-surface-sunken/40">
+          <div>
+            <h3 className="text-sm font-bold text-ink inline-flex items-center gap-1.5">
+              <Plus className="w-3.5 h-3.5 text-violet-500" />
+              Add a code
+            </h3>
+            <p className="text-[11px] text-ink-muted mt-0.5">
+              Add a code the AI didn't suggest. It'll be sent to the golden dataset
+              as an ADD action so the AI can learn from it.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-md hover:bg-surface-2 flex items-center justify-center text-ink-muted"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-1">
+              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+                Category <span className="text-danger normal-case">*</span>
+              </label>
+              <FancySelect
+                value={category}
+                onChange={(v) => setCategory(v as AddCodeCategory)}
+                options={(['PRIMARY', 'SECONDARY', 'PROCEDURE'] as AddCodeCategory[]).map((c) => ({
+                  value: c,
+                  label: ADD_CODE_CATEGORY_LABEL[c],
+                }))}
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+                Code <span className="text-danger normal-case">*</span>
+              </label>
+              <Input
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                placeholder={category === 'PROCEDURE' ? 'e.g. 99213' : 'e.g. E11.9'}
+                className="font-mono"
+                autoFocus
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+              Description <span className="text-danger normal-case">*</span>
+            </label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Type 2 diabetes mellitus without complications"
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+              Why are you adding this? <span className="text-danger normal-case">*</span>
+            </label>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={`Explain why this code is supported by the documentation (min ${REASON_MIN_CHARS} characters)…`}
+              rows={3}
+              error={reasonShort && trimmedReason.length > 0 ? `Minimum ${REASON_MIN_CHARS} characters.` : undefined}
+            />
+            <div className="flex items-center justify-between mt-1">
+              <div className="flex-1 h-1 bg-surface-sunken rounded-full overflow-hidden mr-3">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    reasonShort ? 'bg-danger/70' : 'bg-success',
+                  )}
+                  style={{ width: `${Math.min(100, (trimmedReason.length / REASON_MIN_CHARS) * 100)}%` }}
+                />
+              </div>
+              <span className={cn(
+                'text-[11px] font-mono shrink-0',
+                reasonShort ? 'text-danger' : 'text-success',
+              )}>
+                {trimmedReason.length} / {REASON_MIN_CHARS}
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-violet-300/40 bg-violet-50/40 dark:bg-violet-500/10 px-3 py-2 text-[11px] text-violet-700 dark:text-violet-300">
+            This code will appear in the {ADD_CODE_CATEGORY_LABEL[category]} section as a
+            user-added item (purple chip). On Submit it ships as an{' '}
+            <strong className="font-semibold">ADD</strong> action — no orchestrator
+            <code className="font-mono mx-0.5">predicted_code_id</code> needed.
+          </div>
+        </div>
+
+        <footer className="flex items-center justify-end gap-2 px-4 py-3 border-t border-line bg-surface-sunken/40">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 px-4 rounded-pill border border-line text-sm font-semibold text-ink hover:bg-surface-2 transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+            className="inline-flex items-center gap-2 h-9 px-5 rounded-pill bg-violet-500 text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add code
+          </button>
+        </footer>
+      </div>
+    </div>
   );
 }
 

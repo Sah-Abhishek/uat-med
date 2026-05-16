@@ -170,6 +170,42 @@ export class ConfigurationsController {
   @Roles(Role.TEAMLEAD)
   deleteCustomChartField(@Param('id', ParseIntPipe) id: number) { return this.svc.deleteCustomChartField(id); }
 
+  // 17.X Code Review Reasons (per client+location, codeType × action)
+  @Get('code-review-reasons')
+  @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER)
+  codeReviewReasons(@Query() q: { clientId?: string; locationId?: string }) {
+    return this.svc.getCodeReviewReasons({
+      clientId: q.clientId ? Number(q.clientId) : undefined,
+      locationId: q.locationId ? Number(q.locationId) : undefined,
+    });
+  }
+
+  @Put('code-review-reasons')
+  @Roles(Role.TEAMLEAD)
+  updateCodeReviewReasons(@Body() body: any) {
+    return this.svc.updateCodeReviewReasons({
+      clientId: body?.clientId ? Number(body.clientId) : undefined,
+      locationId: body?.locationId ? Number(body.locationId) : undefined,
+      codeType: body?.codeType,
+      action: body?.action,
+      reasons: body?.reasons,
+    });
+  }
+
+  @Post('code-review-reasons/copy')
+  @Roles(Role.TEAMLEAD)
+  copyCodeReviewReasons(@Body() body: any) {
+    return this.svc.copyCodeReviewReasons({
+      sourceClientId: body?.sourceClientId ? Number(body.sourceClientId) : undefined,
+      sourceLocationId: body?.sourceLocationId ? Number(body.sourceLocationId) : undefined,
+      targetClientId: body?.targetClientId ? Number(body.targetClientId) : undefined,
+      targetLocationId: body?.targetLocationId ? Number(body.targetLocationId) : undefined,
+      codeTypes: Array.isArray(body?.codeTypes) ? body.codeTypes : undefined,
+      actions: Array.isArray(body?.actions) ? body.actions : undefined,
+      includeDisabled: body?.includeDisabled === true,
+    });
+  }
+
   // 17.8 HCC tab
   @Get('hcc/fields') @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER) hccFields() { return this.svc.hccFields(); }
   @Post('hcc/fields') @Roles(Role.TEAMLEAD) createHccField(@Body() body: any) { return this.svc.createHccField(body); }

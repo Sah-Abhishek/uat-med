@@ -23,6 +23,7 @@ import { UpdateChartDto } from './dto/update-chart.dto';
 import { BulkModifyDto, BulkIdsDto } from './dto/bulk-modify.dto';
 import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
 import { ProcessDocumentsDto } from './dto/process-documents.dto';
+import { SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
@@ -147,15 +148,21 @@ export class ChartsController {
   }
 
   /**
-   * Run the ICD Predictor encounter flow for an uploaded batch of documents.
+   * Phase 1 — kick off the ICD Predictor encounter flow.
+   *
    * The frontend POSTs multipart/form-data with N `files` plus a comma-
    * separated `reportTypes` (HP, DISCHARGE_SUMMARY, …) in the SAME order.
-   *
-   * The request blocks until the gateway pipeline finishes (typically 30–90s,
-   * polled at ICD_PREDICTOR_POLL_INTERVAL up to ICD_PREDICTOR_POLL_TIMEOUT).
+   * This endpoint persists each upload to S3, creates a gateway encounter,
+   * and queues the AI run, then returns 202 with `{ encounterId, taskId }`.
+   * The frontend is expected to poll `…/process-documents/:encounterId/status`
+   * until SUCCESS, then call `…/process-documents/:encounterId/finalize` to
+   * load the predicted codes. Splitting the flow keeps every individual
+   * request well under any reverse-proxy read timeout (the old single-shot
+   * version held the connection open for 2+ minutes and 504'd at the edge).
    */
   @Post(':id/process-documents')
   @Roles(Role.CODER, Role.AUDITOR)
+  @HttpCode(202)
   @UseInterceptors(
     FilesInterceptor('files', MAX_FILES, {
       limits: { fileSize: MAX_FILE_BYTES },
@@ -172,8 +179,8 @@ export class ChartsController {
       },
     },
   })
-  @ApiOperation({ summary: 'Upload documents and run ICD Predictor (encounter flow).' })
-  processDocuments(
+  @ApiOperation({ summary: 'Start ICD Predictor encounter flow; returns encounterId + taskId for polling.' })
+  startProcessDocuments(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFiles() files: Express.Multer.File[],
     @Body() body: ProcessDocumentsDto,
@@ -181,6 +188,57 @@ export class ChartsController {
     if (!files?.length) {
       throw new BadRequestException({ error: { code: 'bad_request', message: 'No files uploaded.' } });
     }
-    return this.svc.processDocuments(id, files, body);
+    return this.svc.startProcessDocuments(id, files, body);
+  }
+
+  /** Phase 2 — pass-through to the gateway's task-status endpoint. */
+  @Get(':id/process-documents/:encounterId/status')
+  @Roles(Role.CODER, Role.AUDITOR)
+  @ApiOperation({ summary: 'Poll the AI pipeline status for an in-flight encounter.' })
+  getProcessDocumentsStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('encounterId') encounterId: string,
+    @Query('taskId') taskId: string,
+  ) {
+    if (!taskId) {
+      throw new BadRequestException({ error: { code: 'bad_request', message: 'taskId is required.' } });
+    }
+    return this.svc.getProcessDocumentsStatus(id, encounterId, taskId);
+  }
+
+  @Get(':id/code-decisions')
+  @ApiOperation({ summary: 'Existing per-code Review & Edit decisions for a chart.' })
+  listCodeDecisions(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.listCodeDecisions(id);
+  }
+
+  @Get(':id/predicted-codes')
+  @ApiOperation({ summary: 'Predicted codes WITH the orchestrator UUIDs (predicted_code_id). Used by the Review modal so submissions can carry stable IDs.' })
+  getPredictedCodes(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.getPredictedCodesForChart(id);
+  }
+
+  @Post(':id/code-decisions')
+  @Roles(Role.CODER, Role.AUDITOR)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Persist Review & Edit decisions submitted from the modal. Validates reasons against active code-review-reasons. Also forwards to the orchestrator so EDIT/DELETE/ADD reach the golden dataset.' })
+  submitCodeDecisions(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SubmitCodeDecisionsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.submitCodeDecisions(id, dto, user);
+  }
+
+  /** Phase 3 — fetch the final codes once the FE has seen status=SUCCESS. */
+  @Post(':id/process-documents/:encounterId/finalize')
+  @Roles(Role.CODER, Role.AUDITOR)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Pull final ICD codes from gateway and persist them on the chart.' })
+  finalizeProcessDocuments(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('encounterId') encounterId: string,
+  ) {
+    return this.svc.finalizeProcessDocuments(id, encounterId);
   }
 }

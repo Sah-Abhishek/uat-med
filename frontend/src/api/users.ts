@@ -35,6 +35,7 @@ export interface CreateUserDto {
   clientId?: number;
   locationId?: number;
   primarySpecialityId?: number;
+  employeeId?: string;
   designation?: string;
   dateOfBirth?: string;
   dateOfJoining?: string;
@@ -48,6 +49,7 @@ export interface UpdateUserDto {
   clientId?: number;
   locationId?: number;
   primarySpecialityId?: number;
+  employeeId?: string;
   designation?: string;
   dateOfBirth?: string;
   dateOfJoining?: string;
@@ -61,6 +63,11 @@ export const deactivateUser = (id: string, reason: string) =>
 
 export const activateUser = (id: string) =>
   post<{ status: string }>(`/users/${id}/activate`);
+
+/** Admin-initiated password reset. Backend revokes the user's refresh tokens,
+ *  forcing them onto the new credential on next refresh. */
+export const resetUserPassword = (id: string, newPassword: string) =>
+  post<{ status: 'ok'; revoked: number }>(`/users/${id}/password`, { newPassword });
 
 /* ── Signup approval queue ─────────────────────────────── */
 

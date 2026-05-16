@@ -51,6 +51,8 @@ export const getChart = (id: string) => get<Chart>(`/charts/${id}`);
  * All fields are optional — server persists only what's present.
  */
 export interface UpdateChartDto {
+  chartNo?: string;
+  mrNumber?: string;
   priority?: Priority;
   chartStatus?: ChartStatus;
   allocatedCoderId?: number;
@@ -160,6 +162,71 @@ export interface UpdateFeedbackDto {
 export const updateChartFeedback = (feedbackId: string, dto: UpdateFeedbackDto) =>
   patch<ChartFeedback>(`/charts/feedback/${feedbackId}`, dto);
 
+/* ── Code Review & Edit decisions ──────────────────────── */
+
+export type CodeDecisionType = 'PRIMARY' | 'SECONDARY' | 'PROCEDURE' | 'EM_LEVEL' | 'MODIFIER';
+export type CodeDecisionVerdict = 'ACCEPTED' | 'REJECTED' | 'EDITED' | 'ADDED';
+
+export interface CodeDecisionInput {
+  codeType: CodeDecisionType;
+  codeValue: string;
+  /** Orchestrator UUID for the AI-predicted code this decision is about.
+   * Optional only because legacy charts won't have one — new submissions
+   * should always include it so the orchestrator can record the action. */
+  predictedCodeId?: string;
+  originalDescription?: string;
+  decision: CodeDecisionVerdict;
+  editedCode?: string;
+  editedDescription?: string;
+  reasonDropdown?: string;
+  reasonText?: string;
+}
+
+export interface CodeDecisionRecord extends CodeDecisionInput {
+  id: number;
+  decidedByUserId: number;
+  decidedAt: string;
+}
+
+export interface SubmitDecisionsResponse {
+  items: CodeDecisionRecord[];
+  /** Reflects the second leg of the submit — local DB write succeeded
+   * regardless. `forwarded:true` means the orchestrator accepted the
+   * payload; `skipped` or `error` means it didn't (local audit still saved). */
+  orchestrator?: {
+    forwarded?: boolean;
+    skipped?: boolean;
+    encounterId?: string | null;
+    totalActions?: number;
+    correctionsWritten?: number;
+    qdrantSyncFailures?: number;
+    error?: string;
+    reason?: string;
+  };
+}
+
+export interface PredictedCodeWithId {
+  id: string;
+  icd_code: string;
+  description: string;
+  confidence: number;
+  code_type: string;
+  sequence_pos: number | null;
+  evidence_json: Record<string, unknown> | null;
+  status: string;
+}
+
+export const listCodeDecisions = (chartId: string) =>
+  get<{ items: CodeDecisionRecord[] }>(`/charts/${chartId}/code-decisions`);
+
+export const getPredictedCodes = (chartId: string) =>
+  get<{ codes: PredictedCodeWithId[]; encounterId: string | null }>(
+    `/charts/${chartId}/predicted-codes`,
+  );
+
+export const submitCodeDecisions = (chartId: string, decisions: CodeDecisionInput[]) =>
+  post<SubmitDecisionsResponse>(`/charts/${chartId}/code-decisions`, { decisions });
+
 /* ── AI: ICD Predictor (encounter flow) ──────────────────── */
 
 export interface ProcessDocumentsInput {
@@ -169,10 +236,36 @@ export interface ProcessDocumentsInput {
   documentType?: string;
 }
 
+interface StartProcessDocumentsResponse {
+  encounterId: string;
+  taskId: string;
+  reportIds: string[];
+  uploadedDocs: AiEncounterResult['uploadedDocs'];
+}
+
+type EncounterRunStatus = 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE';
+interface EncounterStatusResponse {
+  status: EncounterRunStatus;
+  error?: string;
+}
+
+const POLL_INTERVAL_MS = 3000;
+const POLL_TIMEOUT_MS = 10 * 60 * 1000;
+
 /**
  * Upload medical documents and run the ICD Predictor encounter flow.
- * The request blocks until the gateway pipeline finishes — typically
- * 30–90s — so callers should disable the form and show a progress UI.
+ *
+ * The pipeline runs in three phases so no single HTTP request is held open
+ * long enough for an upstream proxy to 504 us:
+ *   1. POST /process-documents — uploads files, queues the AI run, returns
+ *      `{ encounterId, taskId }` in <2s.
+ *   2. GET  /process-documents/{encounterId}/status?taskId=… — polled every
+ *      few seconds; each call is sub-second.
+ *   3. POST /process-documents/{encounterId}/finalize — once status flips to
+ *      SUCCESS, fetches the final ICD codes and persists them to the chart.
+ *
+ * Callers see the same Promise<AiEncounterResult> contract as before, so
+ * UploadSection.tsx doesn't need to change.
  */
 export async function processChartDocuments(
   chartId: string,
@@ -184,14 +277,49 @@ export async function processChartDocuments(
   if (input.reportTypes?.length) fd.append('reportTypes', input.reportTypes.join(','));
   if (input.documentType) fd.append('documentType', input.documentType);
 
-  const { data } = await api.post<AiEncounterResult>(`/charts/${chartId}/process-documents`, fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    // Pipeline polls up to 10 min on the server side — give axios room.
-    timeout: 15 * 60 * 1000,
-    onUploadProgress: (e) => {
-      if (!onUploadProgress || !e.total) return;
-      onUploadProgress(Math.round((e.loaded / e.total) * 100));
+  // Phase 1 — start. This still uploads the multipart body, so onUploadProgress
+  // continues to drive the form's "uploading" → "analyzing" transition.
+  const { data: started } = await api.post<StartProcessDocumentsResponse>(
+    `/charts/${chartId}/process-documents`,
+    fd,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      // Phase 1 only does S3 upload + 3 sub-second gateway calls; allow a bit
+      // of headroom for slow client connections on large PDFs.
+      timeout: 5 * 60 * 1000,
+      onUploadProgress: (e) => {
+        if (!onUploadProgress || !e.total) return;
+        onUploadProgress(Math.round((e.loaded / e.total) * 100));
+      },
     },
-  });
-  return data;
+  );
+
+  // Phase 2 — poll. Each call is cheap; we cap total wall-clock at 10min.
+  const start = Date.now();
+  while (true) {
+    if (Date.now() - start >= POLL_TIMEOUT_MS) {
+      throw new Error('AI pipeline timed out — please retry.');
+    }
+    await sleep(POLL_INTERVAL_MS);
+    const { data: s } = await api.get<EncounterStatusResponse>(
+      `/charts/${chartId}/process-documents/${started.encounterId}/status`,
+      { params: { taskId: started.taskId }, timeout: 30 * 1000 },
+    );
+    if (s.status === 'SUCCESS') break;
+    if (s.status === 'FAILURE') {
+      throw new Error(`AI pipeline failed: ${s.error ?? 'unknown error'}`);
+    }
+  }
+
+  // Phase 3 — finalize.
+  const { data: result } = await api.post<AiEncounterResult>(
+    `/charts/${chartId}/process-documents/${started.encounterId}/finalize`,
+    {},
+    { timeout: 60 * 1000 },
+  );
+  return result;
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }

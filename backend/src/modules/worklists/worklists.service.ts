@@ -104,6 +104,7 @@ export class WorklistsService {
         primarySpecialityId: dto.primarySpecialityId,
         processId: dto.processId,
         dateOfService: dto.dateOfService,
+        dateOfServiceTo: dto.dateOfServiceTo,
         receivedDate: dto.receivedDate,
         totalCharts: total,
         createdBy: userId,
@@ -168,6 +169,7 @@ export class WorklistsService {
         : null,
       process: w.process ? { id: Number(w.process.id), name: w.process.name } : null,
       dateOfService: w.dateOfService,
+      dateOfServiceTo: w.dateOfServiceTo,
       receivedDate: w.receivedDate,
       status: w.status,
       totalCharts: w.totalCharts,
@@ -217,14 +219,14 @@ export class WorklistsService {
             // First-time coder allocation lifts the chart out of "Ready to allocate"
             // into "Ready to code" so the coder can start the timer.
             if (c.milestone === ChartMilestone.READY_TO_ALLOCATE) {
-              c.milestone = ChartMilestone.READY_TO_CODE;
+              c.setMilestone(ChartMilestone.READY_TO_CODE);
             }
           } else {
             c.allocatedAuditorId = a.assigneeId;
             c.originalAuditorId ??= a.assigneeId;
             // After coding is done, allocating an auditor moves the chart to ready-to-audit.
             if (c.milestone === ChartMilestone.CODING_DONE) {
-              c.milestone = ChartMilestone.READY_TO_AUDIT;
+              c.setMilestone(ChartMilestone.READY_TO_AUDIT);
             }
           }
           await manager.getRepository(Chart).save(c);

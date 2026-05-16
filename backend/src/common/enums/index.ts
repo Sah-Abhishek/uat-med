@@ -48,4 +48,26 @@ export enum HccValidate {
   NA = 'NA',
 }
 
+export enum CodeReviewType {
+  PRIMARY = 'PRIMARY',
+  SECONDARY = 'SECONDARY',
+  PROCEDURE = 'PROCEDURE',
+  EM_LEVEL = 'EM_LEVEL',
+  MODIFIER = 'MODIFIER',
+}
+
+export enum CodeReviewAction {
+  REJECT = 'REJECT',
+  EDIT = 'EDIT',
+}
+
+export enum CodeReviewDecision {
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  EDITED = 'EDITED',
+  /** A code the coder added that the AI didn't suggest. Forwarded to
+   * the orchestrator as action='ADD' so it enters the golden dataset. */
+  ADDED = 'ADDED',
+}
+
 export { Role } from './roles.enum';

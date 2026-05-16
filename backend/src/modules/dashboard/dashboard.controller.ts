@@ -22,14 +22,24 @@ export class DashboardController {
   status(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.status(q); }
 
   @Get('unallocated')
-  @Roles(Role.MANAGER)
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Unallocated worklists and charts.' })
   unallocated(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.unallocated(q); }
 
   @Get('allocation-stats')
-  @Roles(Role.MANAGER)
-  @ApiOperation({ summary: 'Allocation Statistics panel.' })
-  allocationStats(@Query() q: any) { return this.svc.allocationStats(q); }
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Allocation Statistics — milestone bar, completion / QC / worklist donuts, progress-to-date series.' })
+  allocationStats(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.allocationStats(q); }
+
+  @Get('unallocated-volume')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Unallocated Volume — by worklist / speciality / received-date / DOS.' })
+  unallocatedVolume(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.unallocatedVolume(q); }
+
+  @Get('productivity')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Productivity — daily volume, avg coding minutes, rework count.' })
+  productivity(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.productivity(q); }
 
   @Get('self')
   @Roles(Role.CODER, Role.AUDITOR)

@@ -2,6 +2,11 @@ import * as Joi from 'joi';
 
 export const validationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'uat', 'staging', 'production', 'test').default('development'),
+  // Independent of NODE_ENV: gates real-world side effects like forwarding
+  // corrections to the AI training gateway. Only 'production' allows those
+  // side effects; UAT/staging/dev must not pollute the golden dataset with
+  // tester-entered values.
+  DEPLOYMENT: Joi.string().valid('production', 'uat', 'staging', 'development').default('uat'),
   APP_HOST: Joi.string().default('0.0.0.0'),
   APP_PORT: Joi.number().default(8000),
   APP_GLOBAL_PREFIX: Joi.string().default('api/v1'),
@@ -75,8 +80,6 @@ export const validationSchema = Joi.object({
   ICD_PREDICTOR_BASE_URL: Joi.string().uri().allow('').optional(),
   ICD_PREDICTOR_TOKEN: Joi.string().allow('').optional(),
   ICD_PREDICTOR_ENCOUNTER_TYPE: Joi.string().valid('OUTPATIENT', 'INPATIENT').default('OUTPATIENT'),
-  ICD_PREDICTOR_POLL_INTERVAL: Joi.number().default(10000),
-  ICD_PREDICTOR_POLL_TIMEOUT: Joi.number().default(600000),
 
   // ───── Observability ─────
   LOG_LEVEL: Joi.string().valid('debug', 'info', 'warn', 'error').default('info'),

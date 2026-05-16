@@ -4,7 +4,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '@/auth/store';
 import { can, type Permission } from '@/permissions';
 import { cn } from '@/lib/utils';
-import { ValerionLogo, ValerionMark } from '@/components/ui/Logo';
+import { ValerionLogo } from '@/components/ui/Logo';
 import { TopBar } from './TopBar';
 import {
   LayoutDashboard,
@@ -14,6 +14,9 @@ import {
   Users,
   Settings,
   BarChart3,
+  ClipboardCheck,
+  BookOpenCheck,
+  ShieldCheck,
   Power,
   ChevronLeft,
   ChevronRight,
@@ -35,6 +38,9 @@ const NAV: NavItem[] = [
   { to: '/users', label: 'Users', icon: Users, requires: 'user.list' },
   { to: '/configurations', label: 'Configurations', icon: Settings, requires: 'config.view' },
   { to: '/reports', label: 'Reports', icon: BarChart3, requires: 'reports.run' },
+  { to: '/qa', label: 'Quality Assurance', icon: ClipboardCheck, requires: 'qa.view' },
+  { to: '/coder-rules', label: 'Coder Rules', icon: BookOpenCheck, requires: 'coderRules.manage' },
+  { to: '/admin/code-decisions', label: 'Code Decisions', icon: ShieldCheck, requires: 'admin.codeDecisions.view' },
 ];
 
 const STORAGE_KEY = 'app.sidebar.collapsed';
@@ -68,13 +74,35 @@ export function Layout() {
           collapsed ? 'w-16' : 'w-[240px]',
         )}
       >
+        {/* Header: logo + collapse chevron live in the same row in both
+            states — when collapsed, the logo is hidden so the chevron
+            occupies the spot the previous chevron occupied (top-right band).
+            Keeps the toggle's vertical position stable as the user
+            collapses/expands instead of jumping to the bottom of the rail. */}
         <div
           className={cn(
             'h-16 flex items-center border-b border-line',
-            collapsed ? 'justify-center px-0' : 'px-5',
+            collapsed ? 'justify-center px-2' : 'justify-between px-5',
           )}
         >
-          {collapsed ? <ValerionMark className="w-9 h-9" /> : <ValerionLogo />}
+          {!collapsed && <ValerionLogo />}
+          <HoverTooltip
+            label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            enabled={collapsed}
+          >
+            <button
+              type="button"
+              onClick={() => setCollapsed((v) => !v)}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="w-7 h-7 rounded-md flex items-center justify-center text-ink-muted hover:text-ink hover:bg-surface-sunken transition"
+            >
+              {collapsed ? (
+                <ChevronRight className="w-4 h-4" strokeWidth={2} />
+              ) : (
+                <ChevronLeft className="w-4 h-4" strokeWidth={2} />
+              )}
+            </button>
+          </HoverTooltip>
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
@@ -105,37 +133,23 @@ export function Layout() {
           })}
         </nav>
 
-        {/* Power button at bottom */}
-        <div className={cn('border-t border-line', collapsed ? 'p-2 flex justify-center' : 'p-3')}>
-          <HoverTooltip label="Sign out" enabled>
+        {/* Sign-out — same pattern as nav items so it reads as part of the menu. */}
+        <div className={cn('border-t border-line', collapsed ? 'p-2' : 'p-3')}>
+          <HoverTooltip label="Sign out" enabled={collapsed}>
             <button
-              className="w-10 h-10 rounded-full flex items-center justify-center text-primary hover:bg-primary-soft transition"
+              type="button"
               aria-label="Sign out"
+              className={cn(
+                'w-full flex items-center gap-3 rounded-lg text-sm transition',
+                collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
+                'text-primary hover:bg-primary-soft font-medium',
+              )}
             >
-              <Power className="w-4 h-4" />
+              <Power className="w-4 h-4 shrink-0" strokeWidth={2} />
+              {!collapsed && <span className="truncate">Sign out</span>}
             </button>
           </HoverTooltip>
         </div>
-
-        {/* Collapse toggle — pinned to the right edge */}
-        <HoverTooltip
-          label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          enabled
-          className="absolute top-20 -right-3 z-10"
-        >
-          <button
-            type="button"
-            onClick={() => setCollapsed((v) => !v)}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="w-6 h-6 rounded-full bg-surface border border-line shadow-card flex items-center justify-center text-ink-muted hover:text-ink hover:bg-surface-2 transition"
-          >
-            {collapsed ? (
-              <ChevronRight className="w-3 h-3" />
-            ) : (
-              <ChevronLeft className="w-3 h-3" />
-            )}
-          </button>
-        </HoverTooltip>
       </aside>
 
       {/* ── Main area ───────────────────────────────── */}

@@ -3,7 +3,7 @@ import { Label, Textarea } from '@/components/ui/Field';
 import { FormField, MultiSelect, SkeletonGrid, FieldSkeleton } from './shared';
 import { CustomFieldsRenderer } from './CustomFieldsRenderer';
 import type { FormDraft, CustomFieldValues } from './formState';
-import type { FieldConfig } from './useFieldConfig';
+import { isFieldDisabledByStatus, type FieldConfig } from './useFieldConfig';
 import { cn } from '@/lib/utils';
 
 interface UserOption {
@@ -21,6 +21,10 @@ interface Props {
   updateCustomValue: (id: number, v: unknown) => void;
   coders?: UserOption[];
   auditors?: UserOption[];
+  /** Distinguish "loading user list" from "no users to allocate" so the
+   *  picker can show a spinner-y placeholder while the request is in flight. */
+  codersLoading?: boolean;
+  auditorsLoading?: boolean;
 }
 
 export function ProcessingInfoSection({
@@ -33,6 +37,8 @@ export function ProcessingInfoSection({
   updateCustomValue,
   coders = [],
   auditors = [],
+  codersLoading,
+  auditorsLoading,
 }: Props) {
   // Auditor profile only edits Coder QC Status here; everything else is locked.
   // Coder profile edits everything except Coder QC Status. We apply this per-row
@@ -43,15 +49,18 @@ export function ProcessingInfoSection({
     : readOnly
     ? 'pointer-events-none'
     : '';
-  const isIncomplete = draft.chartStatus === 'Incomplete';
-  const isComplete = draft.chartStatus === 'Complete';
+  // Mirror the validation rule from useFieldConfig — keeps the asterisk in
+  // sync with the actual mandatory check so it disappears when the field is
+  // disabled by chart status.
+  const coderCommentsDisabled = isFieldDisabledByStatus('coderCommentsToClient', draft.chartStatus);
+  const holdReasonDisabled    = isFieldDisabledByStatus('holdReason', draft.chartStatus);
 
   if (cfg.isLoading) {
     return (
       <CollapsibleCard
         title="Processing Info"
         subtitle="All fields related to processing this chart"
-        defaultOpen
+        defaultOpen={!isAuditor}
       >
         <div className="pt-3 space-y-4">
           <div className="grid grid-cols-[1fr_3fr] gap-4">
@@ -73,7 +82,7 @@ export function ProcessingInfoSection({
   const required = (k: string) => cfg.isRequired(k);
 
   return (
-    <CollapsibleCard title="Processing Info" subtitle="All fields related to processing this chart" defaultOpen>
+    <CollapsibleCard title="Processing Info" subtitle="All fields related to processing this chart" defaultOpen={!isAuditor}>
       <div className="pt-3">
         {/* Row 1: chart status + responsible party */}
         {(visible('chartStatus') || visible('responsibleParty')) && (
@@ -93,7 +102,11 @@ export function ProcessingInfoSection({
                 required={required('chartStatus')}
                 value={draft.chartStatus}
                 onChange={(v) => update('chartStatus', v)}
-                options={['Open', 'Complete', 'Incomplete']}
+                // 'Open' is the implicit default state, surfaced as a
+                // placeholder rather than a selectable option — coders only
+                // pick between Complete and Incomplete.
+                options={['Complete', 'Incomplete']}
+                placeholder="Open"
                 readOnly={readOnly}
               />
             )}
@@ -115,16 +128,16 @@ export function ProcessingInfoSection({
         <div
           className={cn(
             'mb-4',
-            !isIncomplete && 'opacity-50 pointer-events-none',
+            holdReasonDisabled && 'opacity-50 pointer-events-none',
             lockForAuditor,
           )}
         >
-          <Label required={isIncomplete}>Hold reason</Label>
+          <Label required={!holdReasonDisabled}>Hold reason</Label>
           <MultiSelect
             value={draft.holdReason}
             onChange={(v) => update('holdReason', v)}
             options={cfg.options.holdReasons}
-            readOnly={readOnly || !isIncomplete}
+            readOnly={readOnly || holdReasonDisabled}
           />
         </div>
 
@@ -133,16 +146,18 @@ export function ProcessingInfoSection({
           <div
             className={cn(
               'mb-4',
-              isComplete && 'opacity-50 pointer-events-none',
+              coderCommentsDisabled && 'opacity-50 pointer-events-none',
               lockForAuditor,
             )}
           >
-            <Label required={required('coderCommentsToClient')}>Coder comments to client</Label>
+            <Label required={!coderCommentsDisabled && required('coderCommentsToClient')}>
+              Coder comments to client
+            </Label>
             <Textarea
               rows={3}
               value={draft.coderComments}
               onChange={(e) => update('coderComments', e.target.value)}
-              readOnly={readOnly || isComplete}
+              readOnly={readOnly || coderCommentsDisabled}
             />
           </div>
         )}
@@ -208,18 +223,36 @@ export function ProcessingInfoSection({
             type="select"
             value={draft.allocateAuditor}
             onChange={(v) => update('allocateAuditor', v)}
-            options={auditors.map((u) => ({ value: u.id, label: u.fullName }))}
-            readOnly={readOnly || !!draft.allocateCoder}
-            placeholder="Select auditor…"
+            // Leading "None" entry lets users explicitly clear an existing
+            // allocation. Selecting it sends an empty value, which the save
+            // path turns into `undefined` (backend keeps the row but unsets
+            // the FK).
+            options={
+              auditorsLoading
+                ? []
+                : [
+                    { value: '', label: 'None' },
+                    ...auditors.map((u) => ({ value: u.id, label: u.fullName })),
+                  ]
+            }
+            readOnly={readOnly || auditorsLoading}
+            placeholder={auditorsLoading ? 'Loading auditors…' : 'Select auditor…'}
           />
           <FormField
             label="Allocate to Coder"
             type="select"
             value={draft.allocateCoder}
             onChange={(v) => update('allocateCoder', v)}
-            options={coders.map((u) => ({ value: u.id, label: u.fullName }))}
-            readOnly={readOnly}
-            placeholder="Select coder…"
+            options={
+              codersLoading
+                ? []
+                : [
+                    { value: '', label: 'None' },
+                    ...coders.map((u) => ({ value: u.id, label: u.fullName })),
+                  ]
+            }
+            readOnly={readOnly || codersLoading}
+            placeholder={codersLoading ? 'Loading coders…' : 'Select coder…'}
           />
           <FormField
             label="Priority"

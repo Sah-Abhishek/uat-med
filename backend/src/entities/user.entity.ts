@@ -30,6 +30,14 @@ export class User {
   @Index()
   role: Role;
 
+  // UUID minted by the AI gateway's POST /admin/users and stored on first sync.
+  // Sent back as `coder_id` on every /api/review/*/submit. Never locally
+  // generated — the gateway owns this value. Null until the user has been
+  // synced; the registration service fills it.
+  @Column({ name: 'public_id', type: 'uuid', nullable: true })
+  @Index({ unique: true, where: '"public_id" IS NOT NULL' })
+  publicId?: string | null;
+
   @Column({ type: 'varchar', length: 16, default: UserStatus.ACTIVE })
   @Index()
   status: UserStatus;

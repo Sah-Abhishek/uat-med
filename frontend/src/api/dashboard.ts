@@ -1,9 +1,12 @@
 import { get } from './client';
 import type {
+  AllocationStats,
   DashboardMilestones,
   DashboardStatus,
   DashboardUnallocated,
   DashboardSelf,
+  ProductivityStats,
+  UnallocatedVolume,
 } from './types';
 
 export interface DashboardFilters {
@@ -21,6 +24,12 @@ export const getUnallocated = (params: DashboardFilters = {}) =>
   get<DashboardUnallocated>('/dashboard/unallocated', params);
 
 export const getAllocationStats = (params: DashboardFilters = {}) =>
-  get<Record<string, unknown>>('/dashboard/allocation-stats', params);
+  get<AllocationStats>('/dashboard/allocation-stats', params);
+
+export const getUnallocatedVolume = (params: DashboardFilters = {}) =>
+  get<UnallocatedVolume>('/dashboard/unallocated-volume', params);
+
+export const getProductivity = (params: DashboardFilters = {}) =>
+  get<ProductivityStats>('/dashboard/productivity', params);
 
 export const getSelfDashboard = () => get<DashboardSelf>('/dashboard/self');

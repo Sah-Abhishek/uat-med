@@ -4,6 +4,9 @@ import {
   getStatus,
   getUnallocated,
   getSelfDashboard,
+  getAllocationStats,
+  getUnallocatedVolume,
+  getProductivity,
 } from '@/api/dashboard';
 import { useAuth } from '@/auth/store';
 import { can } from '@/permissions';
@@ -23,6 +26,15 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { formatDateTime, formatNumber } from '@/lib/utils';
+import {
+  ChartCard,
+  CHART_COLORS,
+  DailyAreaChart,
+  DailyLineChart,
+  DonutChart,
+  HorizontalBar,
+  VerticalBar,
+} from './Charts';
 
 export function DashboardPage() {
   const user = useAuth((s) => s.user)!;
@@ -191,42 +203,221 @@ export function DashboardPage() {
       )}
 
       {/* ── Analytics sections ──────────────────────────── */}
-      {isTeam && (
-        <div className="space-y-4">
-          <CollapsibleCard
-            title="Allocation Statistics"
-            subtitle="(By default: Showing last 2 weeks data)"
-          >
-            <p className="text-sm text-ink-muted py-8 text-center">
-              Chart panels render here — Charts by milestone, Chart completion donut, Quality
-              control donut, Progress to date, Worklist by status. Hook up to{' '}
-              <code className="font-mono text-xs">/dashboard/allocation-stats</code>.
-            </p>
-          </CollapsibleCard>
-
-          <CollapsibleCard
-            title="Unallocated Volume"
-            subtitle="(By default: Showing last 2 weeks data)"
-          >
-            <p className="text-sm text-ink-muted py-8 text-center">
-              By worklist / By speciality / By date received / By date of service — renders once
-              chart endpoints are wired.
-            </p>
-          </CollapsibleCard>
-
-          <CollapsibleCard
-            title="Productivity"
-            subtitle="(By default: Showing last 2 weeks data)"
-          >
-            <p className="text-sm text-ink-muted py-8 text-center">
-              Average time to code a chart / Volume per day / Rework — renders once chart
-              endpoints are wired.
-            </p>
-          </CollapsibleCard>
-        </div>
-      )}
+      {isTeam && <AnalyticsPanels />}
     </div>
   );
+}
+
+/* ── Analytics: 3 collapsible cards × N chart tiles each ─ */
+
+function AnalyticsPanels() {
+  // No filters wired yet — left empty so the panels respect the user's role
+  // scope on the backend without forcing an extra round-trip on mount.
+  const filters = {};
+
+  const allocation = useQuery({
+    queryKey: ['dashboard', 'allocation-stats', filters],
+    queryFn: () => getAllocationStats(filters),
+  });
+  const unallocVol = useQuery({
+    queryKey: ['dashboard', 'unallocated-volume', filters],
+    queryFn: () => getUnallocatedVolume(filters),
+  });
+  const productivity = useQuery({
+    queryKey: ['dashboard', 'productivity', filters],
+    queryFn: () => getProductivity(filters),
+  });
+
+  const a = allocation.data;
+  const u = unallocVol.data;
+  const p = productivity.data;
+
+  // Pre-shape data each render — recharts wants plain `[{name,value}]` arrays
+  // and human-readable labels for milestones (READY_TO_CODE → "Ready to Code").
+  const milestoneRows = (a?.chartsByMilestone ?? []).map((r) => ({
+    milestone: humanizeMilestone(r.milestone),
+    count: r.count,
+  }));
+  const completionDonut = a
+    ? toDonut({ Complete: a.chartCompletion.complete, Incomplete: a.chartCompletion.incomplete, Open: a.chartCompletion.open, Hold: a.chartCompletion.hold })
+    : [];
+  const qcDonut = a
+    ? toDonut({
+        'Feedback Provided': a.qualityControl.feedbackProvided,
+        Agree: a.qualityControl.agree,
+        Rejected: a.qualityControl.feedbackRejected,
+        Implemented: a.qualityControl.feedbackImplemented,
+        Unaudited: a.qualityControl.unaudited,
+      })
+    : [];
+  const wlDonut = a
+    ? toDonut({ Open: a.worklistByStatus.open, 'In Progress': a.worklistByStatus.inProgress, Closed: a.worklistByStatus.closed })
+    : [];
+  const specialityDonut = (u?.bySpeciality ?? []).map((r) => ({ name: r.speciality, value: r.count }));
+
+  return (
+    <div className="space-y-4">
+      <CollapsibleCard
+        title="Allocation Statistics"
+        subtitle="Last 14 days · click a section to drill in"
+        defaultOpen
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 pt-2">
+          <ChartCard
+            title="Charts by Milestone"
+            subtitle="Across the entire org"
+            loading={allocation.isPending}
+            empty={!allocation.isPending && milestoneRows.every((r) => r.count === 0)}
+          >
+            <HorizontalBar data={milestoneRows} xKey="count" yKey="milestone" color={CHART_COLORS.primary} />
+          </ChartCard>
+
+          <ChartCard
+            title="Chart Completion"
+            subtitle="By chart status"
+            loading={allocation.isPending}
+            empty={completionDonut.length === 0}
+          >
+            <DonutChart data={completionDonut} />
+          </ChartCard>
+
+          <ChartCard
+            title="Quality Control"
+            subtitle="Auditor feedback distribution"
+            loading={allocation.isPending}
+            empty={qcDonut.length === 0}
+          >
+            <DonutChart data={qcDonut} />
+          </ChartCard>
+
+          <ChartCard
+            title="Worklist by Status"
+            loading={allocation.isPending}
+            empty={wlDonut.length === 0}
+          >
+            <DonutChart data={wlDonut} />
+          </ChartCard>
+
+          <ChartCard
+            title="Progress to Date"
+            subtitle="Charts closed per day"
+            loading={allocation.isPending}
+            empty={(a?.progressToDate ?? []).every((r) => r.count === 0)}
+          >
+            <DailyAreaChart data={a?.progressToDate ?? []} color={CHART_COLORS.success} />
+          </ChartCard>
+        </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        title="Unallocated Volume"
+        subtitle="Open charts with no coder assigned"
+        defaultOpen
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+          <ChartCard
+            title="By Worklist"
+            subtitle="Top 10"
+            loading={unallocVol.isPending}
+            empty={(u?.byWorklist ?? []).length === 0}
+            height={300}
+          >
+            <HorizontalBar data={u?.byWorklist ?? []} xKey="count" yKey="worklist" color={CHART_COLORS.danger} />
+          </ChartCard>
+
+          <ChartCard
+            title="By Speciality"
+            loading={unallocVol.isPending}
+            empty={specialityDonut.length === 0}
+            height={300}
+          >
+            <DonutChart data={specialityDonut} />
+          </ChartCard>
+
+          <ChartCard
+            title="By Date Received"
+            subtitle="Worklist receive dates, last 14 days"
+            loading={unallocVol.isPending}
+            empty={(u?.byReceivedDate ?? []).every((r) => r.count === 0)}
+          >
+            <VerticalBar data={u?.byReceivedDate ?? []} xKey="date" yKey="count" color={CHART_COLORS.warn} />
+          </ChartCard>
+
+          <ChartCard
+            title="By Date of Service"
+            subtitle="Last 14 days"
+            loading={unallocVol.isPending}
+            empty={(u?.byDateOfService ?? []).every((r) => r.count === 0)}
+          >
+            <VerticalBar data={u?.byDateOfService ?? []} xKey="date" yKey="count" color={CHART_COLORS.indigo} />
+          </ChartCard>
+        </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard title="Productivity" subtitle="Last 14 days" defaultOpen>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-2">
+          <ChartCard
+            title="Volume per Day"
+            subtitle="Charts closed per day"
+            loading={productivity.isPending}
+            empty={(p?.volumePerDay ?? []).every((r) => r.count === 0)}
+          >
+            <VerticalBar data={p?.volumePerDay ?? []} xKey="date" yKey="count" color={CHART_COLORS.success} />
+          </ChartCard>
+
+          <ChartCard
+            title="Avg Time to Code"
+            subtitle="Minutes per chart, daily average"
+            loading={productivity.isPending}
+            empty={(p?.avgCodingMinutes ?? []).every((r) => r.value === 0)}
+          >
+            <DailyLineChart data={p?.avgCodingMinutes ?? []} xKey="date" yKey="value" color={CHART_COLORS.warn} />
+          </ChartCard>
+
+          <ChartCard
+            title="Rework"
+            subtitle="Charts re-opened from coding-done"
+            loading={productivity.isPending}
+            empty={false}
+            height={260}
+          >
+            <ReworkStat count={p?.reworkCount ?? 0} />
+          </ChartCard>
+        </div>
+      </CollapsibleCard>
+    </div>
+  );
+}
+
+/** Big-number tile for the single-value rework metric. */
+function ReworkStat({ count }: { count: number }) {
+  const tone = count === 0 ? 'text-success' : count < 5 ? 'text-warn' : 'text-danger';
+  return (
+    <div className="flex flex-col items-center justify-center h-full text-center">
+      <p className={`text-6xl font-bold ${tone}`}>{formatNumber(count)}</p>
+      <p className="text-xs text-ink-muted mt-2">
+        {count === 0
+          ? 'No charts in rework. Nice work.'
+          : count === 1
+          ? '1 chart needs another pass.'
+          : `${formatNumber(count)} charts need another pass.`}
+      </p>
+    </div>
+  );
+}
+
+function toDonut(map: Record<string, number>): Array<{ name: string; value: number }> {
+  return Object.entries(map)
+    .filter(([, v]) => v > 0)
+    .map(([name, value]) => ({ name, value }));
+}
+
+function humanizeMilestone(m: string): string {
+  return m
+    .toLowerCase()
+    .split('_')
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(' ');
 }
 
 /* Coder / Auditor — just their personal queue */
