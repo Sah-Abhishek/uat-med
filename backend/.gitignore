@@ -8,15 +8,9 @@ dist/
 build/
 *.tsbuildinfo
 
-# env
-env/.env
-env/.env.local
-env/.env.*.local
-env/.env.uat
-env/.env.production
-env/.env.staging
+# env (never commit real secrets — only the example template)
+env/.env*
 !env/.env.example
-!env/.env.development
 
 # logs
 logs/
