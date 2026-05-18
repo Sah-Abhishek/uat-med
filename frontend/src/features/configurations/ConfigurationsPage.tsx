@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import {
@@ -51,6 +51,7 @@ import {
   type CodeReviewAction,
   type CodeReviewReasonRow,
   type CodeReviewReasonInput,
+  type Client,
 } from '@/api/configurations';
 import type { ApiErrorShape, HccFieldDef, ValidationRule } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -61,6 +62,7 @@ import { Modal, ModalFooter, Tabs, ConfirmModal } from '@/components/ui/Primitiv
 import { useAuth } from '@/auth/store';
 import { can } from '@/permissions';
 import {
+  ChevronDown,
   Loader2,
   Plus,
   Save,
@@ -281,9 +283,9 @@ function ConfigScopeRail({
           )}
         </div>
         {clients.isPending ? (
-          <Loader2 className="w-4 h-4 animate-spin text-ink-muted" />
+          <ClientPickerSkeleton />
         ) : clients.data?.items.length === 0 ? (
-          <div className="border border-dashed border-line rounded-lg p-4 text-center">
+          <div className="border border-dashed border-line rounded-xl p-4 text-center">
             <p className="text-xs text-ink-muted mb-2">No clients yet.</p>
             {canEdit && (
               <Button size="sm" onClick={() => setAddClientOpen(true)} leftIcon={<Plus className="w-3 h-3" />}>
@@ -292,20 +294,14 @@ function ConfigScopeRail({
             )}
           </div>
         ) : (
-          <Select
-            value={selectedClient ?? ''}
-            onChange={(e) => {
-              const v = e.target.value ? Number(e.target.value) : null;
-              onClientChange(v);
+          <ClientPicker
+            value={selectedClient}
+            options={clients.data!.items}
+            onChange={(id) => {
+              onClientChange(id);
               onLocationChange(null);
             }}
-          >
-            {clients.data?.items.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
+          />
         )}
       </Card>
 
@@ -2629,5 +2625,98 @@ function CopyReasonsModal({
         </Button>
       </ModalFooter>
     </Modal>
+  );
+}
+
+/* ── Client picker ─────────────────────────────────────────────── */
+// Matches the TopBar ScopePicker: pill trigger with a small uppercase
+// label chip on the left, name on the right, chevron, and a simple
+// rounded popover list with check-on-selected. Kept intentionally plain.
+
+function ClientPickerSkeleton() {
+  return (
+    <div className="h-9 w-full rounded-pill border border-line bg-surface-sunken/40 animate-pulse" />
+  );
+}
+
+function ClientPicker({
+  value,
+  options,
+  onChange,
+}: {
+  value: number | null;
+  options: Client[];
+  onChange: (id: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [open]);
+
+  const selected = options.find((o) => o.id === value) ?? null;
+  const display = selected?.name ?? 'Select';
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'h-9 w-full pl-3 pr-2.5 rounded-pill border flex items-center gap-2.5 text-sm transition',
+          'border-line bg-surface hover:border-line-strong hover:bg-surface-sunken/60',
+          open && 'border-primary/70 bg-surface-sunken/60 shadow-card',
+        )}
+      >
+        <span className="text-[10px] uppercase tracking-[0.08em] text-ink-muted font-semibold">
+          Client
+        </span>
+        <span className="font-semibold text-ink truncate flex-1 text-left">{display}</span>
+        <ChevronDown
+          className={cn(
+            'w-3.5 h-3.5 text-ink-muted transition-transform shrink-0',
+            open && 'rotate-180 text-primary',
+          )}
+        />
+      </button>
+
+      {open && (
+        <div
+          className={cn(
+            'absolute left-0 top-full mt-2 w-full min-w-[220px] z-50',
+            'bg-surface border border-line rounded-xl shadow-pop dark:shadow-pop-dark p-1',
+            'max-h-[340px] overflow-y-auto',
+          )}
+        >
+          {options.map((c) => {
+            const isSelected = c.id === value;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  onChange(c.id);
+                  setOpen(false);
+                }}
+                className={cn(
+                  'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition text-left',
+                  isSelected
+                    ? 'bg-primary-soft text-primary-ink dark:text-primary font-semibold'
+                    : 'text-ink hover:bg-surface-sunken font-medium',
+                )}
+              >
+                <span className="flex-1 truncate">{c.name}</span>
+                {isSelected && <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
