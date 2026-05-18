@@ -18,6 +18,13 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, subtitle, size = 'md', children }: ModalProps) {
+  // Tracks whether the current pointer gesture started on the backdrop. We
+  // only close when *both* mousedown AND mouseup happen on the backdrop —
+  // otherwise drag-selecting text inside an input/textarea and releasing
+  // outside the card would close the modal (the mouseup re-targets to the
+  // backdrop and a plain `target === currentTarget` check on click is fooled).
+  const mouseDownOnBackdrop = useRef(false);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -50,8 +57,23 @@ export function Modal({ open, onClose, title, subtitle, size = 'md', children }:
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        mouseDownOnBackdrop.current = e.target === e.currentTarget;
+        // Don't let mouse events leak to an ancestor modal/backdrop. Some
+        // callers (e.g. ReviewEditModal) attach onClick={onClose} to their
+        // own backdrop, and rely on inner stopPropagation to keep themselves
+        // open — but a nested Modal is rendered as a sibling of that inner
+        // card, not a descendant, so without this its clicks would close the
+        // outer modal too.
+        e.stopPropagation();
       }}
+      onMouseUp={(e) => {
+        if (mouseDownOnBackdrop.current && e.target === e.currentTarget) {
+          onClose();
+        }
+        mouseDownOnBackdrop.current = false;
+        e.stopPropagation();
+      }}
+      onClick={(e) => e.stopPropagation()}
     >
       <div
         className={cn(

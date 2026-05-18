@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 
@@ -91,6 +91,33 @@ export class CoderRegistrationService {
       );
       return user;
     }
+  }
+
+  /**
+   * Role-agnostic variant of syncOne. Returns the user's gateway publicId,
+   * registering them on the fly if they don't have one yet. Needed for
+   * /api/rules (TEAMLEAD/MANAGER can author rules but aren't covered by
+   * REVIEWER_ROLES, so syncOne would no-op for them and the gateway would
+   * 502 on a non-UUID `created_by`).
+   */
+  async ensurePublicId(user: User): Promise<string> {
+    if (user.publicId) return user.publicId;
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new ForbiddenException({
+        error: { code: 'forbidden', message: 'User is not active; cannot register with AI gateway.' },
+      });
+    }
+    const registered = await this.gateway.registerUser({
+      name: user.fullName,
+      email: user.email,
+      role: 'CODER',
+    });
+    user.publicId = registered.id;
+    await this.users.update({ id: user.id }, { publicId: registered.id });
+    this.log.log(
+      `Registered user ${user.id} (${user.email}) with gateway on demand → ${registered.id}`,
+    );
+    return registered.id;
   }
 
   /**
