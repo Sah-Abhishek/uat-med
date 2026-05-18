@@ -5,6 +5,8 @@ import { In, Repository } from 'typeorm';
 
 import { User } from '../entities/user.entity';
 import { Chart } from '../entities/chart.entity';
+import { Client } from '../entities/client.entity';
+import { Location } from '../entities/location.entity';
 import { AuthService } from '../modules/auth/auth.service';
 import { CoderRegistrationService } from '../modules/ai-gateway/coder-registration.service';
 import { Role } from '../common/enums/roles.enum';
@@ -24,6 +26,8 @@ export class BootstrapService implements OnApplicationBootstrap {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(Chart) private readonly charts: Repository<Chart>,
+    @InjectRepository(Client) private readonly clients: Repository<Client>,
+    @InjectRepository(Location) private readonly locations: Repository<Location>,
     private readonly cfg: ConfigService,
     private readonly auth: AuthService,
     private readonly coderRegistration: CoderRegistrationService,
@@ -33,6 +37,40 @@ export class BootstrapService implements OnApplicationBootstrap {
     await this.seedBootstrapAdmin();
     await this.backfillFinalizedPriority();
     await this.backfillCoderPublicIds();
+    await this.backfillEmptyConfigCodes();
+  }
+
+  /**
+   * Clients and Locations used to be saved with `code = ''` when the Team
+   * Lead form left the field blank. Postgres UNIQUE allows many NULLs but
+   * only one empty string, so the second blank-code insert blew up with
+   * 23505 → "Unique constraint violation." A prod migration does the same
+   * fix; this runs every boot for dev/UAT (synchronize:true skips
+   * migrations) and is a no-op once cleaned.
+   */
+  private async backfillEmptyConfigCodes(): Promise<void> {
+    try {
+      const clientsAffected = await this.clients
+        .createQueryBuilder()
+        .update()
+        .set({ code: null as unknown as undefined })
+        .where(`"code" = ''`)
+        .execute();
+      const locationsAffected = await this.locations
+        .createQueryBuilder()
+        .update()
+        .set({ code: null as unknown as undefined })
+        .where(`"code" = ''`)
+        .execute();
+      const total = (clientsAffected.affected ?? 0) + (locationsAffected.affected ?? 0);
+      if (total > 0) {
+        this.logger.warn(
+          `Nullified blank codes: clients=${clientsAffected.affected ?? 0} locations=${locationsAffected.affected ?? 0}`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(`backfillEmptyConfigCodes threw: ${(err as Error)?.message ?? 'unknown'}`);
+    }
   }
 
   /**
