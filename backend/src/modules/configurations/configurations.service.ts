@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { CodeReviewAction, CodeReviewType } from '../../common/enums';
@@ -125,9 +125,37 @@ export class ConfigurationsService {
   }
 
   async createClient(body: { name: string; code?: string; isActive?: boolean }) {
+    const name = (body.name ?? '').trim();
+    if (!name) {
+      throw new BadRequestException({
+        error: { code: 'bad_request', message: 'Client name is required.' },
+      });
+    }
+    // Postgres UNIQUE allows many NULLs but only one empty string, so a
+    // blank `code` must become NULL — otherwise every subsequent client
+    // without a code blows up with a 23505 unique violation.
+    const code = (body.code ?? '').trim() || undefined;
+
+    // Friendly pre-check so the FE gets a field-specific message instead
+    // of the generic "Unique constraint violation." from the DB driver.
+    const existingName = await this.clientsRepo.findOne({ where: { name } });
+    if (existingName) {
+      throw new ConflictException({
+        error: { code: 'conflict', message: `A client named "${name}" already exists.`, field: 'name' },
+      });
+    }
+    if (code) {
+      const existingCode = await this.clientsRepo.findOne({ where: { code } });
+      if (existingCode) {
+        throw new ConflictException({
+          error: { code: 'conflict', message: `Client code "${code}" is already used.`, field: 'code' },
+        });
+      }
+    }
+
     const client = this.clientsRepo.create({
-      name: body.name,
-      code: body.code ?? '',
+      name,
+      code,
       isActive: body.isActive ?? true,
     });
     const saved = await this.clientsRepo.save(client);
@@ -157,6 +185,17 @@ export class ConfigurationsService {
     code?: string;
     isActive?: boolean;
   }) {
+    const name = (body.name ?? '').trim();
+    if (!name) {
+      throw new BadRequestException({
+        error: { code: 'bad_request', message: 'Location name is required.' },
+      });
+    }
+    // Same NULL-vs-empty-string trap as createClient. Location.code itself
+    // isn't unique, but keeping the normalization consistent avoids future
+    // surprises if we ever add such a constraint.
+    const code = (body.code ?? '').trim() || undefined;
+
     // Sanity check: the client must exist — otherwise the FK on Location itself will reject
     const client = await this.clientsRepo.findOne({ where: { id: body.clientId } });
     if (!client) {
@@ -165,10 +204,25 @@ export class ConfigurationsService {
       });
     }
 
+    // The (clientId, name) pair has a unique constraint — pre-check so the
+    // FE gets a clean conflict message instead of the generic 23505 error.
+    const existing = await this.locationsRepo.findOne({
+      where: { clientId: body.clientId, name },
+    });
+    if (existing) {
+      throw new ConflictException({
+        error: {
+          code: 'conflict',
+          message: `Location "${name}" already exists for this client.`,
+          field: 'name',
+        },
+      });
+    }
+
     const loc = this.locationsRepo.create({
       clientId: body.clientId,
-      name: body.name,
-      code: body.code ?? '',
+      name,
+      code,
       isActive: body.isActive ?? true,
     });
     const saved = await this.locationsRepo.save(loc);

@@ -2,8 +2,34 @@ import axios, { AxiosError, AxiosRequestConfig } from 'axios';
 import { useAuth } from '@/auth/store';
 import type { ApiErrorShape } from './types';
 
+// Resolve the API base in a multi-domain-safe way.
+// We deliberately prefer a *relative* path so a single build can be served
+// from multiple hostnames (e.g. uat-med.icdcore.com AND nxtcodeai.com) and
+// each request goes to whatever origin the browser is currently on. If
+// VITE_API_BASE is set to an absolute URL we still respect it, but only
+// when its host matches the current page — otherwise we fall back to the
+// relative path so the call doesn't leak across domains.
+function resolveApiBase(): string {
+  const fallback = '/api/v1';
+  const raw = (import.meta.env.VITE_API_BASE as string | undefined)?.trim();
+  if (!raw) return fallback;
+  if (raw.startsWith('/')) return raw;
+  if (typeof window === 'undefined') return raw;
+  try {
+    const u = new URL(raw);
+    if (u.host === window.location.host) return raw;
+    // Configured for a different host than the page is on — use relative
+    // so the request stays on the current domain.
+    return u.pathname.startsWith('/') ? u.pathname : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export const API_BASE = resolveApiBase();
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE,
+  baseURL: API_BASE,
   timeout: 30_000,
   headers: { Accept: 'application/json' },
 });
@@ -32,7 +58,7 @@ async function refreshAccessToken(): Promise<string | null> {
     }
     try {
       const { data } = await axios.post(
-        `${import.meta.env.VITE_API_BASE}/auth/refresh`,
+        `${API_BASE}/auth/refresh`,
         { refreshToken },
         { headers: { 'Content-Type': 'application/json' } },
       );

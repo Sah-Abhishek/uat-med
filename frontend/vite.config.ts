@@ -13,8 +13,11 @@ export default defineConfig({
     host: true,
     port: 8600,
     allowedHosts: [
-      'uat-med.icdcore.com', 'uat.nxtcodeai.com',
-      '216.48.183.225', 
+      'uat-med.icdcore.com',
+      'uat.nxtcodeai.com',
+      'nxtcodeai.com',
+      'www.nxtcodeai.com',
+      '216.48.183.225',
       'localhost',
     ],
     proxy: {
