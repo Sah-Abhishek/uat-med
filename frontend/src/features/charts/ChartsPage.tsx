@@ -301,7 +301,17 @@ export function ChartsPage() {
     [visibleColumns],
   );
 
-  const summary = useQuery({ queryKey: ['charts', 'summary'], queryFn: getChartsSummary });
+  const summary = useQuery({
+    queryKey: ['charts', 'summary'],
+    queryFn: getChartsSummary,
+    // Keep the AI Queued / Processing tiles moving while any chart on the
+    // current page is in flight — same trigger as the list refetch below.
+    refetchInterval: (query) => {
+      const counts = (query.state.data as { aiStatusCounts?: { queued: number; processing: number } } | undefined)
+        ?.aiStatusCounts;
+      return counts && (counts.queued > 0 || counts.processing > 0) ? 5000 : false;
+    },
+  });
 
   const params: ChartListParams = useMemo(
     () => ({
@@ -319,6 +329,19 @@ export function ChartsPage() {
     queryKey: ['charts', params],
     queryFn: () => listCharts(params),
     placeholderData: (prev) => prev,
+    // If any chart on the current page is mid-AI-pipeline (QUEUED or
+    // PROCESSING), poll the list every 5s so the row tints and AI chip flip to
+    // DONE / ERRORED without a manual refresh. Mirrors the per-chart poll on
+    // ChartDetailPage; stops as soon as the page is settled.
+    refetchInterval: (query) => {
+      const items = (query.state.data as { items?: Chart[] } | undefined)?.items;
+      if (!items?.length) return false;
+      const hasInFlight = items.some((c) => {
+        const s = deriveAiStatus(c.customFields);
+        return s === 'QUEUED' || s === 'PROCESSING';
+      });
+      return hasInFlight ? 5000 : false;
+    },
   });
 
   const totalPages = list.data ? Math.max(1, Math.ceil(list.data.total / pageSize)) : 1;
