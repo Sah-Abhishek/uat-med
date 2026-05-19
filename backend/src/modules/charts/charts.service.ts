@@ -74,7 +74,11 @@ export class ChartsService {
 
   async list(q: QueryChartsDto, user: AuthenticatedUser) {
     const qb = this.charts.createQueryBuilder('c')
-      .leftJoinAndSelect('c.worklist', 'worklist');
+      .leftJoinAndSelect('c.worklist', 'worklist')
+      .leftJoinAndSelect('worklist.client', 'client')
+      .leftJoinAndSelect('worklist.location', 'location')
+      .leftJoinAndSelect('worklist.primarySpeciality', 'primarySpeciality')
+      .leftJoinAndSelect('worklist.process', 'process');
 
     // Role-scoped visibility: coders / auditors see only their own queue.
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
@@ -96,10 +100,74 @@ export class ChartsService {
     qb.skip((q.page - 1) * q.pageSize).take(q.pageSize);
 
     const [items, total] = await qb.getManyAndCount();
-    const mapped = items.map(({ worklist, ...rest }) => ({
-      ...rest,
-      worklistNumber: worklist?.worklistNumber ?? null,
-    }));
+
+    // Batch-resolve user names for the four user FKs the table can show.
+    const userIds = new Set<number>();
+    for (const c of items) {
+      if (c.allocatedCoderId) userIds.add(Number(c.allocatedCoderId));
+      if (c.allocatedAuditorId) userIds.add(Number(c.allocatedAuditorId));
+      if (c.originalCoderId) userIds.add(Number(c.originalCoderId));
+      if (c.originalAuditorId) userIds.add(Number(c.originalAuditorId));
+    }
+    const userMap = new Map<number, string>();
+    if (userIds.size > 0) {
+      const users = await this.users.find({
+        where: { id: In([...userIds]) },
+        select: ['id', 'fullName'],
+      });
+      for (const u of users) userMap.set(Number(u.id), u.fullName);
+    }
+
+    // Batch-fetch earliest CODER/AUDITOR allocation timestamps per chart so the
+    // "Date of Coder/Auditor Allocation" columns can render the first handoff.
+    const chartIds = items.map(c => Number(c.id));
+    const allocRows: Array<{ chart_id: string; role: 'CODER' | 'AUDITOR'; first_at: Date }> =
+      chartIds.length === 0
+        ? []
+        : await this.allocations
+            .createQueryBuilder('a')
+            .select('a.chart_id', 'chart_id')
+            .addSelect('a.role', 'role')
+            .addSelect('MIN(a.allocated_at)', 'first_at')
+            .where('a.chart_id IN (:...ids)', { ids: chartIds })
+            .groupBy('a.chart_id')
+            .addGroupBy('a.role')
+            .getRawMany();
+    const allocByChart = new Map<number, { coderAt?: string; auditorAt?: string }>();
+    for (const r of allocRows) {
+      const cid = Number(r.chart_id);
+      const entry = allocByChart.get(cid) ?? {};
+      const iso = r.first_at instanceof Date ? r.first_at.toISOString() : String(r.first_at);
+      if (r.role === 'CODER') entry.coderAt = iso;
+      if (r.role === 'AUDITOR') entry.auditorAt = iso;
+      allocByChart.set(cid, entry);
+    }
+
+    const mapped = items.map(({ worklist, ...rest }) => {
+      const cf = (rest.customFields ?? {}) as Record<string, any>;
+      const alloc = allocByChart.get(Number(rest.id)) ?? {};
+      return {
+        ...rest,
+        worklistNumber: worklist?.worklistNumber ?? null,
+        clientName: worklist?.client?.name ?? null,
+        locationName: worklist?.location?.name ?? null,
+        specialityName: worklist?.primarySpeciality?.name ?? null,
+        processName: worklist?.process?.name ?? null,
+        receivedDate: worklist?.receivedDate ?? null,
+        allocatedCoderName: rest.allocatedCoderId ? userMap.get(Number(rest.allocatedCoderId)) ?? null : null,
+        allocatedAuditorName: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId)) ?? null : null,
+        originalCoderId: rest.originalCoderId ?? null,
+        originalAuditorId: rest.originalAuditorId ?? null,
+        originalCoderName: rest.originalCoderId ? userMap.get(Number(rest.originalCoderId)) ?? null : null,
+        originalAuditorName: rest.originalAuditorId ? userMap.get(Number(rest.originalAuditorId)) ?? null : null,
+        coderAllocatedAt: alloc.coderAt ?? null,
+        auditorAllocatedAt: alloc.auditorAt ?? null,
+        // Pulled from custom_fields where the seed/import populates them. Null
+        // when the tenant hasn't promoted these into structured columns yet.
+        subSpecialityName: typeof cf.subSpeciality === 'string' ? cf.subSpeciality : null,
+        qcStatus: typeof cf.qcStatus === 'string' ? cf.qcStatus : null,
+      };
+    });
     return new PaginatedResponseDto(mapped, total, q.page, q.pageSize);
   }
 

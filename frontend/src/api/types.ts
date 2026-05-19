@@ -168,6 +168,24 @@ export interface Chart {
   customFields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  /* List-view enrichments — present on responses from `GET /charts`, where
+   * the backend joins lookup tables and batch-resolves user names so the
+   * configurable Charts table can render them without N+1 fetches. */
+  clientName?: string | null;
+  locationName?: string | null;
+  specialityName?: string | null;
+  subSpecialityName?: string | null;
+  processName?: string | null;
+  receivedDate?: string | null;
+  qcStatus?: string | null;
+  originalCoderId?: string | null;
+  originalAuditorId?: string | null;
+  originalCoderName?: string | null;
+  originalAuditorName?: string | null;
+  allocatedCoderName?: string | null;
+  allocatedAuditorName?: string | null;
+  coderAllocatedAt?: string | null;
+  auditorAllocatedAt?: string | null;
 }
 
 export type AiReportType =
