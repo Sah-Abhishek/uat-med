@@ -83,6 +83,10 @@ interface ColumnDef {
   key: string;
   label: string;
   defaultVisible: boolean;
+  /** Always-on columns (Worklist #, S. No., Chart #) — the popover renders
+   * their checkboxes as disabled so users can't accidentally hide identifying
+   * info. They're also force-included on every load regardless of stored prefs. */
+  locked?: boolean;
   render: (c: Chart) => React.ReactNode;
 }
 
@@ -94,176 +98,220 @@ function dash(node: React.ReactNode): React.ReactNode {
   );
 }
 
-const CHART_COLUMNS: ColumnDef[] = [
-  {
-    key: 'location',
-    label: 'Location',
-    defaultVisible: true,
-    render: (c) => dash(c.locationName),
-  },
-  {
-    key: 'client',
-    label: 'Client',
-    defaultVisible: true,
-    render: (c) => dash(c.clientName),
-  },
-  {
-    key: 'specialty',
-    label: 'Specialty',
-    defaultVisible: false,
-    render: (c) => dash(c.specialityName),
-  },
-  {
-    key: 'chartNo',
-    label: 'Chart No.',
-    defaultVisible: true,
-    render: (c) => (
-      <Link to={`/charts/${c.id}`} className="text-ink hover:text-primary font-bold transition">
-        {c.chartNo ?? '—'}
-      </Link>
-    ),
-  },
-  {
-    key: 'dateOfService',
-    label: 'Date of Service',
-    defaultVisible: true,
-    render: (c) => <span className="text-ink-muted">{formatDate(c.dateOfService)}</span>,
-  },
-  {
-    key: 'originalCoder',
-    label: 'Original Coder',
-    defaultVisible: false,
-    render: (c) => dash(c.originalCoderName),
-  },
-  {
-    key: 'followUpCoder',
-    label: 'Follow up Coder',
-    defaultVisible: false,
-    // Not yet modelled — surface a placeholder so toggling the column works
-    // and existing users see where the data will land once it's wired up.
-    render: () => <span className="text-ink-subtle text-xs">—</span>,
-  },
-  {
-    key: 'originalAuditor',
-    label: 'Original Auditor',
-    defaultVisible: false,
-    render: (c) => dash(c.originalAuditorName),
-  },
-  {
-    key: 'chartStatus',
-    label: 'Chart Status',
-    defaultVisible: true,
-    render: (c) => <ChartStatusChip status={c.chartStatus} />,
-  },
-  {
-    key: 'milestone',
-    label: 'Milestone',
-    defaultVisible: true,
-    render: (c) => <MilestoneChip milestone={c.milestone} />,
-  },
-  {
-    key: 'qcStatus',
-    label: 'QC status',
-    defaultVisible: false,
-    render: (c) => dash(c.qcStatus),
-  },
-  {
-    key: 'allocatedUser',
-    label: 'Allocated User',
-    defaultVisible: true,
-    render: (c) => {
-      const name = c.allocatedCoderName ?? c.allocatedAuditorName;
-      if (!name) return <span className="text-ink-subtle text-xs">—</span>;
-      return (
-        <span className="inline-flex items-center gap-2">
-          <Avatar name={name} size="sm" />
-          <span className="text-xs truncate">{name}</span>
-        </span>
-      );
+/** Column catalog. Order here is the on-screen column order; the popover
+ * also renders rows in this order. Render functions depend on `canOpenWorklist`
+ * so coders see Worklist # as plain text (no link to the worklist detail page). */
+function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): ColumnDef[] {
+  return [
+    {
+      key: 'worklistNo',
+      label: 'Worklist #',
+      defaultVisible: true,
+      locked: true,
+      render: (c) =>
+        canOpenWorklist ? (
+          <Link
+            to={`/worklists/${c.worklistId}`}
+            className="text-ink-muted hover:text-primary font-mono text-xs"
+          >
+            {c.worklistNumber}
+          </Link>
+        ) : (
+          <span className="text-ink-muted font-mono text-xs">{c.worklistNumber}</span>
+        ),
     },
-  },
-  {
-    key: 'followUpAuditor',
-    label: 'Follow Up Auditor',
-    defaultVisible: false,
-    render: () => <span className="text-ink-subtle text-xs">—</span>,
-  },
-  {
-    key: 'process',
-    label: 'Process',
-    defaultVisible: false,
-    render: (c) => dash(c.processName),
-  },
-  {
-    key: 'receivedDate',
-    label: 'Received Date',
-    defaultVisible: true,
-    render: (c) => <span className="text-ink-muted">{formatDate(c.receivedDate ?? c.createdAt)}</span>,
-  },
-  {
-    key: 'subSpecialty',
-    label: 'Sub Specialty',
-    defaultVisible: false,
-    render: (c) => dash(c.subSpecialityName),
-  },
-  {
-    key: 'coderAllocatedAt',
-    label: 'Date of Coder Allocation',
-    defaultVisible: false,
-    render: (c) => <span className="text-ink-muted">{formatDate(c.coderAllocatedAt)}</span>,
-  },
-  {
-    key: 'auditorAllocatedAt',
-    label: 'Date of Auditor Allocation',
-    defaultVisible: false,
-    render: (c) => <span className="text-ink-muted">{formatDate(c.auditorAllocatedAt)}</span>,
-  },
-  // Extras kept on the catalog (off by default) so the priority/AI pipeline
-  // information from the prior layout is still reachable without losing the
-  // row tinting that depends on AI status.
-  {
-    key: 'priority',
-    label: 'Priority',
-    defaultVisible: false,
-    render: (c) => <PriorityChip priority={c.priority} />,
-  },
-  {
-    key: 'aiStatus',
-    label: 'AI Status',
-    defaultVisible: false,
-    render: (c) => <AiStatusChip status={deriveAiStatus(c.customFields)} />,
-  },
-  {
-    key: 'worklistNo',
-    label: 'Worklist #',
-    defaultVisible: false,
-    render: (c) => (
-      <Link
-        to={`/worklists/${c.worklistId}`}
-        className="text-ink-muted hover:text-primary font-mono text-xs"
-      >
-        {c.worklistNumber}
-      </Link>
-    ),
-  },
-  {
-    key: 'serialNo',
-    label: 'Serial #',
-    defaultVisible: false,
-    render: (c) => <span className="font-mono text-xs">{c.serialNo}</span>,
-  },
-];
+    {
+      key: 'serialNo',
+      label: 'S. No.',
+      defaultVisible: true,
+      locked: true,
+      render: (c) => <span className="font-mono text-xs">{c.serialNo}</span>,
+    },
+    {
+      key: 'client',
+      label: 'Client',
+      defaultVisible: true,
+      render: (c) => dash(c.clientName),
+    },
+    {
+      key: 'location',
+      label: 'Location',
+      defaultVisible: true,
+      render: (c) => dash(c.locationName),
+    },
+    {
+      key: 'specialty',
+      label: 'Primary Speciality',
+      defaultVisible: false,
+      render: (c) => dash(c.specialityName),
+    },
+    {
+      key: 'chartNo',
+      label: 'Chart #',
+      defaultVisible: true,
+      locked: true,
+      render: (c) => (
+        <Link
+          to={`/charts/${c.id}`}
+          className="text-ink hover:text-primary font-bold transition"
+        >
+          {c.chartNo ?? '—'}
+        </Link>
+      ),
+    },
+    {
+      key: 'dateOfService',
+      label: 'Date of Service',
+      defaultVisible: true,
+      render: (c) => <span className="text-ink-muted">{formatDate(c.dateOfService)}</span>,
+    },
+    {
+      key: 'originalCoder',
+      label: 'Original Coder',
+      defaultVisible: false,
+      render: (c) => dash(c.originalCoderName),
+    },
+    {
+      key: 'followUpCoder',
+      label: 'Follow Up Coder',
+      defaultVisible: false,
+      // Not yet modelled — surface a placeholder so toggling the column works
+      // and users see where the data will land once it's wired up.
+      render: () => <span className="text-ink-subtle text-xs">—</span>,
+    },
+    {
+      key: 'originalAuditor',
+      label: 'Original Auditor',
+      defaultVisible: false,
+      render: (c) => dash(c.originalAuditorName),
+    },
+    {
+      key: 'allocatedUser',
+      label: 'Allocated User',
+      defaultVisible: true,
+      render: (c) => {
+        const name = c.allocatedCoderName ?? c.allocatedAuditorName;
+        if (!name) return <span className="text-ink-subtle text-xs">—</span>;
+        return (
+          <span className="inline-flex items-center gap-2">
+            <Avatar name={name} size="sm" />
+            <span className="text-xs truncate">{name}</span>
+          </span>
+        );
+      },
+    },
+    {
+      key: 'chartStatus',
+      label: 'Chart Status',
+      defaultVisible: true,
+      render: (c) => <ChartStatusChip status={c.chartStatus} />,
+    },
+    {
+      key: 'milestone',
+      label: 'Milestone',
+      defaultVisible: true,
+      render: (c) => <MilestoneChip milestone={c.milestone} />,
+    },
+    {
+      key: 'followUpAuditor',
+      label: 'Follow Up Auditor',
+      defaultVisible: false,
+      render: () => <span className="text-ink-subtle text-xs">—</span>,
+    },
+    {
+      key: 'process',
+      label: 'Process',
+      defaultVisible: false,
+      render: (c) => dash(c.processName),
+    },
+    {
+      key: 'receivedDate',
+      label: 'Received Date',
+      defaultVisible: true,
+      render: (c) => (
+        <span className="text-ink-muted">{formatDate(c.receivedDate ?? c.createdAt)}</span>
+      ),
+    },
+    {
+      key: 'subSpecialty',
+      label: 'Sub Specialty',
+      defaultVisible: false,
+      render: (c) => dash(c.subSpecialityName),
+    },
+    {
+      key: 'auditorAllocatedAt',
+      label: 'Date of Auditor Allocation',
+      defaultVisible: false,
+      render: (c) => (
+        <span className="text-ink-muted">{formatDate(c.auditorAllocatedAt)}</span>
+      ),
+    },
+    // ── Extras (off by default) ─────────────────────────────
+    // Not in the canonical column list but kept here so the data is still
+    // reachable: QC status / coder-allocation timestamp aren't part of the
+    // primary 18, and Priority / AI Status double up on info that already
+    // drives the priority tabs and row tinting respectively.
+    {
+      key: 'qcStatus',
+      label: 'QC Status',
+      defaultVisible: false,
+      render: (c) => dash(c.qcStatus),
+    },
+    {
+      key: 'coderAllocatedAt',
+      label: 'Date of Coder Allocation',
+      defaultVisible: false,
+      render: (c) => (
+        <span className="text-ink-muted">{formatDate(c.coderAllocatedAt)}</span>
+      ),
+    },
+    {
+      key: 'priority',
+      label: 'Priority',
+      defaultVisible: false,
+      render: (c) => <PriorityChip priority={c.priority} />,
+    },
+    {
+      key: 'aiStatus',
+      label: 'AI Status',
+      defaultVisible: false,
+      render: (c) => <AiStatusChip status={deriveAiStatus(c.customFields)} />,
+    },
+  ];
+}
 
-const COLUMN_PREFS_KEY = 'charts.columns.visible.v1';
+/** Static key list — used by load/save to validate stored prefs without
+ * paying for a per-call rebuild of the renderer-bearing catalog. */
+const COLUMN_KEYS: ReadonlySet<string> = new Set(
+  buildChartColumns({ canOpenWorklist: true }).map((c) => c.key),
+);
+const LOCKED_KEYS: ReadonlySet<string> = new Set(
+  buildChartColumns({ canOpenWorklist: true }).filter((c) => c.locked).map((c) => c.key),
+);
+const DEFAULT_VISIBLE_KEYS: ReadonlySet<string> = new Set(
+  buildChartColumns({ canOpenWorklist: true })
+    .filter((c) => c.defaultVisible)
+    .map((c) => c.key),
+);
+
+// Bumped to v2 because the column set + order changed; v1 prefs would still
+// load valid keys but in the old order, which is exactly what the user asked
+// us to overwrite. Clean slate keeps the on-screen layout matching the spec.
+const COLUMN_PREFS_KEY = 'charts.columns.visible.v2';
 
 function loadVisibleColumns(): Set<string> {
+  const fallback = new Set<string>([...DEFAULT_VISIBLE_KEYS, ...LOCKED_KEYS]);
   try {
     const raw = localStorage.getItem(COLUMN_PREFS_KEY);
-    if (!raw) return new Set(CHART_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
+    if (!raw) return fallback;
     const parsed: string[] = JSON.parse(raw);
-    return new Set(parsed.filter((k) => CHART_COLUMNS.some((col) => col.key === k)));
+    const next = new Set(parsed.filter((k) => COLUMN_KEYS.has(k)));
+    // Locked columns can never be removed via stored prefs either — re-add
+    // them in case a user hand-edited localStorage.
+    LOCKED_KEYS.forEach((k) => next.add(k));
+    return next;
   } catch {
-    return new Set(CHART_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
+    return fallback;
   }
 }
 
@@ -296,10 +344,31 @@ export function ChartsPage() {
     saveVisibleColumns(visibleColumns);
   }, [visibleColumns]);
 
-  const activeColumns = useMemo(
-    () => CHART_COLUMNS.filter((c) => visibleColumns.has(c.key)),
-    [visibleColumns],
+  // Coders aren't allowed into the worklist detail page, so the Worklist #
+  // cell renders as plain text for them and as a link for everyone else.
+  const chartColumns = useMemo(
+    () => buildChartColumns({ canOpenWorklist: user.role !== 'CODER' }),
+    [user.role],
   );
+  const activeColumns = useMemo(
+    () => chartColumns.filter((c) => visibleColumns.has(c.key)),
+    [chartColumns, visibleColumns],
+  );
+
+  // Locked columns can never be removed from the visible set, even if the
+  // popover tried — the toggle handler enforces this and we belt-and-braces
+  // it here so any other path (URL state, dev tools) stays consistent.
+  useEffect(() => {
+    let dirty = false;
+    const next = new Set(visibleColumns);
+    LOCKED_KEYS.forEach((k) => {
+      if (!next.has(k)) {
+        next.add(k);
+        dirty = true;
+      }
+    });
+    if (dirty) setVisibleColumns(next);
+  }, [visibleColumns]);
 
   const summary = useQuery({
     queryKey: ['charts', 'summary'],
@@ -552,6 +621,7 @@ export function ChartsPage() {
         open={columnsOpen}
         anchorRef={columnsBtnRef}
         onClose={() => setColumnsOpen(false)}
+        columns={chartColumns}
         visible={visibleColumns}
         onChange={setVisibleColumns}
       />
@@ -702,12 +772,14 @@ function ColumnsPopover({
   open,
   anchorRef,
   onClose,
+  columns,
   visible,
   onChange,
 }: {
   open: boolean;
   anchorRef: React.RefObject<HTMLButtonElement | null>;
   onClose: () => void;
+  columns: ColumnDef[];
   visible: Set<string>;
   onChange: (next: Set<string>) => void;
 }) {
@@ -738,6 +810,9 @@ function ColumnsPopover({
   if (!open) return null;
 
   function toggle(key: string) {
+    // Locked columns ignore the toggle — checkbox is disabled too, but this
+    // is the source-of-truth guard for any other entry point.
+    if (LOCKED_KEYS.has(key)) return;
     const next = new Set(visible);
     if (next.has(key)) next.delete(key);
     else next.add(key);
@@ -745,11 +820,13 @@ function ColumnsPopover({
   }
 
   function resetDefaults() {
-    onChange(new Set(CHART_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key)));
+    const next = new Set(columns.filter((c) => c.defaultVisible).map((c) => c.key));
+    LOCKED_KEYS.forEach((k) => next.add(k));
+    onChange(next);
   }
 
   function showAll() {
-    onChange(new Set(CHART_COLUMNS.map((c) => c.key)));
+    onChange(new Set(columns.map((c) => c.key)));
   }
 
   return (
@@ -791,20 +868,33 @@ function ColumnsPopover({
         </div>
       </div>
       <div className="max-h-80 overflow-y-auto px-2 pb-2">
-        {CHART_COLUMNS.map((col) => {
+        {columns.map((col) => {
           const checked = visible.has(col.key);
+          const locked = !!col.locked;
           return (
             <label
               key={col.key}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer hover:bg-surface-sunken/60"
+              className={cn(
+                'flex items-center gap-2 px-2 py-1.5 rounded-md',
+                locked
+                  ? 'cursor-not-allowed opacity-70'
+                  : 'cursor-pointer hover:bg-surface-sunken/60',
+              )}
+              title={locked ? 'Always shown' : undefined}
             >
               <input
                 type="checkbox"
                 checked={checked}
+                disabled={locked}
                 onChange={() => toggle(col.key)}
                 className="checkbox"
               />
               <span className="text-sm text-ink">{col.label}</span>
+              {locked && (
+                <span className="ml-auto text-[10px] uppercase tracking-wide text-ink-subtle">
+                  Locked
+                </span>
+              )}
             </label>
           );
         })}

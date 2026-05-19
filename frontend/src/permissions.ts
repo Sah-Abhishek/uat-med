@@ -1,6 +1,9 @@
 import type { Role } from '@/api/types';
 
 export const PERMISSIONS = {
+  // Coders intentionally excluded — they consume charts via the Charts page
+  // and shouldn't be navigating into worklist management.
+  'worklist.view': ['TEAMLEAD', 'MANAGER', 'AUDITOR'],
   'worklist.create': ['TEAMLEAD', 'MANAGER'],
   'worklist.delete': ['TEAMLEAD', 'MANAGER'],
   'worklist.allocate': ['TEAMLEAD', 'MANAGER'],
