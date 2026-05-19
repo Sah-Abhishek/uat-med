@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
@@ -33,7 +33,7 @@ import {
   MilestoneChip,
   PriorityChip,
 } from '@/components/ui/Chip';
-import { deriveAiStatus, type AiStatus } from '@/api/types';
+import { deriveAiStatus, type AiStatus, type Chart } from '@/api/types';
 
 // Row tints by AI pipeline status. Each row gets the same soft token the
 // AI chip uses plus a 4px inset accent on the leading edge so the state
@@ -73,6 +73,208 @@ const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
   { key: 'FINALIZED', label: 'Done' },
 ];
 
+/* ── Configurable column catalog ──────────────────────────
+ * Each entry pairs a label with a renderer; visibility is toggled from the
+ * Columns popover and persisted in localStorage so each user keeps their own
+ * layout. Keep in sync with the backend `GET /charts` projection — keys here
+ * must match the fields the list endpoint actually returns.
+ * ────────────────────────────────────────────────────────── */
+interface ColumnDef {
+  key: string;
+  label: string;
+  defaultVisible: boolean;
+  render: (c: Chart) => React.ReactNode;
+}
+
+function dash(node: React.ReactNode): React.ReactNode {
+  return node === null || node === undefined || node === '' ? (
+    <span className="text-ink-subtle text-xs">—</span>
+  ) : (
+    node
+  );
+}
+
+const CHART_COLUMNS: ColumnDef[] = [
+  {
+    key: 'location',
+    label: 'Location',
+    defaultVisible: true,
+    render: (c) => dash(c.locationName),
+  },
+  {
+    key: 'client',
+    label: 'Client',
+    defaultVisible: true,
+    render: (c) => dash(c.clientName),
+  },
+  {
+    key: 'specialty',
+    label: 'Specialty',
+    defaultVisible: false,
+    render: (c) => dash(c.specialityName),
+  },
+  {
+    key: 'chartNo',
+    label: 'Chart No.',
+    defaultVisible: true,
+    render: (c) => (
+      <Link to={`/charts/${c.id}`} className="text-ink hover:text-primary font-bold transition">
+        {c.chartNo ?? '—'}
+      </Link>
+    ),
+  },
+  {
+    key: 'dateOfService',
+    label: 'Date of Service',
+    defaultVisible: true,
+    render: (c) => <span className="text-ink-muted">{formatDate(c.dateOfService)}</span>,
+  },
+  {
+    key: 'originalCoder',
+    label: 'Original Coder',
+    defaultVisible: false,
+    render: (c) => dash(c.originalCoderName),
+  },
+  {
+    key: 'followUpCoder',
+    label: 'Follow up Coder',
+    defaultVisible: false,
+    // Not yet modelled — surface a placeholder so toggling the column works
+    // and existing users see where the data will land once it's wired up.
+    render: () => <span className="text-ink-subtle text-xs">—</span>,
+  },
+  {
+    key: 'originalAuditor',
+    label: 'Original Auditor',
+    defaultVisible: false,
+    render: (c) => dash(c.originalAuditorName),
+  },
+  {
+    key: 'chartStatus',
+    label: 'Chart Status',
+    defaultVisible: true,
+    render: (c) => <ChartStatusChip status={c.chartStatus} />,
+  },
+  {
+    key: 'milestone',
+    label: 'Milestone',
+    defaultVisible: true,
+    render: (c) => <MilestoneChip milestone={c.milestone} />,
+  },
+  {
+    key: 'qcStatus',
+    label: 'QC status',
+    defaultVisible: false,
+    render: (c) => dash(c.qcStatus),
+  },
+  {
+    key: 'allocatedUser',
+    label: 'Allocated User',
+    defaultVisible: true,
+    render: (c) => {
+      const name = c.allocatedCoderName ?? c.allocatedAuditorName;
+      if (!name) return <span className="text-ink-subtle text-xs">—</span>;
+      return (
+        <span className="inline-flex items-center gap-2">
+          <Avatar name={name} size="sm" />
+          <span className="text-xs truncate">{name}</span>
+        </span>
+      );
+    },
+  },
+  {
+    key: 'followUpAuditor',
+    label: 'Follow Up Auditor',
+    defaultVisible: false,
+    render: () => <span className="text-ink-subtle text-xs">—</span>,
+  },
+  {
+    key: 'process',
+    label: 'Process',
+    defaultVisible: false,
+    render: (c) => dash(c.processName),
+  },
+  {
+    key: 'receivedDate',
+    label: 'Received Date',
+    defaultVisible: true,
+    render: (c) => <span className="text-ink-muted">{formatDate(c.receivedDate ?? c.createdAt)}</span>,
+  },
+  {
+    key: 'subSpecialty',
+    label: 'Sub Specialty',
+    defaultVisible: false,
+    render: (c) => dash(c.subSpecialityName),
+  },
+  {
+    key: 'coderAllocatedAt',
+    label: 'Date of Coder Allocation',
+    defaultVisible: false,
+    render: (c) => <span className="text-ink-muted">{formatDate(c.coderAllocatedAt)}</span>,
+  },
+  {
+    key: 'auditorAllocatedAt',
+    label: 'Date of Auditor Allocation',
+    defaultVisible: false,
+    render: (c) => <span className="text-ink-muted">{formatDate(c.auditorAllocatedAt)}</span>,
+  },
+  // Extras kept on the catalog (off by default) so the priority/AI pipeline
+  // information from the prior layout is still reachable without losing the
+  // row tinting that depends on AI status.
+  {
+    key: 'priority',
+    label: 'Priority',
+    defaultVisible: false,
+    render: (c) => <PriorityChip priority={c.priority} />,
+  },
+  {
+    key: 'aiStatus',
+    label: 'AI Status',
+    defaultVisible: false,
+    render: (c) => <AiStatusChip status={deriveAiStatus(c.customFields)} />,
+  },
+  {
+    key: 'worklistNo',
+    label: 'Worklist #',
+    defaultVisible: false,
+    render: (c) => (
+      <Link
+        to={`/worklists/${c.worklistId}`}
+        className="text-ink-muted hover:text-primary font-mono text-xs"
+      >
+        {c.worklistNumber}
+      </Link>
+    ),
+  },
+  {
+    key: 'serialNo',
+    label: 'Serial #',
+    defaultVisible: false,
+    render: (c) => <span className="font-mono text-xs">{c.serialNo}</span>,
+  },
+];
+
+const COLUMN_PREFS_KEY = 'charts.columns.visible.v1';
+
+function loadVisibleColumns(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLUMN_PREFS_KEY);
+    if (!raw) return new Set(CHART_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
+    const parsed: string[] = JSON.parse(raw);
+    return new Set(parsed.filter((k) => CHART_COLUMNS.some((col) => col.key === k)));
+  } catch {
+    return new Set(CHART_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
+  }
+}
+
+function saveVisibleColumns(visible: Set<string>) {
+  try {
+    localStorage.setItem(COLUMN_PREFS_KEY, JSON.stringify([...visible]));
+  } catch {
+    /* ignore quota / disabled storage */
+  }
+}
+
 export function ChartsPage() {
   const user = useAuth((s) => s.user)!;
   const isManager = can(user, 'chart.bulkModify');
@@ -87,6 +289,17 @@ export function ChartsPage() {
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [modifyOpen, setModifyOpen] = useState(false);
   const [selfAllocateOpen, setSelfAllocateOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => loadVisibleColumns());
+  const columnsBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    saveVisibleColumns(visibleColumns);
+  }, [visibleColumns]);
+
+  const activeColumns = useMemo(
+    () => CHART_COLUMNS.filter((c) => visibleColumns.has(c.key)),
+    [visibleColumns],
+  );
 
   const summary = useQuery({ queryKey: ['charts', 'summary'], queryFn: getChartsSummary });
 
@@ -199,7 +412,12 @@ export function ChartsPage() {
             <Button variant="soft" leftIcon={<FilterIcon className="w-3.5 h-3.5" />} onClick={() => setFilterOpen(true)}>
               Filter
             </Button>
-            <Button variant="soft" leftIcon={<Columns3 className="w-3.5 h-3.5" />} onClick={() => setColumnsOpen(true)}>
+            <Button
+              ref={columnsBtnRef}
+              variant="soft"
+              leftIcon={<Columns3 className="w-3.5 h-3.5" />}
+              onClick={() => setColumnsOpen((v) => !v)}
+            >
               Columns
             </Button>
             {isManager && (
@@ -236,17 +454,9 @@ export function ChartsPage() {
                     className="checkbox"
                   />
                 </th>
-                <HeaderCell sortable>Serial #</HeaderCell>
-                <HeaderCell sortable>Chart #</HeaderCell>
-                <HeaderCell>Worklist #</HeaderCell>
-                <HeaderCell sortable>Priority</HeaderCell>
-                <HeaderCell sortable>Milestone</HeaderCell>
-                <HeaderCell sortable>Status</HeaderCell>
-                <HeaderCell>AI</HeaderCell>
-                <HeaderCell>Coder</HeaderCell>
-                <HeaderCell>Auditor</HeaderCell>
-                <HeaderCell sortable>Date of service</HeaderCell>
-                <HeaderCell sortable>Received date</HeaderCell>
+                {activeColumns.map((col) => (
+                  <HeaderCell key={col.key}>{col.label}</HeaderCell>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -256,44 +466,16 @@ export function ChartsPage() {
                     <td className="table-cell">
                       <div className="w-4 h-4 rounded bg-surface-sunken animate-pulse" />
                     </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-8 rounded bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-20 rounded bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-16 rounded bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-5 w-16 rounded-pill bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-5 w-24 rounded-pill bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-5 w-16 rounded-pill bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-5 w-20 rounded-pill bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="w-7 h-7 rounded-full bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="w-7 h-7 rounded-full bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-20 rounded bg-surface-sunken animate-pulse" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-20 rounded bg-surface-sunken animate-pulse" />
-                    </td>
+                    {activeColumns.map((col) => (
+                      <td key={col.key} className="table-cell">
+                        <div className="h-3 w-20 rounded bg-surface-sunken animate-pulse" />
+                      </td>
+                    ))}
                   </tr>
                 ))
               ) : list.data?.items.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-20 text-center text-sm text-ink-muted">
+                  <td colSpan={activeColumns.length + 1} className="py-20 text-center text-sm text-ink-muted">
                     No charts match the current filters.
                   </td>
                 </tr>
@@ -301,45 +483,27 @@ export function ChartsPage() {
                 list.data?.items.map((c) => {
                   const aiStatus = deriveAiStatus(c.customFields);
                   return (
-                  <tr
-                    key={c.id}
-                    className={cn(
-                      'group border-b border-line/60 transition-colors',
-                      AI_ROW_TINT[aiStatus],
-                    )}
-                  >
-                    <td className="table-cell">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(c.id)}
-                        onChange={() => toggle(c.id)}
-                        className="checkbox"
-                      />
-                    </td>
-                    <td className="table-cell font-mono text-xs">{c.serialNo}</td>
-                    <td className="table-cell font-bold">
-                      <Link to={`/charts/${c.id}`} className="text-ink hover:text-primary transition">
-                        {c.chartNo ?? '—'}
-                      </Link>
-                    </td>
-                    <td className="table-cell">
-                      <Link to={`/worklists/${c.worklistId}`} className="text-ink-muted hover:text-primary font-mono text-xs">
-                        {c.worklistNumber}
-                      </Link>
-                    </td>
-                    <td className="table-cell"><PriorityChip priority={c.priority} /></td>
-                    <td className="table-cell"><MilestoneChip milestone={c.milestone} /></td>
-                    <td className="table-cell"><ChartStatusChip status={c.chartStatus} /></td>
-                    <td className="table-cell"><AiStatusChip status={aiStatus} /></td>
-                    <td className="table-cell">
-                      {c.allocatedCoderId ? <Avatar name={`U ${c.allocatedCoderId}`} size="sm" /> : <span className="text-ink-subtle text-xs">—</span>}
-                    </td>
-                    <td className="table-cell">
-                      {c.allocatedAuditorId ? <Avatar name={`A ${c.allocatedAuditorId}`} size="sm" /> : <span className="text-ink-subtle text-xs">—</span>}
-                    </td>
-                    <td className="table-cell text-ink-muted">{formatDate(c.dateOfService)}</td>
-                    <td className="table-cell text-ink-muted">{formatDate(c.createdAt)}</td>
-                  </tr>
+                    <tr
+                      key={c.id}
+                      className={cn(
+                        'group border-b border-line/60 transition-colors',
+                        AI_ROW_TINT[aiStatus],
+                      )}
+                    >
+                      <td className="table-cell">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(c.id)}
+                          onChange={() => toggle(c.id)}
+                          className="checkbox"
+                        />
+                      </td>
+                      {activeColumns.map((col) => (
+                        <td key={col.key} className="table-cell">
+                          {col.render(c)}
+                        </td>
+                      ))}
+                    </tr>
                   );
                 })
               )}
@@ -361,7 +525,13 @@ export function ChartsPage() {
       </Card>
 
       <FilterModal open={filterOpen} onClose={() => setFilterOpen(false)} value={filters} onApply={(f) => { setFilters(f); setPage(1); }} />
-      <ColumnsModal open={columnsOpen} onClose={() => setColumnsOpen(false)} />
+      <ColumnsPopover
+        open={columnsOpen}
+        anchorRef={columnsBtnRef}
+        onClose={() => setColumnsOpen(false)}
+        visible={visibleColumns}
+        onChange={setVisibleColumns}
+      />
       <ModifyChartsModal
         open={modifyOpen}
         onClose={() => setModifyOpen(false)}
@@ -504,18 +674,119 @@ function FilterModal({
   );
 }
 
-/* ── Columns visibility modal (simplified) ──────────────── */
-function ColumnsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/* ── Columns visibility popover ─────────────────────────── */
+function ColumnsPopover({
+  open,
+  anchorRef,
+  onClose,
+  visible,
+  onChange,
+}: {
+  open: boolean;
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  visible: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Close on outside click / Escape. The anchor button toggles open itself, so
+  // clicks on it must not count as "outside" — otherwise the button would
+  // close and immediately reopen the panel.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t)) return;
+      if (anchorRef.current?.contains(t)) return;
+      onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, onClose, anchorRef]);
+
+  if (!open) return null;
+
+  function toggle(key: string) {
+    const next = new Set(visible);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onChange(next);
+  }
+
+  function resetDefaults() {
+    onChange(new Set(CHART_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key)));
+  }
+
+  function showAll() {
+    onChange(new Set(CHART_COLUMNS.map((c) => c.key)));
+  }
+
   return (
-    <Modal open={open} onClose={onClose} title="Columns Visibility" size="md">
-      <p className="text-sm text-ink-muted mb-4">
-        Column preferences sync to the server at <code className="font-mono text-xs">PUT /charts/columns</code>.
-        UI wiring to come — for now, all columns are shown.
-      </p>
-      <ModalFooter>
-        <Button onClick={onClose}>Done</Button>
-      </ModalFooter>
-    </Modal>
+    <div
+      ref={panelRef}
+      className="absolute right-8 mt-2 z-40 w-72 rounded-card border border-line bg-surface shadow-pop dark:shadow-pop-dark"
+      style={{
+        // Anchor visually under the Columns button. The toolbar uses `ml-auto`
+        // so right-aligning to its container approximates the button position
+        // without needing portal-based positioning.
+        top: anchorRef.current
+          ? anchorRef.current.getBoundingClientRect().bottom + 6
+          : undefined,
+        right: anchorRef.current
+          ? Math.max(8, window.innerWidth - anchorRef.current.getBoundingClientRect().right)
+          : 32,
+        position: 'fixed',
+      }}
+      role="dialog"
+      aria-label="Configure visible columns"
+    >
+      <div className="flex items-center justify-between px-4 pt-3 pb-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-ink-muted">Columns</p>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={showAll}
+            className="text-[11px] font-semibold text-primary hover:underline"
+          >
+            Show all
+          </button>
+          <button
+            type="button"
+            onClick={resetDefaults}
+            className="text-[11px] font-semibold text-ink-muted hover:underline"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+      <div className="max-h-80 overflow-y-auto px-2 pb-2">
+        {CHART_COLUMNS.map((col) => {
+          const checked = visible.has(col.key);
+          return (
+            <label
+              key={col.key}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer hover:bg-surface-sunken/60"
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(col.key)}
+                className="checkbox"
+              />
+              <span className="text-sm text-ink">{col.label}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
