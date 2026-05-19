@@ -33,7 +33,23 @@ import {
   MilestoneChip,
   PriorityChip,
 } from '@/components/ui/Chip';
-import { deriveAiStatus } from '@/api/types';
+import { deriveAiStatus, type AiStatus } from '@/api/types';
+
+// Row tints by AI pipeline status. Each row gets the same soft token the
+// AI chip uses plus a 4px inset accent on the leading edge so the state
+// is identifiable at a glance. Tokens resolve to saturated dark variants
+// automatically (see :root / .dark in global.css).
+const AI_ROW_TINT: Record<AiStatus, string> = {
+  NONE: 'hover:bg-surface-sunken/40',
+  QUEUED:
+    'bg-info-soft/80 hover:bg-info-soft shadow-[inset_4px_0_0_0_theme(colors.info.DEFAULT)]',
+  PROCESSING:
+    'bg-warn-soft/80 hover:bg-warn-soft shadow-[inset_4px_0_0_0_theme(colors.warn.DEFAULT)]',
+  DONE:
+    'bg-success-soft/70 hover:bg-success-soft shadow-[inset_4px_0_0_0_theme(colors.success.DEFAULT)]',
+  ERRORED:
+    'bg-danger-soft/80 hover:bg-danger-soft shadow-[inset_4px_0_0_0_theme(colors.danger.DEFAULT)]',
+};
 import { useAuth } from '@/auth/store';
 import { can } from '@/permissions';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
@@ -282,8 +298,16 @@ export function ChartsPage() {
                   </td>
                 </tr>
               ) : (
-                list.data?.items.map((c) => (
-                  <tr key={c.id} className="group hover:bg-surface-sunken/40 transition">
+                list.data?.items.map((c) => {
+                  const aiStatus = deriveAiStatus(c.customFields);
+                  return (
+                  <tr
+                    key={c.id}
+                    className={cn(
+                      'group border-b border-line/60 transition-colors',
+                      AI_ROW_TINT[aiStatus],
+                    )}
+                  >
                     <td className="table-cell">
                       <input
                         type="checkbox"
@@ -306,7 +330,7 @@ export function ChartsPage() {
                     <td className="table-cell"><PriorityChip priority={c.priority} /></td>
                     <td className="table-cell"><MilestoneChip milestone={c.milestone} /></td>
                     <td className="table-cell"><ChartStatusChip status={c.chartStatus} /></td>
-                    <td className="table-cell"><AiStatusChip status={deriveAiStatus(c.customFields)} /></td>
+                    <td className="table-cell"><AiStatusChip status={aiStatus} /></td>
                     <td className="table-cell">
                       {c.allocatedCoderId ? <Avatar name={`U ${c.allocatedCoderId}`} size="sm" /> : <span className="text-ink-subtle text-xs">—</span>}
                     </td>
@@ -316,7 +340,8 @@ export function ChartsPage() {
                     <td className="table-cell text-ink-muted">{formatDate(c.dateOfService)}</td>
                     <td className="table-cell text-ink-muted">{formatDate(c.createdAt)}</td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
