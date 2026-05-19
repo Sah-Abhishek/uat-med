@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import {
@@ -40,7 +40,12 @@ export function WorklistDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'details' | 'activity'>('details');
+  const canViewWorklist = useCan('worklist.view');
   const canAllocate = useCan('worklist.allocate');
+
+  // Coders never see the entry link on the Charts page; this guard catches the
+  // direct-URL path so the worklist detail can't be reached by typing it in.
+  if (!canViewWorklist) return <Navigate to="/charts" replace />;
 
   const { data, isPending } = useQuery({
     queryKey: ['worklist', id],
