@@ -73,7 +73,8 @@ export class ChartsService {
   }
 
   async list(q: QueryChartsDto, user: AuthenticatedUser) {
-    const qb = this.charts.createQueryBuilder('c');
+    const qb = this.charts.createQueryBuilder('c')
+      .leftJoinAndSelect('c.worklist', 'worklist');
 
     // Role-scoped visibility: coders / auditors see only their own queue.
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
@@ -87,18 +88,19 @@ export class ChartsService {
     if (q.chartStatus) qb.andWhere('c.chart_status = :cs', { cs: q.chartStatus });
     if (q.milestone) qb.andWhere('c.milestone = :m', { m: q.milestone });
     if (q.allocatedUserId) qb.andWhere('(c.allocated_coder_id = :au OR c.allocated_auditor_id = :au)', { au: q.allocatedUserId });
-    if (q.primarySpecialityId) qb.innerJoin('worklists', 'w', 'w.id = c.worklist_id').andWhere('w.primary_speciality_id = :ps', { ps: q.primarySpecialityId });
-    if (q.receivedDateFrom || q.receivedDateTo) {
-      qb.innerJoin('worklists', 'wl', 'wl.id = c.worklist_id');
-      if (q.receivedDateFrom) qb.andWhere('wl.received_date >= :rdf', { rdf: q.receivedDateFrom });
-      if (q.receivedDateTo) qb.andWhere('wl.received_date <= :rdt', { rdt: q.receivedDateTo });
-    }
+    if (q.primarySpecialityId) qb.andWhere('worklist.primary_speciality_id = :ps', { ps: q.primarySpecialityId });
+    if (q.receivedDateFrom) qb.andWhere('worklist.received_date >= :rdf', { rdf: q.receivedDateFrom });
+    if (q.receivedDateTo) qb.andWhere('worklist.received_date <= :rdt', { rdt: q.receivedDateTo });
 
     qb.orderBy(`c.${q.sortBy ?? 'createdAt'}`, q.sortDir === 'asc' ? 'ASC' : 'DESC');
     qb.skip((q.page - 1) * q.pageSize).take(q.pageSize);
 
     const [items, total] = await qb.getManyAndCount();
-    return new PaginatedResponseDto(items, total, q.page, q.pageSize);
+    const mapped = items.map(({ worklist, ...rest }) => ({
+      ...rest,
+      worklistNumber: worklist?.worklistNumber ?? null,
+    }));
+    return new PaginatedResponseDto(mapped, total, q.page, q.pageSize);
   }
 
   async summary(user: AuthenticatedUser) {
