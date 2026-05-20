@@ -7,8 +7,11 @@ import {
   updateWorklist,
   deleteWorklist,
   allocateWorklist,
+  runAiOnWorklist,
+  clearStuckAiOnWorklist,
   type AllocationRange,
   type CreateWorklistDto,
+  type RunAiResult,
 } from '@/api/worklists';
 import { listUsers } from '@/api/users';
 import { listCharts } from '@/api/charts';
@@ -18,7 +21,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Label, FancySelect } from '@/components/ui/Field';
-import { Modal, ModalFooter, Tabs, PillBadge, Avatar } from '@/components/ui/Primitives';
+import { Modal, ModalFooter, Tabs, PillBadge, Avatar, ConfirmModal } from '@/components/ui/Primitives';
 import { WorklistStatusChip } from '@/components/ui/Chip';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
@@ -31,17 +34,24 @@ import {
   Trash2,
   Plus,
   ShieldCheck,
+  Sparkles,
+  Upload,
   X as XIcon,
+  AlertTriangle,
+  CheckCircle2,
   Loader2,
 } from 'lucide-react';
+import { BulkUploadWizard } from './BulkUploadWizard';
 
 export function WorklistDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'details' | 'activity'>('details');
   const canViewWorklist = useCan('worklist.view');
   const canAllocate = useCan('worklist.allocate');
+  const canBulkImport = useCan('worklist.bulkImport');
 
   // Coders never see the entry link on the Charts page; this guard catches the
   // direct-URL path so the worklist detail can't be reached by typing it in.
@@ -51,6 +61,14 @@ export function WorklistDetailPage() {
     queryKey: ['worklist', id],
     queryFn: () => getWorklist(id!),
     enabled: !!id,
+    // Auto-refresh while any chart on this worklist is in the AI pipeline —
+    // same trigger pattern used on ChartsPage so the progress bar advances
+    // without a manual reload. Settles once the queue drains.
+    refetchInterval: (query) => {
+      const ai = (query.state.data as { aiStatusCounts?: { queued: number; processing: number } } | undefined)
+        ?.aiStatusCounts;
+      return ai && (ai.queued > 0 || ai.processing > 0) ? 5000 : false;
+    },
   });
 
   if (isPending) {
@@ -118,10 +136,19 @@ export function WorklistDetailPage() {
             <StatMini label="Total charts" value={formatNumber(data.totalCharts)} />
           </div>
 
-          <div className="flex gap-2 mt-5">
+          <div className="flex flex-wrap gap-2 mt-5">
             <Button onClick={() => setEditOpen(true)} leftIcon={<Pencil className="w-3.5 h-3.5" />}>
               Edit Worklist
             </Button>
+            {canBulkImport && (
+              <Button
+                variant="soft"
+                onClick={() => setBulkOpen(true)}
+                leftIcon={<Upload className="w-3.5 h-3.5" />}
+              >
+                Bulk Upload
+              </Button>
+            )}
             <Button
               variant="danger"
               onClick={() => setDeleteOpen(true)}
@@ -173,6 +200,14 @@ export function WorklistDetailPage() {
         </Card>
       </div>
 
+      {/* AI pipeline progress — full-width card */}
+      <AiPipelineCard
+        ai={data.aiStatusCounts}
+        total={s.total}
+        worklistId={id!}
+        canRun={canBulkImport}
+      />
+
       {/* Bottom row: Details table + Allocate Fresh Volume */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card padding="none">
@@ -211,6 +246,13 @@ export function WorklistDetailPage() {
         onClose={() => setDeleteOpen(false)}
         worklistId={id!}
         expectedNumber={data.worklistNumber}
+      />
+      <BulkUploadWizard
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        worklistId={id!}
+        worklistNumber={data.worklistNumber}
+        existingChartCount={s.total}
       />
     </div>
   );
@@ -269,6 +311,351 @@ function LegendRow({ color, label, value }: { color: string; label: string; valu
       <span className="font-mono text-ink text-[13px] tabular-nums ml-6">
         {formatNumber(value)}
       </span>
+    </div>
+  );
+}
+
+/* ── AI pipeline progress card ──────────────────────────── */
+function AiPipelineCard({
+  ai,
+  total,
+  worklistId,
+  canRun,
+}: {
+  ai: NonNullable<Awaited<ReturnType<typeof getWorklist>>>['aiStatusCounts'];
+  total: number;
+  worklistId: string;
+  canRun: boolean;
+}) {
+  const qc = useQueryClient();
+  const [runResult, setRunResult] = useState<RunAiResult | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearedCount, setClearedCount] = useState<number | null>(null);
+
+  const runMut = useMutation({
+    mutationFn: () => runAiOnWorklist(worklistId),
+    onSuccess: (r) => {
+      setRunResult(r);
+      setRunError(null);
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId] });
+      qc.invalidateQueries({ queryKey: ['charts'] });
+    },
+    onError: (err) => setRunError((err as unknown as ApiErrorShape).message),
+  });
+
+  const clearMut = useMutation({
+    mutationFn: () => clearStuckAiOnWorklist(worklistId),
+    onSuccess: (r) => {
+      setClearedCount(r.cleared);
+      setRunError(null);
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId] });
+      qc.invalidateQueries({ queryKey: ['charts'] });
+    },
+    onError: (err) => setRunError((err as unknown as ApiErrorShape).message),
+  });
+
+  // "Eligible" is a frontend-approximation of the backend filter: charts that
+  // exist and haven't been pushed to the AI gateway yet. We can't see per-chart
+  // uploadedDocs from the worklist summary, so this is an upper bound — the
+  // backend returns the exact count after running.
+  const inFlight = ai.queued + ai.processing;
+  const processed = ai.done + ai.errored;
+  const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+  const eligibleUpperBound = Math.max(0, total - processed - inFlight);
+  const segments = [
+    { key: 'done', value: ai.done, color: 'bg-success', label: 'Done', tone: 'text-success' },
+    { key: 'processing', value: ai.processing, color: 'bg-warn', label: 'Processing', tone: 'text-warn' },
+    { key: 'queued', value: ai.queued, color: 'bg-info', label: 'Queued', tone: 'text-info' },
+    { key: 'errored', value: ai.errored, color: 'bg-danger', label: 'Errored', tone: 'text-danger' },
+  ];
+  // Empty state: no charts at all in worklist, or none has been touched by AI yet.
+  const empty = total === 0 || (ai.done + ai.errored + ai.queued + ai.processing === 0);
+
+  return (
+    <Card padding="default">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-card bg-primary-soft text-primary-ink dark:text-primary flex items-center justify-center shrink-0">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-[15px] font-bold text-ink leading-tight">AI Pipeline</h3>
+            <p className="text-xs text-ink-muted">
+              {empty
+                ? 'Waiting for the first chart to enter the pipeline'
+                : `${formatNumber(processed)} of ${formatNumber(total)} chart${total === 1 ? '' : 's'} processed`}
+              {inFlight > 0 && (
+                <span className="ml-1.5 inline-flex items-center gap-1 text-warn font-semibold">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {formatNumber(inFlight)} in flight
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          {canRun && inFlight > 0 && (
+            <Button
+              variant="soft-danger"
+              loading={clearMut.isPending}
+              onClick={() => setClearConfirmOpen(true)}
+              leftIcon={<XIcon className="w-3.5 h-3.5" />}
+            >
+              Clear stuck queue ({formatNumber(inFlight)})
+            </Button>
+          )}
+          {canRun && eligibleUpperBound > 0 && (
+            <Button
+              variant="primary"
+              loading={runMut.isPending}
+              onClick={() => setConfirmOpen(true)}
+              leftIcon={<Sparkles className="w-3.5 h-3.5" />}
+            >
+              Run AI on {formatNumber(eligibleUpperBound)} chart{eligibleUpperBound === 1 ? '' : 's'}
+            </Button>
+          )}
+          <div className="text-right">
+            <p
+              className="text-3xl font-bold text-ink tracking-tightish tabular-nums leading-none"
+              aria-label={`${pct} percent of charts processed`}
+            >
+              {pct}
+              <span className="text-lg text-ink-muted">%</span>
+            </p>
+            <p className="text-[11px] text-ink-muted mt-1">Processed</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Run-result banner — shown after a manual trigger. Inline; closeable. */}
+      {runResult && (
+        <RunResultBanner
+          result={runResult}
+          onDismiss={() => setRunResult(null)}
+        />
+      )}
+      {clearedCount !== null && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-2.5 px-3.5 py-3 rounded-card border mb-4 bg-success-soft/40 border-success/30"
+        >
+          <CheckCircle2 className="w-4 h-4 text-success shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-ink">
+              {clearedCount === 0
+                ? 'Nothing was stuck'
+                : `Cleared ${formatNumber(clearedCount)} stuck chart${clearedCount === 1 ? '' : 's'}`}
+            </p>
+            <p className="text-[11px] text-ink-muted mt-0.5">
+              These charts are back to "Not started" — re-run AI when you're ready.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setClearedCount(null)}
+            aria-label="Dismiss"
+            className="w-6 h-6 rounded-full text-ink-muted hover:bg-surface-sunken flex items-center justify-center shrink-0"
+          >
+            <XIcon className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+      {runError && (
+        <div role="alert" className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-danger-soft text-danger border border-danger/30 text-xs mb-4">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span className="flex-1">{runError}</span>
+          <button type="button" onClick={() => setRunError(null)} className="text-danger/70 hover:text-danger" aria-label="Dismiss error">
+            <XIcon className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Segmented progress bar — total width = total charts.
+          Segments stack visually: Done | Processing | Queued | Errored | Unstarted. */}
+      <div
+        role="img"
+        aria-label={`Pipeline: ${ai.done} done, ${ai.processing} processing, ${ai.queued} queued, ${ai.errored} errored, ${ai.none} not started`}
+        className={cn(
+          'flex h-2.5 w-full rounded-pill overflow-hidden bg-surface-sunken',
+          'ring-1 ring-line/60',
+        )}
+      >
+        {segments.map((seg) => {
+          const w = total > 0 ? (seg.value / total) * 100 : 0;
+          if (w === 0) return null;
+          return (
+            <div
+              key={seg.key}
+              className={cn(seg.color, 'transition-all duration-500 ease-out')}
+              style={{ width: `${w}%` }}
+              title={`${seg.label}: ${seg.value}`}
+            />
+          );
+        })}
+      </div>
+
+      {/* Count tiles row — 4 statuses + Not started */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-5">
+        <AiStatTile
+          label="Done"
+          value={ai.done}
+          dotClass="bg-success"
+          icon={<CheckCircle2 className="w-3.5 h-3.5 text-success" />}
+        />
+        <AiStatTile
+          label="Processing"
+          value={ai.processing}
+          dotClass="bg-warn"
+          icon={<Loader2 className={cn('w-3.5 h-3.5 text-warn', ai.processing > 0 && 'animate-spin')} />}
+        />
+        <AiStatTile
+          label="Queued"
+          value={ai.queued}
+          dotClass="bg-info"
+        />
+        <AiStatTile
+          label="Errored"
+          value={ai.errored}
+          dotClass="bg-danger"
+          icon={ai.errored > 0 ? <AlertTriangle className="w-3.5 h-3.5 text-danger" /> : undefined}
+        />
+        <AiStatTile
+          label="Not started"
+          value={ai.none}
+          dotClass="bg-ink-subtle"
+          muted
+        />
+      </div>
+
+      <ConfirmModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          runMut.mutate();
+        }}
+        variant="primary"
+        message={
+          `Trigger AI prediction on every chart in this worklist that has uploaded documents and hasn't been processed yet? ` +
+          `Up to ${formatNumber(eligibleUpperBound)} chart${eligibleUpperBound === 1 ? '' : 's'} will be queued.`
+        }
+        confirmLabel="Start AI run"
+        cancelLabel="Cancel"
+        loading={runMut.isPending}
+      />
+
+      <ConfirmModal
+        open={clearConfirmOpen}
+        onClose={() => setClearConfirmOpen(false)}
+        onConfirm={() => {
+          setClearConfirmOpen(false);
+          clearMut.mutate();
+        }}
+        variant="danger"
+        message={
+          `Wipe the pending-AI state from ${formatNumber(inFlight)} chart${inFlight === 1 ? '' : 's'} stuck in Queued or Processing? ` +
+          `This only resets the local state — any in-flight gateway run is abandoned. You can re-run AI afterwards.`
+        }
+        confirmLabel="Clear queue"
+        cancelLabel="Cancel"
+        loading={clearMut.isPending}
+      />
+    </Card>
+  );
+}
+
+function RunResultBanner({
+  result,
+  onDismiss,
+}: {
+  result: RunAiResult;
+  onDismiss: () => void;
+}) {
+  const skippedByReason = {
+    no_documents: result.skipped.filter((s) => s.reason === 'no_documents').length,
+    already_done: result.skipped.filter((s) => s.reason === 'already_done').length,
+    already_in_flight: result.skipped.filter((s) => s.reason === 'already_in_flight').length,
+    gateway_error: result.skipped.filter((s) => s.reason === 'gateway_error').length,
+  };
+  const reasons = [
+    skippedByReason.already_done > 0 && `${skippedByReason.already_done} already processed`,
+    skippedByReason.already_in_flight > 0 && `${skippedByReason.already_in_flight} already running`,
+    skippedByReason.no_documents > 0 && `${skippedByReason.no_documents} have no documents`,
+    skippedByReason.gateway_error > 0 && `${skippedByReason.gateway_error} failed`,
+  ].filter(Boolean);
+  const hasErrors = skippedByReason.gateway_error > 0;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        'flex items-start gap-2.5 px-3.5 py-3 rounded-card border mb-4',
+        hasErrors
+          ? 'bg-warn-soft/40 border-warn/30'
+          : 'bg-success-soft/40 border-success/30',
+      )}
+    >
+      {hasErrors ? (
+        <AlertTriangle className="w-4 h-4 text-warn shrink-0 mt-0.5" />
+      ) : (
+        <CheckCircle2 className="w-4 h-4 text-success shrink-0 mt-0.5" />
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-ink">
+          {result.triggered === 0
+            ? 'Nothing to queue'
+            : `${formatNumber(result.triggered)} chart${result.triggered === 1 ? '' : 's'} queued for AI`}
+          {reasons.length > 0 && (
+            <span className="font-normal text-ink-muted"> · {reasons.join(' · ')}</span>
+          )}
+        </p>
+        <p className="text-[11px] text-ink-muted mt-0.5">
+          Predictions usually finish in 30–180 seconds. The progress bar above will update automatically.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="w-6 h-6 rounded-full text-ink-muted hover:bg-surface-sunken flex items-center justify-center shrink-0"
+      >
+        <XIcon className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
+function AiStatTile({
+  label,
+  value,
+  dotClass,
+  icon,
+  muted,
+}: {
+  label: string;
+  value: number;
+  dotClass: string;
+  icon?: React.ReactNode;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded-card border border-line bg-surface px-3 py-2.5 flex items-center gap-2.5 transition',
+        muted && 'bg-surface-sunken/40',
+      )}
+    >
+      <span className={cn('w-2 h-2 rounded-full shrink-0', dotClass)} aria-hidden />
+      <div className="min-w-0 flex-1">
+        <p className={cn('text-lg font-bold leading-none tabular-nums', muted ? 'text-ink-muted' : 'text-ink')}>
+          {formatNumber(value)}
+        </p>
+        <p className="text-[11px] text-ink-muted mt-1 truncate">{label}</p>
+      </div>
+      {icon && <span className="shrink-0">{icon}</span>}
     </div>
   );
 }

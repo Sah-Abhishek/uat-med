@@ -193,8 +193,11 @@ export function FancySelect({
       }
       setOpen(false);
     }
-    if (open) document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
+    // Capture phase: fires before the Modal backdrop's React mousedown handler
+    // can call e.stopPropagation(), which would otherwise prevent this listener
+    // from running when the trigger is rendered inside a <Modal>.
+    if (open) document.addEventListener('mousedown', onClickOutside, true);
+    return () => document.removeEventListener('mousedown', onClickOutside, true);
   }, [open]);
 
   useEffect(() => {
@@ -391,8 +394,11 @@ export function DatePicker({
       }
       setOpen(false);
     }
-    if (open) document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
+    // Capture phase: fires before the Modal backdrop's React mousedown handler
+    // can call e.stopPropagation(), which would otherwise prevent this listener
+    // from running when the trigger is rendered inside a <Modal>.
+    if (open) document.addEventListener('mousedown', onClickOutside, true);
+    return () => document.removeEventListener('mousedown', onClickOutside, true);
   }, [open]);
 
   useEffect(() => {
@@ -656,8 +662,11 @@ export function RangeDatePicker({
       setOpen(false);
       setHover(null);
     }
-    if (open) document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
+    // Capture phase: fires before the Modal backdrop's React mousedown handler
+    // can call e.stopPropagation(), which would otherwise prevent this listener
+    // from running when the trigger is rendered inside a <Modal>.
+    if (open) document.addEventListener('mousedown', onClickOutside, true);
+    return () => document.removeEventListener('mousedown', onClickOutside, true);
   }, [open]);
 
   useEffect(() => {

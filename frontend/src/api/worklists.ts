@@ -1,4 +1,4 @@
-import { get, post, patch, del } from './client';
+import { api, get, post, patch, del } from './client';
 import type {
   Paginated,
   Worklist,
@@ -71,3 +71,160 @@ export const reallocateWorklist = (id: string, range: AllocationRange) =>
     `/worklists/${id}/reallocate`,
     range,
   );
+
+/* ── Bulk upload ────────────────────────────────────────── */
+
+export interface BulkPreviewRow {
+  row: number;
+  chartNo: string;
+  mrNumber: string;
+  dos: string;
+  admitDate: string;
+  dischargeDate: string;
+  errors: string[];
+}
+
+export interface BulkImportPreview {
+  totalRows: number;
+  validRows: number;
+  rows: BulkPreviewRow[];
+  errors: Array<{ row: number; field?: string; message: string }>;
+}
+
+export interface BulkImportResult {
+  inserted: number;
+  skipped: number;
+  charts: Array<{ id: string; serialNo: number; chartNo: string; mrNumber: string }>;
+  errors: Array<{ row: number; field?: string; message: string }>;
+}
+
+export interface BulkDocumentsResult {
+  matched: Array<{
+    chartId: string;
+    chartNo: string;
+    filename: string;
+    matchedBy: 'folder' | 'chartNo' | 'mrNumber' | 'manual';
+    storedKey: string;
+  }>;
+  unmatched: Array<{
+    filename: string;
+    reason: 'no_token_match' | 'ambiguous_mrn';
+    /** Already uploaded to S3 — assign by reference, no re-upload needed. */
+    stagedKey: string;
+    stagedUrl: string;
+    mimeType: string;
+    size: number;
+    candidates?: Array<{ chartId: string; chartNo: string }>;
+  }>;
+  skipped: Array<{ filename: string; reason: string }>;
+}
+
+export interface AssignStagedRequest {
+  stagedKey: string;
+  stagedUrl: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  chartId: string;
+}
+
+export interface AssignStagedResult {
+  assigned: number;
+  skipped: Array<{ stagedKey: string; reason: 'chart_not_in_worklist' | 'chart_not_found' }>;
+}
+
+export async function bulkPreviewCharts(worklistId: string, file: File): Promise<BulkImportPreview> {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post<BulkImportPreview>(
+    `/worklists/${worklistId}/charts/bulk-preview`,
+    form,
+  );
+  return data;
+}
+
+export async function bulkImportCharts(worklistId: string, file: File): Promise<BulkImportResult> {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post<BulkImportResult>(
+    `/worklists/${worklistId}/charts/bulk-import`,
+    form,
+  );
+  return data;
+}
+
+export async function bulkUploadDocuments(
+  worklistId: string,
+  files: File[],
+  manualMappings: Array<{ filename: string; chartId: string }> = [],
+): Promise<BulkDocumentsResult> {
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+  if (manualMappings.length > 0) form.append('manualMappings', JSON.stringify(manualMappings));
+  const { data } = await api.post<BulkDocumentsResult>(
+    `/worklists/${worklistId}/charts/bulk-documents`,
+    form,
+  );
+  return data;
+}
+
+export function downloadBulkTemplateUrl(): string {
+  return `${import.meta.env.VITE_API_BASE}/worklists/bulk-template`;
+}
+
+export async function assignStagedDocuments(
+  worklistId: string,
+  assignments: AssignStagedRequest[],
+): Promise<AssignStagedResult> {
+  return post<AssignStagedResult>(
+    `/worklists/${worklistId}/charts/bulk-documents/assign-staged`,
+    { assignments },
+  );
+}
+
+export interface RunAiResult {
+  eligible: number;
+  triggered: number;
+  skipped: Array<{
+    chartId: string;
+    reason: 'already_done' | 'already_in_flight' | 'no_documents' | 'gateway_error';
+    message?: string;
+  }>;
+}
+
+export async function runAiOnWorklist(worklistId: string): Promise<RunAiResult> {
+  return post<RunAiResult>(`/worklists/${worklistId}/charts/run-ai`);
+}
+
+export interface ClearStuckAiResult {
+  cleared: number;
+  chartIds: string[];
+}
+
+export async function clearStuckAiOnWorklist(worklistId: string): Promise<ClearStuckAiResult> {
+  return post<ClearStuckAiResult>(`/worklists/${worklistId}/charts/clear-stuck-ai`);
+}
+
+export interface CreateWorklistFromExcelResult {
+  id: string;
+  worklistNumber: string;
+  inserted: number;
+  skipped: number;
+  errors: Array<{ row: number; field?: string; message: string }>;
+}
+
+export async function createWorklistFromExcel(
+  dto: Omit<CreateWorklistDto, 'numberOfCharts'>,
+  file: File,
+): Promise<CreateWorklistFromExcelResult> {
+  const form = new FormData();
+  form.append('file', file);
+  for (const [k, v] of Object.entries(dto)) {
+    if (v !== undefined && v !== null && v !== '') form.append(k, String(v));
+  }
+  const { data } = await api.post<CreateWorklistFromExcelResult>(
+    '/worklists/from-excel',
+    form,
+  );
+  return data;
+}

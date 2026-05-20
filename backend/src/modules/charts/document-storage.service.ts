@@ -1,6 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import * as path from 'path';
 
 export interface StoredDocument {
@@ -87,6 +87,24 @@ export class DocumentStorageService {
       mimeType: file.mimetype,
       size: file.size,
     };
+  }
+
+  /**
+   * Fetch a previously-uploaded file as a Buffer. Used by the bulk AI-trigger
+   * flow to re-send already-stored documents to the gateway without forcing
+   * the team lead to re-upload them.
+   */
+  async download(key: string): Promise<Buffer> {
+    if (!this.client) {
+      throw new ServiceUnavailableException('Document storage (S3/MinIO) is not configured.');
+    }
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    const body = res.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+    if (!body?.transformToByteArray) {
+      throw new ServiceUnavailableException(`Could not stream S3 object ${key}.`);
+    }
+    const bytes = await body.transformToByteArray();
+    return Buffer.from(bytes);
   }
 
   async uploadMany(
