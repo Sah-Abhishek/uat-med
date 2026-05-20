@@ -25,5 +25,6 @@ import { User } from '../../entities/user.entity';
   ],
   controllers: [ChartsController],
   providers: [ChartsService, AiPredictorService, AiPipelineWatcher, DocumentStorageService],
+  exports: [DocumentStorageService, AiPredictorService],
 })
 export class ChartsModule {}

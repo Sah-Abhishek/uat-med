@@ -153,6 +153,30 @@ export class WorklistsService {
     const total = Math.max(declared, rowCount);
     const allocated = Number(counts.allocated ?? 0);
     const unallocated = Math.max(0, total - allocated);
+
+    // AI pipeline status counts — same mutually-exclusive ordering as
+    // charts.summary() so the worklist progress card never disagrees with
+    // the chart list's AI tiles. Scope is this worklist's charts only.
+    const aiBase = this.charts.createQueryBuilder('c').where('c.worklist_id = :id', { id });
+    const aiQueued = await aiBase.clone()
+      .andWhere(`c.custom_fields ? 'pendingPrediction'`)
+      .andWhere(`COALESCE(c.custom_fields->'pendingPrediction'->>'gatewayStatus','PENDING') = 'PENDING'`)
+      .getCount();
+    const aiProcessing = await aiBase.clone()
+      .andWhere(`c.custom_fields ? 'pendingPrediction'`)
+      .andWhere(`c.custom_fields->'pendingPrediction'->>'gatewayStatus' = 'STARTED'`)
+      .getCount();
+    const aiErrored = await aiBase.clone()
+      .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)
+      .andWhere(`c.custom_fields ? 'aiPredictionError'`)
+      .getCount();
+    const aiDone = await aiBase.clone()
+      .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)
+      .andWhere(`NOT (c.custom_fields ? 'aiPredictionError')`)
+      .andWhere(`c.custom_fields ? 'aiPrediction'`)
+      .getCount();
+    const aiNone = Math.max(0, rowCount - aiQueued - aiProcessing - aiErrored - aiDone);
+
     return {
       id: w.id,
       worklistNumber: w.worklistNumber,
@@ -181,6 +205,13 @@ export class WorklistsService {
         notStarted: Number(counts.notStarted ?? 0),
         inProgress: Number(counts.inProgress ?? 0),
         closed: Number(counts.closed ?? 0),
+      },
+      aiStatusCounts: {
+        queued: aiQueued,
+        processing: aiProcessing,
+        done: aiDone,
+        errored: aiErrored,
+        none: aiNone,
       },
     };
   }

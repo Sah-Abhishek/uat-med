@@ -109,6 +109,14 @@ export interface WorklistDetail extends Worklist {
     inProgress: number;
     closed: number;
   };
+  aiStatusCounts: {
+    queued: number;
+    processing: number;
+    done: number;
+    errored: number;
+    /** Charts that haven't been sent to the AI pipeline yet. */
+    none: number;
+  };
 }
 
 export interface WorklistStatusSummary {
