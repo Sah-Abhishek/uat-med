@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/theme/store';
 import { useAuth } from '@/auth/store';
 import { logout } from '@/api/auth';
+import { MSAL_CONFIGURED, signOutMicrosoft } from '@/auth/msal';
 import { listClients, listLocations } from '@/api/configurations';
 import { useNavigate } from 'react-router-dom';
 import { cn, initials } from '@/lib/utils';
@@ -47,11 +48,23 @@ export function TopBar() {
     try {
       if (refreshToken) await logout(refreshToken);
     } catch {
-      /* ignore */
-    } finally {
-      clear();
-      navigate('/login', { replace: true });
+      /* ignore — local cleanup happens below regardless */
     }
+    clear();
+    // SSO users (e.g. team leads on Azure AD) must also be signed out of
+    // Microsoft. Without this, /login auto-runs handleMsalRedirect →
+    // ssoExchange and immediately logs them back in, making sign-out a no-op.
+    // logoutRedirect navigates away to Microsoft and then back to
+    // postLogoutRedirectUri (=/login) with no active account.
+    if (MSAL_CONFIGURED) {
+      try {
+        await signOutMicrosoft();
+        return;
+      } catch {
+        /* fall through to the local redirect below */
+      }
+    }
+    navigate('/login', { replace: true });
   }
 
   return (

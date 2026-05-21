@@ -17,7 +17,6 @@ import {
   ClipboardCheck,
   BookOpenCheck,
   ShieldCheck,
-  Power,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -133,23 +132,8 @@ export function Layout() {
           })}
         </nav>
 
-        {/* Sign-out — same pattern as nav items so it reads as part of the menu. */}
-        <div className={cn('border-t border-line', collapsed ? 'p-2' : 'p-3')}>
-          <HoverTooltip label="Sign out" enabled={collapsed}>
-            <button
-              type="button"
-              aria-label="Sign out"
-              className={cn(
-                'w-full flex items-center gap-3 rounded-lg text-sm transition',
-                collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
-                'text-primary hover:bg-primary-soft font-medium',
-              )}
-            >
-              <Power className="w-4 h-4 shrink-0" strokeWidth={2} />
-              {!collapsed && <span className="truncate">Sign out</span>}
-            </button>
-          </HoverTooltip>
-        </div>
+        {/* Sign out lives in the TopBar profile menu — keeping a single
+            exit path avoids the dead/duplicate sidebar button. */}
       </aside>
 
       {/* ── Main area ───────────────────────────────── */}
