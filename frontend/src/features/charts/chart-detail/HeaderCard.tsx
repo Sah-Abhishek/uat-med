@@ -140,7 +140,7 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
   const active = useQuery({
     queryKey: ['active-timer'],
     queryFn: getActiveTimer,
-    enabled: user?.role === 'CODER' || user?.role === 'AUDITOR',
+    enabled: user?.role === 'CODER' || user?.role === 'AUDITOR' || user?.role === 'TEAMLEAD',
     refetchOnWindowFocus: true,
   });
 
@@ -207,7 +207,7 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
     },
   });
 
-  const canTime = user?.role === 'CODER' || user?.role === 'AUDITOR';
+  const canTime = user?.role === 'CODER' || user?.role === 'AUDITOR' || user?.role === 'TEAMLEAD';
 
   const startStr = startedAt
     ? new Date(startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
