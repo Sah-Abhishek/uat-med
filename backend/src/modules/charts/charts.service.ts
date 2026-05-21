@@ -348,10 +348,14 @@ async update(id: number, dto: UpdateChartDto) {
 
     const now = Date.now();
     activeTimers.set(`${user.id}:${id}`, now);
-    if (c.milestone === ChartMilestone.READY_TO_CODE && user.role === Role.CODER) {
+    // Team leads can act in either capacity; the chart's current milestone
+    // determines which transition fires.
+    const canCode = user.role === Role.CODER || user.role === Role.TEAMLEAD;
+    const canAudit = user.role === Role.AUDITOR || user.role === Role.TEAMLEAD;
+    if (c.milestone === ChartMilestone.READY_TO_CODE && canCode) {
       c.setMilestone(ChartMilestone.CODING_IN_PROGRESS);
       await this.charts.save(c);
-    } else if (c.milestone === ChartMilestone.READY_TO_AUDIT && user.role === Role.AUDITOR) {
+    } else if (c.milestone === ChartMilestone.READY_TO_AUDIT && canAudit) {
       c.setMilestone(ChartMilestone.AUDIT_IN_PROGRESS);
       await this.charts.save(c);
     }

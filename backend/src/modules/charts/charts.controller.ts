@@ -51,7 +51,7 @@ export class ChartsController {
   }
 
   @Get('active-timer')
-  @Roles(Role.CODER, Role.AUDITOR)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @ApiOperation({ summary: "Returns the user's currently running chart timer (or null)." })
   activeTimer(@CurrentUser() user: AuthenticatedUser) {
     return this.svc.activeTimer(user);
@@ -103,7 +103,7 @@ export class ChartsController {
   }
 
   @Post(':id/start')
-  @Roles(Role.CODER, Role.AUDITOR)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(200)
   @ApiOperation({ summary: 'Start the coding / audit timer.' })
   start(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
@@ -111,7 +111,7 @@ export class ChartsController {
   }
 
   @Post(':id/stop')
-  @Roles(Role.CODER, Role.AUDITOR)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(200)
   @ApiOperation({ summary: 'Stop the active timer; returns elapsed milliseconds.' })
   stop(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
@@ -119,7 +119,7 @@ export class ChartsController {
   }
 
   @Post(':id/transition')
-  @Roles(Role.CODER, Role.AUDITOR)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(200)
   @ApiOperation({ summary: 'Transition milestone / chartStatus. Validates allowed transitions.' })
   transition(@Param('id', ParseIntPipe) id: number, @Body() body: { milestone: string; chartStatus?: string }) {
@@ -133,7 +133,7 @@ export class ChartsController {
   }
 
   @Post(':id/feedback')
-  @Roles(Role.AUDITOR)
+  @Roles(Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(201)
   @ApiOperation({ summary: 'Auditor adds feedback.' })
   addFeedback(@Param('id', ParseIntPipe) id: number, @Body() dto: ChartFeedbackDto, @CurrentUser() user: AuthenticatedUser) {
@@ -141,7 +141,7 @@ export class ChartsController {
   }
 
   @Patch('feedback/:feedbackId')
-  @Roles(Role.CODER)
+  @Roles(Role.CODER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Coder responds to feedback (Agree / Reject / Implement).' })
   updateFeedback(@Param('feedbackId', ParseIntPipe) feedbackId: number, @Body() dto: UpdateFeedbackDto) {
     return this.svc.updateFeedback(feedbackId, dto);
@@ -161,7 +161,7 @@ export class ChartsController {
    * version held the connection open for 2+ minutes and 504'd at the edge).
    */
   @Post(':id/process-documents')
-  @Roles(Role.CODER, Role.AUDITOR)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(202)
   @UseInterceptors(
     FilesInterceptor('files', MAX_FILES, {
@@ -193,7 +193,7 @@ export class ChartsController {
 
   /** Phase 2 — pass-through to the gateway's task-status endpoint. */
   @Get(':id/process-documents/:encounterId/status')
-  @Roles(Role.CODER, Role.AUDITOR)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Poll the AI pipeline status for an in-flight encounter.' })
   getProcessDocumentsStatus(
     @Param('id', ParseIntPipe) id: number,
@@ -219,7 +219,7 @@ export class ChartsController {
   }
 
   @Post(':id/code-decisions')
-  @Roles(Role.CODER, Role.AUDITOR)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(200)
   @ApiOperation({ summary: 'Persist Review & Edit decisions submitted from the modal. Validates reasons against active code-review-reasons. Also forwards to the orchestrator so EDIT/DELETE/ADD reach the golden dataset.' })
   submitCodeDecisions(
@@ -232,7 +232,7 @@ export class ChartsController {
 
   /** Phase 3 — fetch the final codes once the FE has seen status=SUCCESS. */
   @Post(':id/process-documents/:encounterId/finalize')
-  @Roles(Role.CODER, Role.AUDITOR)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(200)
   @ApiOperation({ summary: 'Pull final ICD codes from gateway and persist them on the chart.' })
   finalizeProcessDocuments(
