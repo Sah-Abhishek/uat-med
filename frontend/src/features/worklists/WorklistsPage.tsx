@@ -26,13 +26,14 @@ import {
 } from '@/api/configurations';
 import { Modal, ModalFooter, Pagination, Avatar, DualProgressBar } from '@/components/ui/Primitives';
 import { WorklistStatusChip } from '@/components/ui/Chip';
+import { SortableHeader } from '@/components/ui/SortableHeader';
 import { useCan } from '@/hooks/useCan';
+import { useTableSort, sortRows } from '@/hooks/useTableSort';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
   Plus,
   Filter as FilterIcon,
   Loader2,
-  ChevronsUpDown,
   FileSpreadsheet,
   Download,
   CheckCircle2,
@@ -48,6 +49,9 @@ export function WorklistsPage() {
   const [pageSize, setPageSize] = useState(20);
   const [modalOpen, setModalOpen] = useState(false);
   const [filters] = useState<WorklistListParams>({});
+  // Client-side sort: reorders the rows on the page currently in view. The
+  // initial undefined keeps the server's default order (received date desc).
+  const { sort, toggle: onSort } = useTableSort({ sortBy: undefined, sortDir: 'asc' });
 
   const summary = useQuery({
     queryKey: ['worklists', 'summary'],
@@ -70,6 +74,18 @@ export function WorklistsPage() {
   const totalPages = list.data
     ? Math.max(1, Math.ceil(list.data.total / pageSize))
     : 1;
+
+  // Sort the current page's rows in the browser by the clicked column.
+  const sortedItems = sortRows(list.data?.items ?? [], sort, {
+    worklistNumber: (w) => w.worklistNumber,
+    clientId: (w) => w.clientId,
+    locationId: (w) => w.locationId,
+    processId: (w) => w.processId,
+    primarySpecialityId: (w) => w.primarySpecialityId,
+    dateOfService: (w) => w.dateOfService,
+    receivedDate: (w) => w.receivedDate,
+    status: (w) => w.status,
+  });
 
   return (
     <div className="p-8 max-w-[1600px] space-y-6">
@@ -120,17 +136,17 @@ export function WorklistsPage() {
           <table className="w-full min-w-[1100px]">
             <thead>
               <tr>
-                <HeaderCell sortable>Worklist #</HeaderCell>
-                <HeaderCell sortable>Client</HeaderCell>
-                <HeaderCell sortable>Location</HeaderCell>
-                <HeaderCell sortable>Process</HeaderCell>
-                <HeaderCell>Specialty</HeaderCell>
-                <HeaderCell sortable>Allocation %</HeaderCell>
-                <HeaderCell>Progress %</HeaderCell>
-                <HeaderCell sortable>Changed by</HeaderCell>
-                <HeaderCell sortable>Date of service</HeaderCell>
-                <HeaderCell sortable>Received date</HeaderCell>
-                <HeaderCell sortable>Status</HeaderCell>
+                <SortableHeader column="worklistNumber" sort={sort} onSort={onSort}>Worklist #</SortableHeader>
+                <SortableHeader column="clientId" sort={sort} onSort={onSort}>Client</SortableHeader>
+                <SortableHeader column="locationId" sort={sort} onSort={onSort}>Location</SortableHeader>
+                <SortableHeader column="processId" sort={sort} onSort={onSort}>Process</SortableHeader>
+                <SortableHeader column="primarySpecialityId" sort={sort} onSort={onSort}>Specialty</SortableHeader>
+                <SortableHeader>Allocation %</SortableHeader>
+                <SortableHeader>Progress %</SortableHeader>
+                <SortableHeader>Changed by</SortableHeader>
+                <SortableHeader column="dateOfService" sort={sort} onSort={onSort}>Date of service</SortableHeader>
+                <SortableHeader column="receivedDate" sort={sort} onSort={onSort}>Received date</SortableHeader>
+                <SortableHeader column="status" sort={sort} onSort={onSort}>Status</SortableHeader>
               </tr>
             </thead>
             <tbody>
@@ -140,14 +156,14 @@ export function WorklistsPage() {
                     <Loader2 className="w-5 h-5 animate-spin inline" />
                   </td>
                 </tr>
-              ) : list.data?.items.length === 0 ? (
+              ) : sortedItems.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-20 text-center">
                     <p className="text-sm text-ink-muted">No worklists yet.</p>
                   </td>
                 </tr>
               ) : (
-                list.data?.items.map((wl) => {
+                sortedItems.map((wl) => {
                   const allocPct = wl.totalCharts > 0
                     ? (wl.allocatedCharts / wl.totalCharts) * 100
                     : 0;
@@ -222,24 +238,6 @@ export function WorklistsPage() {
 
       <AddVolumeModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
-  );
-}
-
-/* ── Reusable sortable header cell ───────────────────── */
-function HeaderCell({
-  children,
-  sortable,
-}: {
-  children: React.ReactNode;
-  sortable?: boolean;
-}) {
-  return (
-    <th className={cn('table-head whitespace-nowrap')}>
-      <span className="inline-flex items-center gap-1">
-        {children}
-        {sortable && <ChevronsUpDown className="w-3 h-3 opacity-50" />}
-      </span>
-    </th>
   );
 }
 

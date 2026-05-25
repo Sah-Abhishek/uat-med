@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronLeft, ChevronRight, FileSearch, Loader2, Pencil, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { SortableHeader } from '@/components/ui/SortableHeader';
+import { useTableSort, sortRows, type SortState } from '@/hooks/useTableSort';
 import {
   listQaSubmissions,
   type QaFilters,
@@ -20,6 +22,9 @@ const PAGE_SIZE = 25;
 export function SubmissionsTab({ filters, onResetFilters }: Props) {
   const [page, setPage] = useState(1);
   const navigate = useNavigate();
+  // Client-side sort: reorders the rows on the page currently in view. The
+  // initial undefined keeps the server's default order (last submitted desc).
+  const { sort, toggle: onSort } = useTableSort({ sortBy: undefined, sortDir: 'asc' });
 
   const q = useQuery({
     queryKey: ['qa', 'submissions', filters, page],
@@ -27,7 +32,18 @@ export function SubmissionsTab({ filters, onResetFilters }: Props) {
     placeholderData: (prev) => prev,
   });
 
-  const items = q.data?.items ?? [];
+  // Sort the current page's rows in the browser by the clicked column.
+  const items = sortRows(q.data?.items ?? [], sort, {
+    lastSubmitted: (r) => r.lastSubmittedAt,
+    chartNo: (r) => r.chartNo,
+    client: (r) => r.clientName,
+    specialty: (r) => r.specialityName,
+    coder: (r) => r.coderName,
+    auditor: (r) => r.auditorName,
+    milestone: (r) => r.milestone,
+    codes: (r) => r.totalDecisions,
+    time: (r) => r.timeTakenMs,
+  });
   const total = q.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -49,17 +65,17 @@ export function SubmissionsTab({ filters, onResetFilters }: Props) {
           <table className="w-full text-sm">
             <thead className="bg-surface-sunken/40 sticky top-0 z-10">
               <tr className="text-left text-[10px] uppercase tracking-wide text-ink-muted">
-                <Th>Last submitted</Th>
-                <Th>Chart #</Th>
-                <Th>Client / Location</Th>
-                <Th>Specialty</Th>
-                <Th>Coder</Th>
-                <Th>Auditor</Th>
-                <Th>Milestone</Th>
-                <Th align="right">Codes</Th>
-                <Th>Verdicts</Th>
-                <Th align="right">AI accuracy</Th>
-                <Th align="right">Time</Th>
+                <QaTh column="lastSubmitted" sort={sort} onSort={onSort}>Last submitted</QaTh>
+                <QaTh column="chartNo" sort={sort} onSort={onSort}>Chart #</QaTh>
+                <QaTh column="client" sort={sort} onSort={onSort}>Client / Location</QaTh>
+                <QaTh column="specialty" sort={sort} onSort={onSort}>Specialty</QaTh>
+                <QaTh column="coder" sort={sort} onSort={onSort}>Coder</QaTh>
+                <QaTh column="auditor" sort={sort} onSort={onSort}>Auditor</QaTh>
+                <QaTh column="milestone" sort={sort} onSort={onSort}>Milestone</QaTh>
+                <QaTh column="codes" sort={sort} onSort={onSort} align="right">Codes</QaTh>
+                <QaTh>Verdicts</QaTh>
+                <QaTh align="right">AI accuracy</QaTh>
+                <QaTh column="time" sort={sort} onSort={onSort} align="right">Time</QaTh>
               </tr>
             </thead>
             <tbody>
@@ -136,17 +152,31 @@ export function SubmissionsTab({ filters, onResetFilters }: Props) {
   );
 }
 
-function Th({ children, align }: { children: React.ReactNode; align?: 'right' }) {
+/** QA submissions header cell — SortableHeader styled to match this compact
+ * table. Pass `column`/`onSort` to make it sortable; omit for computed columns. */
+function QaTh({
+  children,
+  column,
+  sort,
+  onSort,
+  align,
+}: {
+  children: React.ReactNode;
+  column?: string;
+  sort?: SortState;
+  onSort?: (column: string) => void;
+  align?: 'right';
+}) {
   return (
-    <th
-      scope="col"
-      className={cn(
-        'px-3 py-2.5 font-semibold whitespace-nowrap',
-        align === 'right' && 'text-right',
-      )}
+    <SortableHeader
+      column={column}
+      sort={sort}
+      onSort={onSort}
+      align={align}
+      className="px-3 py-2.5 font-semibold"
     >
       {children}
-    </th>
+    </SortableHeader>
   );
 }
 
