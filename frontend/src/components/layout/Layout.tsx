@@ -17,6 +17,7 @@ import {
   ClipboardCheck,
   BookOpenCheck,
   ShieldCheck,
+  Sparkles,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -38,6 +39,7 @@ const NAV: NavItem[] = [
   { to: '/configurations', label: 'Configurations', icon: Settings, requires: 'config.view' },
   { to: '/reports', label: 'Reports', icon: BarChart3, requires: 'reports.run' },
   { to: '/qa', label: 'Quality Assurance', icon: ClipboardCheck, requires: 'qa.view' },
+  { to: '/ai-analytics', label: 'AI Analytics', icon: Sparkles, requires: 'qa.view' },
   { to: '/coder-rules', label: 'Coder Rules', icon: BookOpenCheck, requires: 'coderRules.manage' },
   { to: '/admin/code-decisions', label: 'Code Decisions', icon: ShieldCheck, requires: 'admin.codeDecisions.view' },
 ];

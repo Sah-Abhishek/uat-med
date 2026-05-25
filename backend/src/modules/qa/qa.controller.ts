@@ -36,4 +36,13 @@ export class QaController {
   coders() {
     return this.svc.coders();
   }
+
+  @Get('facilities')
+  @ApiOperation({ summary: 'Distinct facility values present on charts (optionally scoped by client/location) — for the filter dropdown.' })
+  facilities(@Query() q: { clientId?: string; locationId?: string }) {
+    return this.svc.facilities(
+      q.clientId ? Number(q.clientId) : undefined,
+      q.locationId ? Number(q.locationId) : undefined,
+    );
+  }
 }
