@@ -47,6 +47,7 @@ import { cn } from '@/lib/utils';
 const COLOR_ACCEPT = '#10B981'; // success
 const COLOR_EDIT = '#3B82F6'; // info
 const COLOR_REJECT = '#EF4444'; // danger
+const COLOR_ADDED = '#F59E0B'; // warn — coder added a code the AI missed
 const COLOR_PRIMARY = '#1E40AF';
 const COLOR_AXIS = '#94A3B8';
 const COLOR_GRID = '#E2E8F0';
@@ -150,6 +151,7 @@ export function AiAnalyticsPage() {
                 accepted={data?.kpis.acceptedCount ?? 0}
                 edited={data?.kpis.editedCount ?? 0}
                 rejected={data?.kpis.rejectedCount ?? 0}
+                added={data?.kpis.addedCount ?? 0}
                 acceptancePct={acceptancePct}
               />
             </ChartCard>
@@ -406,7 +408,7 @@ function ChartCard({
 function PerCodeTypeChart({
   rows,
 }: {
-  rows: { codeType: CodeReviewType; accepted: number; edited: number; rejected: number; total: number }[];
+  rows: { codeType: CodeReviewType; accepted: number; edited: number; rejected: number; added: number; total: number }[];
 }) {
   const data = rows.map((r) => {
     const total = r.total || 1;
@@ -415,9 +417,11 @@ function PerCodeTypeChart({
       accepted: r.accepted,
       edited: r.edited,
       rejected: r.rejected,
+      added: r.added,
       acceptedPct: (r.accepted / total) * 100,
       editedPct: (r.edited / total) * 100,
       rejectedPct: (r.rejected / total) * 100,
+      addedPct: (r.added / total) * 100,
     };
   });
   return (
@@ -433,6 +437,9 @@ function PerCodeTypeChart({
           <linearGradient id="pctReject" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="#FB7185" /><stop offset="100%" stopColor={COLOR_REJECT} />
           </linearGradient>
+          <linearGradient id="pctAdded" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#FBBF24" /><stop offset="100%" stopColor={COLOR_ADDED} />
+          </linearGradient>
         </defs>
         <CartesianGrid horizontal={false} stroke={COLOR_GRID} strokeDasharray="4 4" strokeOpacity={0.6} />
         <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -443,9 +450,21 @@ function PerCodeTypeChart({
             <ChartTooltip
               formatItem={(e) => {
                 const k = e.dataKey as string;
-                const raw = k === 'acceptedPct' ? e.payload.accepted : k === 'editedPct' ? e.payload.edited : e.payload.rejected;
-                const lbl = k === 'acceptedPct' ? 'Accepted' : k === 'editedPct' ? 'Edited' : 'Rejected';
-                const color = k === 'acceptedPct' ? COLOR_ACCEPT : k === 'editedPct' ? COLOR_EDIT : COLOR_REJECT;
+                const raw =
+                  k === 'acceptedPct' ? e.payload.accepted :
+                  k === 'editedPct' ? e.payload.edited :
+                  k === 'rejectedPct' ? e.payload.rejected :
+                  e.payload.added;
+                const lbl =
+                  k === 'acceptedPct' ? 'Accepted' :
+                  k === 'editedPct' ? 'Edited' :
+                  k === 'rejectedPct' ? 'Rejected' :
+                  'Added';
+                const color =
+                  k === 'acceptedPct' ? COLOR_ACCEPT :
+                  k === 'editedPct' ? COLOR_EDIT :
+                  k === 'rejectedPct' ? COLOR_REJECT :
+                  COLOR_ADDED;
                 return { label: lbl, value: `${raw} (${(e.value as number).toFixed(1)}%)`, color };
               }}
             />
@@ -454,7 +473,8 @@ function PerCodeTypeChart({
         <Legend wrapperStyle={legendStyle} iconType="circle" iconSize={9} />
         <Bar dataKey="acceptedPct" stackId="v" name="Accepted" fill="url(#pctAccept)" radius={[6, 0, 0, 6]} maxBarSize={26} animationDuration={700} animationEasing="ease-out" />
         <Bar dataKey="editedPct" stackId="v" name="Edited" fill="url(#pctEdit)" maxBarSize={26} animationDuration={700} animationEasing="ease-out" />
-        <Bar dataKey="rejectedPct" stackId="v" name="Rejected" fill="url(#pctReject)" radius={[0, 6, 6, 0]} maxBarSize={26} animationDuration={700} animationEasing="ease-out" />
+        <Bar dataKey="rejectedPct" stackId="v" name="Rejected" fill="url(#pctReject)" maxBarSize={26} animationDuration={700} animationEasing="ease-out" />
+        <Bar dataKey="addedPct" stackId="v" name="Added" fill="url(#pctAdded)" radius={[0, 6, 6, 0]} maxBarSize={26} animationDuration={700} animationEasing="ease-out" />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -466,17 +486,20 @@ function VerdictDonut({
   accepted,
   edited,
   rejected,
+  added,
   acceptancePct,
 }: {
   accepted: number;
   edited: number;
   rejected: number;
+  added: number;
   acceptancePct: number;
 }) {
   const data = [
     { name: 'Accepted', value: accepted, color: COLOR_ACCEPT },
     { name: 'Edited', value: edited, color: COLOR_EDIT },
     { name: 'Rejected', value: rejected, color: COLOR_REJECT },
+    { name: 'Added', value: added, color: COLOR_ADDED },
   ].filter((d) => d.value > 0);
 
   return (
