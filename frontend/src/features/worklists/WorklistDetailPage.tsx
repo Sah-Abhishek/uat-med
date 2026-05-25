@@ -40,6 +40,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
+  FileText,
 } from 'lucide-react';
 import { BulkUploadWizard } from './BulkUploadWizard';
 
@@ -136,6 +137,26 @@ export function WorklistDetailPage() {
             <StatMini label="Total charts" value={formatNumber(data.totalCharts)} />
           </div>
 
+          {/* Documents status — makes it explicit when nothing has been uploaded. */}
+          <div
+            className={cn(
+              'mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm',
+              data.documentsCount > 0
+                ? 'border-line bg-surface-sunken/40 text-ink'
+                : 'border-warn/30 bg-warn-soft/40 text-ink',
+            )}
+          >
+            <FileText className="w-4 h-4 shrink-0 text-ink-muted" />
+            {data.documentsCount > 0 ? (
+              <span>
+                <span className="font-semibold">{formatNumber(data.documentsCount)}</span>{' '}
+                document{data.documentsCount === 1 ? '' : 's'} uploaded
+              </span>
+            ) : (
+              <span className="text-ink-muted">No documents uploaded yet</span>
+            )}
+          </div>
+
           <div className="flex flex-wrap gap-2 mt-5">
             <Button onClick={() => setEditOpen(true)} leftIcon={<Pencil className="w-3.5 h-3.5" />}>
               Edit Worklist
@@ -204,6 +225,7 @@ export function WorklistDetailPage() {
       <AiPipelineCard
         ai={data.aiStatusCounts}
         total={s.total}
+        documentsCount={data.documentsCount}
         worklistId={id!}
         canRun={canBulkImport}
       />
@@ -319,11 +341,13 @@ function LegendRow({ color, label, value }: { color: string; label: string; valu
 function AiPipelineCard({
   ai,
   total,
+  documentsCount,
   worklistId,
   canRun,
 }: {
   ai: NonNullable<Awaited<ReturnType<typeof getWorklist>>>['aiStatusCounts'];
   total: number;
+  documentsCount: number;
   worklistId: string;
   canRun: boolean;
 }) {
@@ -390,6 +414,21 @@ function AiPipelineCard({
                 <span className="ml-1.5 inline-flex items-center gap-1 text-warn font-semibold">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   {formatNumber(inFlight)} in flight
+                </span>
+              )}
+            </p>
+            {/* Documents drive the pipeline — the AI only processes charts that
+                have files. Make the available document count explicit here. */}
+            <p className="text-xs mt-1 inline-flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5 shrink-0 text-ink-muted" />
+              {documentsCount > 0 ? (
+                <span className="text-ink-muted">
+                  <span className="font-semibold text-ink">{formatNumber(documentsCount)}</span>{' '}
+                  document{documentsCount === 1 ? '' : 's'} uploaded to feed the AI
+                </span>
+              ) : (
+                <span className="font-medium text-warn">
+                  No documents uploaded — nothing for the AI to process yet
                 </span>
               )}
             </p>

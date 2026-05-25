@@ -108,11 +108,16 @@ export class ConfigurationsService {
 
   /* ── Clients (TypeORM-backed) ─────────────────────────── */
 
-  async listClients() {
+  async listClients(includeInactive = false) {
+    // Soft-deleted clients have isActive=false. Hidden by default so they drop
+    // out of every picker/creation flow; the config management view opts in
+    // with includeInactive=true to edit/restore them.
+    const where = includeInactive ? {} : { isActive: true };
     const rows = await this.clientsRepo.find({
+      where,
       order: { name: 'ASC' },
       relations: ['locations'],
-    }).catch(() => this.clientsRepo.find({ order: { name: 'ASC' } }));
+    }).catch(() => this.clientsRepo.find({ where, order: { name: 'ASC' } }));
 
     const items = rows.map((c) => ({
       id: c.id,
@@ -125,20 +130,77 @@ export class ConfigurationsService {
   }
 
   async createClient(body: { name: string; code?: string; isActive?: boolean }) {
+    const code = body.code?.trim();
     const client = this.clientsRepo.create({
       name: body.name,
-      code: body.code ?? '',
+      // Absent/empty code → NULL. The `code` column is UNIQUE; storing '' makes
+      // the second code-less client collide on the unique index, whereas
+      // Postgres permits many NULLs.
+      code: code ? code : null,
       isActive: body.isActive ?? true,
     });
     const saved = await this.clientsRepo.save(client);
     return { id: saved.id };
   }
 
+  async updateClient(id: number, body: { name?: string; code?: string; isActive?: boolean }) {
+    const client = await this.clientsRepo.findOne({ where: { id } });
+    if (!client) {
+      throw new NotFoundException({ error: { code: 'not_found', message: `Client ${id} not found.` } });
+    }
+    if (body.name !== undefined) client.name = body.name;
+    // Normalise empty code to NULL — see createClient (unique index on code).
+    if (body.code !== undefined) client.code = body.code.trim() || null;
+    if (body.isActive !== undefined) client.isActive = body.isActive;
+    await this.clientsRepo.save(client);
+    return { id: client.id };
+  }
+
+  /** Soft delete: deactivate so it's hidden everywhere but never removed.
+   * Restore by editing it back to active. */
+  async deactivateClient(id: number) {
+    const client = await this.clientsRepo.findOne({ where: { id } });
+    if (!client) {
+      throw new NotFoundException({ error: { code: 'not_found', message: `Client ${id} not found.` } });
+    }
+    client.isActive = false;
+    await this.clientsRepo.save(client);
+    return { id: client.id, isActive: false };
+  }
+
+  /**
+   * Hard delete with cascade. Permanently removes the client and everything
+   * under it. Only `users` and `worklists` hold real FKs to client/location;
+   * config tables (processes, specialities, …) carry loose id columns with no
+   * constraint, so they don't block the delete. We:
+   *   1. null out user.client_id / user.location_id (FK would otherwise block),
+   *   2. delete the client's worklists (charts → allocations / decisions /
+   *      feedback cascade at the DB level),
+   *   3. delete the client (its locations cascade via Location→Client).
+   * All in one transaction so a failure leaves nothing half-deleted.
+   */
+  async cascadeDeleteClient(id: number) {
+    const client = await this.clientsRepo.findOne({ where: { id } });
+    if (!client) {
+      throw new NotFoundException({ error: { code: 'not_found', message: `Client ${id} not found.` } });
+    }
+    await this.dataSource.transaction(async (em) => {
+      const locRows: Array<{ id: string }> = await em.query('SELECT id FROM locations WHERE client_id = $1', [id]);
+      const locationIds = locRows.map((r) => Number(r.id));
+      await em.query('UPDATE users SET client_id = NULL WHERE client_id = $1', [id]);
+      await em.query('UPDATE users SET location_id = NULL WHERE location_id = ANY($1::bigint[])', [locationIds]);
+      await em.query('DELETE FROM worklists WHERE client_id = $1', [id]);
+      await em.query('DELETE FROM worklists WHERE location_id = ANY($1::bigint[])', [locationIds]);
+      await em.query('DELETE FROM clients WHERE id = $1', [id]);
+    });
+    return { id, deleted: true };
+  }
+
   /* ── Locations (TypeORM-backed) ───────────────────────── */
 
-  async listLocations(clientId: number) {
+  async listLocations(clientId: number, includeInactive = false) {
     const rows = await this.locationsRepo.find({
-      where: { clientId },
+      where: includeInactive ? { clientId } : { clientId, isActive: true },
       order: { name: 'ASC' },
     });
     const items = rows.map((l) => ({
@@ -173,6 +235,45 @@ export class ConfigurationsService {
     });
     const saved = await this.locationsRepo.save(loc);
     return { id: saved.id };
+  }
+
+  async updateLocation(id: number, body: { name?: string; code?: string; isActive?: boolean }) {
+    const loc = await this.locationsRepo.findOne({ where: { id } });
+    if (!loc) {
+      throw new NotFoundException({ error: { code: 'not_found', message: `Location ${id} not found.` } });
+    }
+    if (body.name !== undefined) loc.name = body.name;
+    if (body.code !== undefined) loc.code = body.code;
+    if (body.isActive !== undefined) loc.isActive = body.isActive;
+    await this.locationsRepo.save(loc);
+    return { id: loc.id };
+  }
+
+  /** Soft delete: deactivate so it's hidden everywhere but never removed. */
+  async deactivateLocation(id: number) {
+    const loc = await this.locationsRepo.findOne({ where: { id } });
+    if (!loc) {
+      throw new NotFoundException({ error: { code: 'not_found', message: `Location ${id} not found.` } });
+    }
+    loc.isActive = false;
+    await this.locationsRepo.save(loc);
+    return { id: loc.id, isActive: false };
+  }
+
+  /** Hard delete with cascade — permanently removes the location and all
+   * worklists/charts under it; unassigns users at this location. See
+   * cascadeDeleteClient for the FK reasoning. */
+  async cascadeDeleteLocation(id: number) {
+    const loc = await this.locationsRepo.findOne({ where: { id } });
+    if (!loc) {
+      throw new NotFoundException({ error: { code: 'not_found', message: `Location ${id} not found.` } });
+    }
+    await this.dataSource.transaction(async (em) => {
+      await em.query('UPDATE users SET location_id = NULL WHERE location_id = $1', [id]);
+      await em.query('DELETE FROM worklists WHERE location_id = $1', [id]);
+      await em.query('DELETE FROM locations WHERE id = $1', [id]);
+    });
+    return { id, deleted: true };
   }
 
   /* ── Specialities → General (DB-backed) ───────────────── */

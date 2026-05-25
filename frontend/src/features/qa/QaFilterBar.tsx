@@ -30,7 +30,7 @@ interface Props {
 export function QaFilterBar({ filters, onChange, onReset }: Props) {
   const clientsQ = useQuery({
     queryKey: ['configurations', 'clients'],
-    queryFn: listClients,
+    queryFn: () => listClients(),
   });
   const locationsQ = useQuery({
     queryKey: ['configurations', 'locations', filters.clientId],

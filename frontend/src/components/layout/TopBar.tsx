@@ -25,7 +25,7 @@ export function TopBar() {
 
   const clients = useQuery({
     queryKey: ['configurations', 'clients'],
-    queryFn: listClients,
+    queryFn: () => listClients(),
     enabled: !!user,
   });
   const locations = useQuery({

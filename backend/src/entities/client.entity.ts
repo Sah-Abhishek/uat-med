@@ -7,7 +7,7 @@ export class Client {
 
   @Column({ type: 'varchar', length: 120, unique: true }) name: string;
 
-  @Column({ type: 'varchar', length: 32, nullable: true, unique: true }) code?: string;
+  @Column({ type: 'varchar', length: 32, nullable: true, unique: true }) code?: string | null;
 
   @Column({ name: 'is_active', type: 'boolean', default: true }) isActive: boolean;
 

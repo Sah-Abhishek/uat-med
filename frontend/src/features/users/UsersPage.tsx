@@ -105,7 +105,7 @@ export function UsersPage() {
   // Loaded once at page mount; cached by react-query so switching tabs doesn't refetch.
   const clientsLookup = useQuery({
     queryKey: ['configurations', 'clients'],
-    queryFn: listClients,
+    queryFn: () => listClients(),
     staleTime: 60_000,
   });
   const specialitiesLookup = useQuery({
@@ -651,7 +651,7 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
   // Lookups for the three dropdowns
   const clientsQuery = useQuery({
     queryKey: ['configurations', 'clients'],
-    queryFn: listClients,
+    queryFn: () => listClients(),
     enabled: open,
   });
   const selectedClientId = watch('clientId');
@@ -872,7 +872,7 @@ function ApproveModal({
   // Lookups — Configurations APIs. Populate dropdowns with real data.
   const clientsQuery = useQuery({
     queryKey: ['configurations', 'clients'],
-    queryFn: listClients,
+    queryFn: () => listClients(),
   });
   const { register, handleSubmit, watch, setValue } = useForm<CreateUserDto>({
     defaultValues: {

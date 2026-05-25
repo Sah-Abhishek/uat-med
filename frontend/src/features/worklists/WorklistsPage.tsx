@@ -271,7 +271,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
 
   const clients = useQuery({
     queryKey: ['configurations', 'clients'],
-    queryFn: listClients,
+    queryFn: () => listClients(),
     enabled: open,
   });
   const locations = useQuery({
