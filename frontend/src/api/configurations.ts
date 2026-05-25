@@ -34,15 +34,38 @@ export interface Location {
   isActive: boolean;
 }
 
-export const listClients = () => get<{ items: Client[] }>('/configurations/clients');
+/** Pass `includeInactive` from management views to also list soft-deleted
+ * (deactivated) rows; omit it elsewhere so deactivated clients stay hidden. */
+export const listClients = (opts?: { includeInactive?: boolean }) =>
+  get<{ items: Client[] }>('/configurations/clients', opts?.includeInactive ? { includeInactive: true } : undefined);
 export const createClient = (dto: Omit<Client, 'id' | 'locations'>) =>
   post<{ id: number }>('/configurations/clients', dto);
+export const updateClient = (id: number, dto: Partial<Omit<Client, 'id' | 'locations'>>) =>
+  patch<{ id: number }>(`/configurations/clients/${id}`, dto);
+/** Soft delete — deactivates the client (isActive=false). */
+export const deleteClient = (id: number) =>
+  del<{ id: number; isActive: boolean }>(`/configurations/clients/${id}`);
+/** Hard delete with cascade — permanently removes the client, its locations,
+ * and all worklists/charts under it. Irreversible. */
+export const cascadeDeleteClient = (id: number) =>
+  del<{ id: number; deleted: boolean }>(`/configurations/clients/${id}/cascade`);
 
-export const listLocations = (clientId: number) =>
-  get<{ items: Location[] }>('/configurations/locations', { clientId });
-
+export const listLocations = (clientId: number, opts?: { includeInactive?: boolean }) =>
+  get<{ items: Location[] }>('/configurations/locations', {
+    clientId,
+    ...(opts?.includeInactive ? { includeInactive: true } : {}),
+  });
 export const createLocation = (dto: Omit<Location, 'id'>) =>
   post<{ id: number }>('/configurations/locations', dto);
+export const updateLocation = (id: number, dto: Partial<Omit<Location, 'id' | 'clientId'>>) =>
+  patch<{ id: number }>(`/configurations/locations/${id}`, dto);
+/** Soft delete — deactivates the location (isActive=false). */
+export const deleteLocation = (id: number) =>
+  del<{ id: number; isActive: boolean }>(`/configurations/locations/${id}`);
+/** Hard delete with cascade — permanently removes the location and all
+ * worklists/charts under it. Irreversible. */
+export const cascadeDeleteLocation = (id: number) =>
+  del<{ id: number; deleted: boolean }>(`/configurations/locations/${id}/cascade`);
 
 /* ── Specialities → General sub-tab ───────────────────── */
 

@@ -6,8 +6,14 @@ import {
   updateGeneralConfig,
   listClients,
   createClient,
+  updateClient,
+  deleteClient,
+  cascadeDeleteClient,
   listLocations,
   createLocation,
+  updateLocation,
+  deleteLocation,
+  cascadeDeleteLocation,
   getSpecialitiesGeneral,
   updateSpecialitiesGeneral,
   getFeedbackCategories,
@@ -52,6 +58,7 @@ import {
   type CodeReviewReasonRow,
   type CodeReviewReasonInput,
   type Client,
+  type Location,
 } from '@/api/configurations';
 import type { ApiErrorShape, HccFieldDef, ValidationRule } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -74,6 +81,9 @@ import {
   Check,
   Minus,
   GripVertical,
+  RotateCcw,
+  Ban,
+  Archive,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -249,13 +259,45 @@ function ConfigScopeRail({
   const qc = useQueryClient();
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [addLocationOpen, setAddLocationOpen] = useState(false);
+  const [editClient, setEditClient] = useState<Client | null>(null);
+  const [editLocation, setEditLocation] = useState<Location | null>(null);
+  const [deactivateClientTarget, setDeactivateClientTarget] = useState<Client | null>(null);
+  const [deactivateLocationTarget, setDeactivateLocationTarget] = useState<Location | null>(null);
+  const [cascadeClientTarget, setCascadeClientTarget] = useState<Client | null>(null);
+  const [cascadeLocationTarget, setCascadeLocationTarget] = useState<Location | null>(null);
+  const [deactivatedOpen, setDeactivatedOpen] = useState(false);
 
-  const clients = useQuery({ queryKey: ['configurations', 'clients'], queryFn: listClients });
+  const invalidateClients = () => qc.invalidateQueries({ queryKey: ['configurations', 'clients'] });
+  const invalidateLocations = () => qc.invalidateQueries({ queryKey: ['configurations', 'locations'] });
+  const invalidateAll = () => { invalidateClients(); invalidateLocations(); };
+
+  // Management query pulls inactive rows too — used to derive the "Deactivated"
+  // panel and each client's deactivated locations. The visible pickers below
+  // render ACTIVE rows only; everywhere else calls the APIs without
+  // includeInactive, so deactivated rows stay hidden across the app.
+  const clients = useQuery({
+    queryKey: ['configurations', 'clients', 'manage'],
+    queryFn: () => listClients({ includeInactive: true }),
+  });
+  const allClients = clients.data?.items ?? [];
+  const activeClients = allClients.filter((c) => c.isActive);
+  const deactivatedClients = allClients.filter((c) => !c.isActive);
+  // Individually-deactivated locations under still-active clients. (Locations
+  // under a deactivated client travel with it, so they aren't listed twice.)
+  const deactivatedLocations = allClients
+    .filter((c) => c.isActive)
+    .flatMap((c) =>
+      (c.locations ?? [])
+        .filter((l) => !l.isActive)
+        .map((l) => ({ location: l as Location, clientName: c.name })),
+    );
+  const deactivatedCount = deactivatedClients.length + deactivatedLocations.length;
 
   useEffect(() => {
-    if (!selectedClient && clients.data?.items.length) {
-      onClientChange(clients.data.items[0].id);
-    }
+    const active = (clients.data?.items ?? []).filter((c) => c.isActive);
+    if (!active.length) return;
+    if (selectedClient && active.some((c) => c.id === selectedClient)) return;
+    onClientChange(active[0].id);
   }, [clients.data, selectedClient, onClientChange]);
 
   const locations = useQuery({
@@ -271,6 +313,31 @@ function ConfigScopeRail({
     onLocationChange(items[0]?.id ?? null);
   }, [locations.data, selectedLocation, onLocationChange]);
 
+  const deactivateClientMut = useMutation({
+    mutationFn: (id: number) => deleteClient(id),
+    onSuccess: () => { invalidateClients(); setDeactivateClientTarget(null); },
+  });
+  const cascadeClientMut = useMutation({
+    mutationFn: (id: number) => cascadeDeleteClient(id),
+    onSuccess: () => { invalidateAll(); setCascadeClientTarget(null); },
+  });
+  const restoreClientMut = useMutation({
+    mutationFn: (id: number) => updateClient(id, { isActive: true }),
+    onSuccess: invalidateClients,
+  });
+  const deactivateLocationMut = useMutation({
+    mutationFn: (id: number) => deleteLocation(id),
+    onSuccess: () => { invalidateAll(); setDeactivateLocationTarget(null); },
+  });
+  const cascadeLocationMut = useMutation({
+    mutationFn: (id: number) => cascadeDeleteLocation(id),
+    onSuccess: () => { invalidateAll(); setCascadeLocationTarget(null); },
+  });
+  const restoreLocationMut = useMutation({
+    mutationFn: (id: number) => updateLocation(id, { isActive: true }),
+    onSuccess: invalidateAll,
+  });
+
   return (
     <aside className="w-[260px] shrink-0 space-y-4">
       <Card>
@@ -284,9 +351,9 @@ function ConfigScopeRail({
         </div>
         {clients.isPending ? (
           <ClientPickerSkeleton />
-        ) : clients.data?.items.length === 0 ? (
+        ) : activeClients.length === 0 ? (
           <div className="border border-dashed border-line rounded-lg p-4 text-center">
-            <p className="text-xs text-ink-muted mb-2">No clients yet.</p>
+            <p className="text-xs text-ink-muted mb-2">No active clients.</p>
             {canEdit && (
               <Button size="sm" onClick={() => setAddClientOpen(true)} leftIcon={<Plus className="w-3 h-3" />}>
                 Add first client
@@ -296,11 +363,15 @@ function ConfigScopeRail({
         ) : (
           <ClientPicker
             value={selectedClient}
-            options={clients.data!.items}
+            options={activeClients}
+            canEdit={canEdit}
             onChange={(id) => {
               onClientChange(id);
               onLocationChange(null);
             }}
+            onEdit={setEditClient}
+            onDeactivate={setDeactivateClientTarget}
+            onDelete={setCascadeClientTarget}
           />
         )}
       </Card>
@@ -337,41 +408,276 @@ function ConfigScopeRail({
             {locations.data?.items.map((l) => {
               const isSelected = selectedLocation === l.id;
               return (
-                <button
+                <div
                   key={l.id}
-                  onClick={() => onLocationChange(l.id)}
                   className={cn(
-                    'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition text-sm',
+                    'group flex items-center gap-1 pl-3 pr-1.5 rounded-lg transition',
                     isSelected
-                      ? 'bg-primary-soft text-primary-ink dark:text-primary font-semibold'
-                      : 'text-ink hover:bg-surface-sunken font-medium',
+                      ? 'bg-primary-soft text-primary-ink dark:text-primary'
+                      : 'text-ink hover:bg-surface-sunken',
                   )}
                 >
-                  <span className="truncate">{l.name}</span>
-                  <span className="text-ink-muted">›</span>
-                </button>
+                  <button
+                    onClick={() => onLocationChange(l.id)}
+                    className={cn(
+                      'flex-1 flex items-center gap-2 py-2.5 text-left text-sm min-w-0',
+                      isSelected ? 'font-semibold' : 'font-medium',
+                    )}
+                  >
+                    <span className="truncate">{l.name}</span>
+                  </button>
+                  {canEdit && (
+                    <RowActions
+                      onEdit={() => setEditLocation(l)}
+                      onDeactivate={() => setDeactivateLocationTarget(l)}
+                      onDelete={() => setCascadeLocationTarget(l)}
+                    />
+                  )}
+                </div>
               );
             })}
           </div>
         )}
       </Card>
 
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => setDeactivatedOpen(true)}
+          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-ink px-3 py-2 rounded-lg border border-dashed border-line hover:bg-surface-sunken/60 transition"
+        >
+          <Archive className="w-3.5 h-3.5" />
+          Deactivated ({deactivatedCount})
+        </button>
+      )}
+
       {addClientOpen && (
         <AddClientModal
           onClose={() => setAddClientOpen(false)}
-          onSaved={() => qc.invalidateQueries({ queryKey: ['configurations', 'clients'] })}
+          onSaved={invalidateClients}
         />
       )}
       {addLocationOpen && selectedClient && (
         <AddLocationModal
           clientId={selectedClient}
           onClose={() => setAddLocationOpen(false)}
-          onSaved={() =>
-            qc.invalidateQueries({ queryKey: ['configurations', 'locations', selectedClient] })
-          }
+          onSaved={invalidateLocations}
         />
       )}
+      {editClient && (
+        <EditClientModal
+          client={editClient}
+          onClose={() => setEditClient(null)}
+          onSaved={invalidateAll}
+        />
+      )}
+      {editLocation && (
+        <EditLocationModal
+          location={editLocation}
+          onClose={() => setEditLocation(null)}
+          onSaved={invalidateAll}
+        />
+      )}
+      {deactivatedOpen && (
+        <DeactivatedModal
+          clients={deactivatedClients}
+          locations={deactivatedLocations}
+          onClose={() => setDeactivatedOpen(false)}
+          onRestoreClient={(c) => restoreClientMut.mutate(c.id)}
+          onDeleteClient={(c) => setCascadeClientTarget(c)}
+          onRestoreLocation={(l) => restoreLocationMut.mutate(l.id)}
+          onDeleteLocation={(l) => setCascadeLocationTarget(l)}
+        />
+      )}
+
+      {/* ── Deactivate (soft) confirmations ── */}
+      <ConfirmModal
+        open={!!deactivateClientTarget}
+        onClose={() => setDeactivateClientTarget(null)}
+        onConfirm={() => deactivateClientTarget && deactivateClientMut.mutate(deactivateClientTarget.id)}
+        confirmLabel="Deactivate"
+        cancelLabel="Cancel"
+        loading={deactivateClientMut.isPending}
+        variant="danger"
+        message={
+          `Deactivate "${deactivateClientTarget?.name}"? It will be hidden from all pickers and ` +
+          `creation flows. Existing worklists and data are kept, and you can restore it from the ` +
+          `Deactivated panel later.`
+        }
+      />
+      <ConfirmModal
+        open={!!deactivateLocationTarget}
+        onClose={() => setDeactivateLocationTarget(null)}
+        onConfirm={() => deactivateLocationTarget && deactivateLocationMut.mutate(deactivateLocationTarget.id)}
+        confirmLabel="Deactivate"
+        cancelLabel="Cancel"
+        loading={deactivateLocationMut.isPending}
+        variant="danger"
+        message={
+          `Deactivate "${deactivateLocationTarget?.name}"? It will be hidden. ` +
+          `Existing data is kept, and you can restore it from the Deactivated panel later.`
+        }
+      />
+
+      {/* ── Cascade (hard) delete confirmations — strong, irreversible warning ── */}
+      <ConfirmModal
+        open={!!cascadeClientTarget}
+        onClose={() => setCascadeClientTarget(null)}
+        onConfirm={() => cascadeClientTarget && cascadeClientMut.mutate(cascadeClientTarget.id)}
+        confirmLabel="Delete everything"
+        cancelLabel="Cancel"
+        loading={cascadeClientMut.isPending}
+        variant="danger"
+        message={
+          `⚠️ Permanently delete client "${cascadeClientTarget?.name}"? This CASCADES — it also deletes ` +
+          `ALL of its locations, and every worklist and chart under it (including allocations, audit ` +
+          `decisions, and feedback). Any users linked to this client will be unassigned. ` +
+          `This cannot be undone.`
+        }
+      />
+      <ConfirmModal
+        open={!!cascadeLocationTarget}
+        onClose={() => setCascadeLocationTarget(null)}
+        onConfirm={() => cascadeLocationTarget && cascadeLocationMut.mutate(cascadeLocationTarget.id)}
+        confirmLabel="Delete everything"
+        cancelLabel="Cancel"
+        loading={cascadeLocationMut.isPending}
+        variant="danger"
+        message={
+          `⚠️ Permanently delete location "${cascadeLocationTarget?.name}"? This CASCADES — it also deletes ` +
+          `every worklist and chart under it (including allocations, audit decisions, and feedback). ` +
+          `Any users at this location will be unassigned. This cannot be undone.`
+        }
+      />
     </aside>
+  );
+}
+
+/** Hover-revealed row actions. Each button renders only if its handler is
+ * given, so the same component serves active rows (Edit / Deactivate / Delete)
+ * and the Deactivated panel (Restore / Delete). */
+function RowActions({
+  onEdit,
+  onRestore,
+  onDeactivate,
+  onDelete,
+}: {
+  onEdit?: () => void;
+  onRestore?: () => void;
+  onDeactivate?: () => void;
+  onDelete?: () => void;
+}) {
+  const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
+  return (
+    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
+      {onEdit && (
+        <button type="button" title="Edit" aria-label="Edit" onClick={stop(onEdit)}
+          className="p-1.5 rounded-md text-ink-muted hover:text-ink hover:bg-surface-2 transition">
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {onRestore && (
+        <button type="button" title="Restore" aria-label="Restore" onClick={stop(onRestore)}
+          className="p-1.5 rounded-md text-ink-muted hover:text-success hover:bg-success-soft/50 transition">
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {onDeactivate && (
+        <button type="button" title="Deactivate (hide, reversible)" aria-label="Deactivate" onClick={stop(onDeactivate)}
+          className="p-1.5 rounded-md text-ink-muted hover:text-warn hover:bg-warn-soft/50 transition">
+          <Ban className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {onDelete && (
+        <button type="button" title="Delete permanently (cascade)" aria-label="Delete permanently" onClick={stop(onDelete)}
+          className="p-1.5 rounded-md text-ink-muted hover:text-danger hover:bg-danger-soft/50 transition">
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** "Deactivated" panel — lists soft-deleted clients and locations so they can
+ * be restored or permanently (cascade) deleted. Reached from the rail's
+ * Deactivated button; that's where deactivated rows "live" now that the main
+ * pickers only show active ones. */
+function DeactivatedModal({
+  clients,
+  locations,
+  onClose,
+  onRestoreClient,
+  onDeleteClient,
+  onRestoreLocation,
+  onDeleteLocation,
+}: {
+  clients: Client[];
+  locations: Array<{ location: Location; clientName: string }>;
+  onClose: () => void;
+  onRestoreClient: (c: Client) => void;
+  onDeleteClient: (c: Client) => void;
+  onRestoreLocation: (l: Location) => void;
+  onDeleteLocation: (l: Location) => void;
+}) {
+  const empty = clients.length === 0 && locations.length === 0;
+  return (
+    <Modal open onClose={onClose} title="Deactivated clients & locations" size="md">
+      {empty ? (
+        <div className="py-10 text-center text-sm text-ink-muted">
+          Nothing is deactivated. Deactivated clients and locations show up here.
+        </div>
+      ) : (
+        <div className="space-y-5 max-h-[60vh] overflow-y-auto">
+          <section>
+            <h4 className="text-[11px] uppercase tracking-wide font-bold text-ink-muted mb-2">
+              Clients ({clients.length})
+            </h4>
+            {clients.length === 0 ? (
+              <p className="text-xs text-ink-subtle">No deactivated clients.</p>
+            ) : (
+              <div className="space-y-1">
+                {clients.map((c) => (
+                  <div key={c.id} className="group flex items-center gap-1 pl-3 pr-1.5 py-1 rounded-lg hover:bg-surface-sunken transition">
+                    <span className="flex-1 truncate text-sm text-ink">{c.name}</span>
+                    <RowActions
+                      onRestore={() => onRestoreClient(c)}
+                      onDelete={() => onDeleteClient(c)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <h4 className="text-[11px] uppercase tracking-wide font-bold text-ink-muted mb-2">
+              Locations ({locations.length})
+            </h4>
+            {locations.length === 0 ? (
+              <p className="text-xs text-ink-subtle">No deactivated locations.</p>
+            ) : (
+              <div className="space-y-1">
+                {locations.map(({ location, clientName }) => (
+                  <div key={location.id} className="group flex items-center gap-1 pl-3 pr-1.5 py-1 rounded-lg hover:bg-surface-sunken transition">
+                    <span className="flex-1 truncate text-sm text-ink">
+                      {location.name}
+                      <span className="text-ink-subtle"> · {clientName}</span>
+                    </span>
+                    <RowActions
+                      onRestore={() => onRestoreLocation(location)}
+                      onDelete={() => onDeleteLocation(location)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+      <ModalFooter>
+        <Button variant="ghost" type="button" onClick={onClose}>Close</Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 
@@ -2519,7 +2825,7 @@ function CopyReasonsModal({
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ copied: number; skipped: number } | null>(null);
 
-  const clients = useQuery({ queryKey: ['configurations', 'clients'], queryFn: listClients });
+  const clients = useQuery({ queryKey: ['configurations', 'clients'], queryFn: () => listClients() });
   const locations = useQuery({
     queryKey: ['configurations', 'locations', sourceClient],
     queryFn: () => listLocations(sourceClient!),
@@ -2628,6 +2934,110 @@ function CopyReasonsModal({
   );
 }
 
+function EditClientModal({
+  client,
+  onClose,
+  onSaved,
+}: {
+  client: Client;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { register, handleSubmit, control } = useForm<{ name: string; code: string; isActive: boolean }>({
+    defaultValues: { name: client.name, code: client.code ?? '', isActive: client.isActive },
+  });
+  const [err, setErr] = useState<string | null>(null);
+  const m = useMutation({
+    mutationFn: (d: { name: string; code: string; isActive: boolean }) =>
+      updateClient(client.id, { name: d.name, code: d.code, isActive: d.isActive }),
+    onSuccess: () => { onSaved(); onClose(); },
+    onError: (e) => setErr((e as unknown as ApiErrorShape).message),
+  });
+  return (
+    <Modal open onClose={onClose} title="Edit Client" size="sm">
+      <form onSubmit={handleSubmit((d) => m.mutate(d))} className="space-y-3">
+        {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
+        <div>
+          <Label required>Name</Label>
+          <Input {...register('name', { required: true })} autoFocus />
+        </div>
+        <div>
+          <Label>Code</Label>
+          <Input {...register('code')} placeholder="Optional" />
+        </div>
+        <Controller
+          control={control}
+          name="isActive"
+          render={({ field }) => (
+            <Switch
+              checked={field.value}
+              onChange={field.onChange}
+              label="Active"
+              description="Inactive clients are hidden from pickers and creation flows."
+            />
+          )}
+        />
+        <ModalFooter>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={m.isPending}>Save</Button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  );
+}
+
+function EditLocationModal({
+  location,
+  onClose,
+  onSaved,
+}: {
+  location: Location;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { register, handleSubmit, control } = useForm<{ name: string; code: string; isActive: boolean }>({
+    defaultValues: { name: location.name, code: location.code ?? '', isActive: location.isActive },
+  });
+  const [err, setErr] = useState<string | null>(null);
+  const m = useMutation({
+    mutationFn: (d: { name: string; code: string; isActive: boolean }) =>
+      updateLocation(location.id, { name: d.name, code: d.code, isActive: d.isActive }),
+    onSuccess: () => { onSaved(); onClose(); },
+    onError: (e) => setErr((e as unknown as ApiErrorShape).message),
+  });
+  return (
+    <Modal open onClose={onClose} title="Edit Location" size="sm">
+      <form onSubmit={handleSubmit((d) => m.mutate(d))} className="space-y-3">
+        {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
+        <div>
+          <Label required>Name</Label>
+          <Input {...register('name', { required: true })} autoFocus />
+        </div>
+        <div>
+          <Label>Code</Label>
+          <Input {...register('code')} placeholder="Optional" />
+        </div>
+        <Controller
+          control={control}
+          name="isActive"
+          render={({ field }) => (
+            <Switch
+              checked={field.value}
+              onChange={field.onChange}
+              label="Active"
+              description="Inactive locations are hidden from pickers and creation flows."
+            />
+          )}
+        />
+        <ModalFooter>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={m.isPending}>Save</Button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  );
+}
+
 /* ── Client picker ─────────────────────────────────────────────── */
 // Matches the TopBar ScopePicker: pill trigger with a small uppercase
 // label chip on the left, name on the right, chevron, and a simple
@@ -2643,10 +3053,18 @@ function ClientPicker({
   value,
   options,
   onChange,
+  canEdit,
+  onEdit,
+  onDeactivate,
+  onDelete,
 }: {
   value: number | null;
   options: Client[];
   onChange: (id: number) => void;
+  canEdit?: boolean;
+  onEdit?: (c: Client) => void;
+  onDeactivate?: (c: Client) => void;
+  onDelete?: (c: Client) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -2696,23 +3114,37 @@ function ClientPicker({
           {options.map((c) => {
             const isSelected = c.id === value;
             return (
-              <button
+              <div
                 key={c.id}
-                type="button"
-                onClick={() => {
-                  onChange(c.id);
-                  setOpen(false);
-                }}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition text-left',
+                  'group flex items-center gap-1 pl-3 pr-1.5 rounded-lg transition',
                   isSelected
-                    ? 'bg-primary-soft text-primary-ink dark:text-primary font-semibold'
-                    : 'text-ink hover:bg-surface-sunken font-medium',
+                    ? 'bg-primary-soft text-primary-ink dark:text-primary'
+                    : 'text-ink hover:bg-surface-sunken',
                 )}
               >
-                <span className="flex-1 truncate">{c.name}</span>
-                {isSelected && <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(c.id);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    'flex-1 flex items-center gap-2 py-2 text-sm text-left min-w-0',
+                    isSelected ? 'font-semibold' : 'font-medium',
+                  )}
+                >
+                  <span className="flex-1 truncate">{c.name}</span>
+                  {isSelected && <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />}
+                </button>
+                {canEdit && (
+                  <RowActions
+                    onEdit={() => onEdit?.(c)}
+                    onDeactivate={() => onDeactivate?.(c)}
+                    onDelete={() => onDelete?.(c)}
+                  />
+                )}
+              </div>
             );
           })}
         </div>

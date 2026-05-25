@@ -101,6 +101,8 @@ export interface WorklistDetail extends Worklist {
   primarySpeciality: { id: number; name: string } | null;
   process: { id: number; name: string } | null;
   netChange: number;
+  /** Total documents uploaded across this worklist's charts. */
+  documentsCount: number;
   chartSummary: {
     total: number;
     allocated: number;

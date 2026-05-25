@@ -145,6 +145,13 @@ export class WorklistsService {
       .addSelect(`SUM(CASE WHEN c.milestone = 'READY_TO_CODE' THEN 1 ELSE 0 END)`, 'notStarted')
       .addSelect(`SUM(CASE WHEN c.milestone IN ('CODING_IN_PROGRESS','AUDIT_IN_PROGRESS') THEN 1 ELSE 0 END)`, 'inProgress')
       .addSelect(`SUM(CASE WHEN c.milestone = 'CLOSED' THEN 1 ELSE 0 END)`, 'closed')
+      // Total documents uploaded across this worklist's charts. Each chart keeps
+      // its files in custom_fields.uploadedDocs (a JSONB array); sum the lengths.
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN jsonb_typeof(c.custom_fields->'uploadedDocs') = 'array'
+                           THEN jsonb_array_length(c.custom_fields->'uploadedDocs') ELSE 0 END), 0)`,
+        'documentsCount',
+      )
       .where('c.worklist_id = :id', { id })
       .getRawOne();
     const rowCount = Number(counts.rowCount ?? 0);
@@ -198,6 +205,7 @@ export class WorklistsService {
       status: w.status,
       totalCharts: w.totalCharts,
       netChange: w.netChange,
+      documentsCount: Number(counts.documentsCount ?? 0),
       chartSummary: {
         total,
         allocated,

@@ -396,7 +396,7 @@ function EditUserModal({
   // Lookups for the role/client/location/speciality dropdowns.
   const clientsQuery = useQuery({
     queryKey: ['configurations', 'clients'],
-    queryFn: listClients,
+    queryFn: () => listClients(),
     enabled: open,
   });
   const selectedClientId = watch('clientId');
