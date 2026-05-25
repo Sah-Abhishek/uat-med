@@ -52,12 +52,13 @@ const AI_ROW_TINT: Record<AiStatus, string> = {
 };
 import { useAuth } from '@/auth/store';
 import { can } from '@/permissions';
+import { SortableHeader } from '@/components/ui/SortableHeader';
+import { useTableSort, sortRows } from '@/hooks/useTableSort';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
   Filter as FilterIcon,
   Columns3,
   Sparkles,
-  ChevronsUpDown,
   UserPlus,
   Clock,
   ChevronRight,
@@ -82,6 +83,9 @@ const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
 interface ColumnDef {
   key: string;
   label: string;
+  /** Backend sort whitelist key (see CHART_SORT_COLUMNS in charts.service).
+   * Omit for computed/derived columns that can't be sorted server-side. */
+  sortKey?: string;
   defaultVisible: boolean;
   /** Always-on columns (Worklist #, S. No., Chart #) — the popover renders
    * their checkboxes as disabled so users can't accidentally hide identifying
@@ -105,6 +109,7 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
   return [
     {
       key: 'worklistNo',
+      sortKey: 'worklistNumber',
       label: 'Worklist #',
       defaultVisible: true,
       locked: true,
@@ -122,6 +127,7 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
     },
     {
       key: 'serialNo',
+      sortKey: 'serialNo',
       label: 'S. No.',
       defaultVisible: true,
       locked: true,
@@ -129,24 +135,28 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
     },
     {
       key: 'client',
+      sortKey: 'client',
       label: 'Client',
       defaultVisible: true,
       render: (c) => dash(c.clientName),
     },
     {
       key: 'location',
+      sortKey: 'location',
       label: 'Location',
       defaultVisible: true,
       render: (c) => dash(c.locationName),
     },
     {
       key: 'specialty',
+      sortKey: 'specialty',
       label: 'Primary Speciality',
       defaultVisible: false,
       render: (c) => dash(c.specialityName),
     },
     {
       key: 'chartNo',
+      sortKey: 'chartNo',
       label: 'Chart #',
       defaultVisible: true,
       locked: true,
@@ -161,6 +171,7 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
     },
     {
       key: 'dateOfService',
+      sortKey: 'dateOfService',
       label: 'Date of Service',
       defaultVisible: true,
       render: (c) => <span className="text-ink-muted">{formatDate(c.dateOfService)}</span>,
@@ -202,12 +213,14 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
     },
     {
       key: 'chartStatus',
+      sortKey: 'chartStatus',
       label: 'Chart Status',
       defaultVisible: true,
       render: (c) => <ChartStatusChip status={c.chartStatus} />,
     },
     {
       key: 'milestone',
+      sortKey: 'milestone',
       label: 'Milestone',
       defaultVisible: true,
       render: (c) => <MilestoneChip milestone={c.milestone} />,
@@ -220,12 +233,14 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
     },
     {
       key: 'process',
+      sortKey: 'process',
       label: 'Process',
       defaultVisible: false,
       render: (c) => dash(c.processName),
     },
     {
       key: 'receivedDate',
+      sortKey: 'receivedDate',
       label: 'Received Date',
       defaultVisible: true,
       render: (c) => (
@@ -267,6 +282,7 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
     },
     {
       key: 'priority',
+      sortKey: 'priority',
       label: 'Priority',
       defaultVisible: false,
       render: (c) => <PriorityChip priority={c.priority} />,
@@ -332,6 +348,8 @@ export function ChartsPage() {
   const [pageSize, setPageSize] = useState(20);
   const [tab, setTab] = useState<'ALL' | Priority>('ALL');
   const [filters, setFilters] = useState<ChartListParams>({});
+  // Client-side sort: reorders the rows on the page currently in view.
+  const { sort, toggle: onSort } = useTableSort({ sortBy: undefined, sortDir: 'asc' });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -414,6 +432,24 @@ export function ChartsPage() {
   });
 
   const totalPages = list.data ? Math.max(1, Math.ceil(list.data.total / pageSize)) : 1;
+
+  // Sort the current page's rows in the browser by the clicked column. Keyed by
+  // each column's `sortKey`; columns without one have no sortable header.
+  const sortedItems = sortRows(list.data?.items ?? [], sort, {
+    worklistNumber: (c) => c.worklistNumber,
+    serialNo: (c) => c.serialNo,
+    client: (c) => c.clientName,
+    location: (c) => c.locationName,
+    specialty: (c) => c.specialityName,
+    chartNo: (c) => c.chartNo,
+    dateOfService: (c) => c.dateOfService,
+    chartStatus: (c) => c.chartStatus,
+    milestone: (c) => c.milestone,
+    process: (c) => c.processName,
+    receivedDate: (c) => c.receivedDate ?? c.createdAt,
+    priority: (c) => c.priority,
+  });
+
   const allOnPageIds = list.data?.items.map((c) => c.id) ?? [];
   const allSelected = allOnPageIds.length > 0 && allOnPageIds.every((id) => selected.has(id));
   const someSelected = selected.size > 0;
@@ -547,7 +583,14 @@ export function ChartsPage() {
                   />
                 </th>
                 {activeColumns.map((col) => (
-                  <HeaderCell key={col.key}>{col.label}</HeaderCell>
+                  <SortableHeader
+                    key={col.key}
+                    column={col.sortKey}
+                    sort={sort}
+                    onSort={col.sortKey ? onSort : undefined}
+                  >
+                    {col.label}
+                  </SortableHeader>
                 ))}
               </tr>
             </thead>
@@ -565,14 +608,14 @@ export function ChartsPage() {
                     ))}
                   </tr>
                 ))
-              ) : list.data?.items.length === 0 ? (
+              ) : sortedItems.length === 0 ? (
                 <tr>
                   <td colSpan={activeColumns.length + 1} className="py-20 text-center text-sm text-ink-muted">
                     No charts match the current filters.
                   </td>
                 </tr>
               ) : (
-                list.data?.items.map((c) => {
+                sortedItems.map((c) => {
                   const aiStatus = deriveAiStatus(c.customFields);
                   return (
                     <tr
@@ -656,17 +699,6 @@ function SummaryTile({ label, value, tone }: { label: string; value: number; ton
       <p className="text-2xl font-bold leading-none tracking-tightish">{formatNumber(value)}</p>
       <p className="text-[11px] font-semibold mt-1.5">{label}</p>
     </div>
-  );
-}
-
-function HeaderCell({ children, sortable }: { children: React.ReactNode; sortable?: boolean }) {
-  return (
-    <th className="table-head whitespace-nowrap">
-      <span className="inline-flex items-center gap-1">
-        {children}
-        {sortable && <ChevronsUpDown className="w-3 h-3 opacity-50" />}
-      </span>
-    </th>
   );
 }
 

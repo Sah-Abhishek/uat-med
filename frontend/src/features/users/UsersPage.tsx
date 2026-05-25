@@ -33,6 +33,8 @@ import {
   ConfirmModal,
 } from '@/components/ui/Primitives';
 import { IllustrationStatCard } from '@/components/ui/StatCards';
+import { SortableHeader } from '@/components/ui/SortableHeader';
+import { useTableSort, sortRows } from '@/hooks/useTableSort';
 import { useAuth } from '@/auth/store';
 import { can } from '@/permissions';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
@@ -73,6 +75,8 @@ export function UsersPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<UserFilters>({});
+  // Client-side sort: reorders the rows on the page currently in view.
+  const { sort, toggle: onSort } = useTableSort({ sortBy: undefined, sortDir: 'asc' });
   const [filterOpen, setFilterOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null);
@@ -140,6 +144,15 @@ export function UsersPage() {
   });
 
   const totalPages = list.data ? Math.max(1, Math.ceil(list.data.total / pageSize)) : 1;
+
+  // Sort the current page's rows in the browser by the clicked column.
+  const sortedItems = sortRows(list.data?.items ?? [], sort, {
+    id: (u) => u.employeeId ?? u.id,
+    name: (u) => u.fullName,
+    role: (u) => u.role,
+    designation: (u) => u.designation,
+    status: (u) => u.status,
+  });
 
   // Placeholder until backend exposes a bulk "today's attendance" endpoint
   const attending = 0;
@@ -256,14 +269,14 @@ export function UsersPage() {
               <table className="w-full min-w-[1100px]">
                 <thead>
                   <tr>
-                    <th className="table-head">ID</th>
-                    <th className="table-head">Name</th>
-                    <th className="table-head">Role</th>
-                    <th className="table-head">Primary Speciality</th>
-                    <th className="table-head">Client</th>
-                    <th className="table-head">Designation</th>
-                    <th className="table-head">Status</th>
-                    {canDeactivate && <th className="table-head text-right">Actions</th>}
+                    <SortableHeader column="id" sort={sort} onSort={onSort}>ID</SortableHeader>
+                    <SortableHeader column="name" sort={sort} onSort={onSort}>Name</SortableHeader>
+                    <SortableHeader column="role" sort={sort} onSort={onSort}>Role</SortableHeader>
+                    <SortableHeader>Primary Speciality</SortableHeader>
+                    <SortableHeader>Client</SortableHeader>
+                    <SortableHeader column="designation" sort={sort} onSort={onSort}>Designation</SortableHeader>
+                    <SortableHeader column="status" sort={sort} onSort={onSort}>Status</SortableHeader>
+                    {canDeactivate && <SortableHeader align="right">Actions</SortableHeader>}
                   </tr>
                 </thead>
                 <tbody>
@@ -273,14 +286,14 @@ export function UsersPage() {
                         <Loader2 className="w-5 h-5 animate-spin inline text-ink-muted" />
                       </td>
                     </tr>
-                  ) : list.data?.items.length === 0 ? (
+                  ) : sortedItems.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-20 text-center text-sm text-ink-muted">
                         No {tab.toLowerCase()} users.
                       </td>
                     </tr>
                   ) : (
-                    list.data?.items.map((u) => (
+                    sortedItems.map((u) => (
                       <UserRow
                         key={u.id}
                         u={u}
