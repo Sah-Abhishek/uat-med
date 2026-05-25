@@ -176,7 +176,8 @@ export class QaService {
         COUNT(DISTINCT d.chart_id)::int                                    AS distinct_charts,
         SUM(CASE WHEN d.decision = 'ACCEPTED' THEN 1 ELSE 0 END)::int      AS accepted,
         SUM(CASE WHEN d.decision = 'REJECTED' THEN 1 ELSE 0 END)::int      AS rejected,
-        SUM(CASE WHEN d.decision = 'EDITED'   THEN 1 ELSE 0 END)::int      AS edited
+        SUM(CASE WHEN d.decision = 'EDITED'   THEN 1 ELSE 0 END)::int      AS edited,
+        SUM(CASE WHEN d.decision = 'ADDED'    THEN 1 ELSE 0 END)::int      AS added
       FROM chart_code_decisions d
       JOIN charts    c ON c.id = d.chart_id
       JOIN worklists w ON w.id = c.worklist_id
@@ -189,6 +190,7 @@ export class QaService {
         SUM(CASE WHEN d.decision = 'ACCEPTED' THEN 1 ELSE 0 END)::int AS accepted,
         SUM(CASE WHEN d.decision = 'REJECTED' THEN 1 ELSE 0 END)::int AS rejected,
         SUM(CASE WHEN d.decision = 'EDITED'   THEN 1 ELSE 0 END)::int AS edited,
+        SUM(CASE WHEN d.decision = 'ADDED'    THEN 1 ELSE 0 END)::int AS added,
         COUNT(*)::int AS total
       FROM chart_code_decisions d
       JOIN charts    c ON c.id = d.chart_id
@@ -222,6 +224,7 @@ export class QaService {
         SUM(CASE WHEN d.decision = 'ACCEPTED' THEN 1 ELSE 0 END)::int AS accepted,
         SUM(CASE WHEN d.decision = 'REJECTED' THEN 1 ELSE 0 END)::int AS rejected,
         SUM(CASE WHEN d.decision = 'EDITED'   THEN 1 ELSE 0 END)::int AS edited,
+        SUM(CASE WHEN d.decision = 'ADDED'    THEN 1 ELSE 0 END)::int AS added,
         COUNT(*)::int AS total
       FROM chart_code_decisions d
       JOIN charts    c ON c.id = d.chart_id
@@ -283,6 +286,7 @@ export class QaService {
         acceptedCount: accepted,
         rejectedCount: Number(s.rejected ?? 0),
         editedCount: Number(s.edited ?? 0),
+        addedCount: Number(s.added ?? 0),
         medianTimePerChartMs: medianRow[0]?.median_ms ? Number(medianRow[0].median_ms) : 0,
       },
       perCodeType: perType.map((r: any) => ({
@@ -290,6 +294,7 @@ export class QaService {
         accepted: Number(r.accepted),
         rejected: Number(r.rejected),
         edited: Number(r.edited),
+        added: Number(r.added),
         total: Number(r.total),
       })),
       topRejectReasons: topReject.map((r: any) => ({
@@ -301,6 +306,7 @@ export class QaService {
         accepted: Number(r.accepted),
         rejected: Number(r.rejected),
         edited: Number(r.edited),
+        added: Number(r.added),
         total: Number(r.total),
       })),
       daily: daily.map((r: any) => ({

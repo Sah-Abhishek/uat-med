@@ -59,6 +59,8 @@ export interface QaAccuracyResponse {
     acceptedCount: number;
     rejectedCount: number;
     editedCount: number;
+    /** Codes the coder added that the AI didn't suggest (an omission/miss). */
+    addedCount: number;
     medianTimePerChartMs: number;
   };
   perCodeType: Array<{
@@ -66,6 +68,7 @@ export interface QaAccuracyResponse {
     accepted: number;
     rejected: number;
     edited: number;
+    added: number;
     total: number;
   }>;
   topRejectReasons: Array<{ reason: string; count: number }>;
@@ -74,6 +77,7 @@ export interface QaAccuracyResponse {
     accepted: number;
     rejected: number;
     edited: number;
+    added: number;
     total: number;
   }>;
   daily: Array<{ day: string; submissions: number; decisions: number }>;
