@@ -41,6 +41,7 @@ export class QaService {
         params.milestones = list;
       }
     }
+    if (f.facility)        { where.push(`${cAlias}.custom_fields->>'facility' = :facility`); params.facility = f.facility; }
     if (f.from)            { where.push(`${alias}.decided_at >= :fromTs`); params.fromTs = `${f.from} 00:00:00`; }
     if (f.to)              { where.push(`${alias}.decided_at <= :toTs`); params.toTs = `${f.to} 23:59:59`; }
     if (f.q?.trim()) {
@@ -324,6 +325,28 @@ export class QaService {
     return {
       items: rows.map((r: any) => ({ id: Number(r.id), name: r.full_name })),
     };
+  }
+
+  /**
+   * Distinct facility values actually present on charts — for the filter
+   * dropdown. Facility lives in chart.custom_fields.facility (a free string,
+   * not an FK), so we surface only values that exist, optionally scoped to a
+   * client/location so the dropdown matches the rest of the filters.
+   */
+  async facilities(clientId?: number, locationId?: number) {
+    const where: string[] = [`NULLIF(trim(c.custom_fields->>'facility'), '') IS NOT NULL`];
+    const params: unknown[] = [];
+    if (clientId) { params.push(clientId); where.push(`w.client_id = $${params.length}`); }
+    if (locationId) { params.push(locationId); where.push(`w.location_id = $${params.length}`); }
+    const rows = await this.ds.query(
+      `SELECT DISTINCT c.custom_fields->>'facility' AS facility
+       FROM charts c
+       JOIN worklists w ON w.id = c.worklist_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY 1 ASC`,
+      params,
+    );
+    return { items: rows.map((r: any) => r.facility as string).filter(Boolean) };
   }
 
   /* ── Param-binding helper ────────────────────────────────── */

@@ -14,6 +14,7 @@ import { UserProfilePage } from '@/features/users/UserProfilePage';
 import { ConfigurationsPage } from '@/features/configurations/ConfigurationsPage';
 import { ReportsPage } from '@/features/reports/ReportsPage';
 import { QaPage } from '@/features/qa/QaPage';
+import { AiAnalyticsPage } from '@/features/ai-analytics/AiAnalyticsPage';
 import { CoderRulesPage } from '@/features/coder-rules/CoderRulesPage';
 import { CodeDecisionsPage } from '@/features/admin/CodeDecisionsPage';
 import { ChartDecisionsDetailPage } from '@/features/admin/ChartDecisionsDetailPage';
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
           { path: 'configurations', element: <ConfigurationsPage /> },
           { path: 'reports', element: <ReportsPage /> },
           { path: 'qa', element: <QaPage /> },
+          { path: 'ai-analytics', element: <AiAnalyticsPage /> },
           { path: 'coder-rules', element: <CoderRulesPage /> },
           { path: 'admin/code-decisions', element: <CodeDecisionsPage /> },
           { path: 'admin/code-decisions/charts/:id', element: <ChartDecisionsDetailPage /> },

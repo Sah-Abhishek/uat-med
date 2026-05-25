@@ -12,6 +12,9 @@ export class QaFiltersDto {
   /** Comma-separated list of milestones, e.g. CODING_DONE,AUDIT_DONE. */
   @ApiPropertyOptional() @IsOptional() @IsString() milestone?: string;
 
+  /** Facility name as stored on chart.custom_fields.facility. */
+  @ApiPropertyOptional() @IsOptional() @IsString() facility?: string;
+
   /** ISO date (YYYY-MM-DD), inclusive. */
   @ApiPropertyOptional() @IsOptional() @IsString() from?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() to?: string;

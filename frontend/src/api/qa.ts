@@ -10,6 +10,8 @@ export interface QaFilters {
   auditorId?: number;
   /** Comma-separated list of milestone enum values, e.g. "CODING_DONE,AUDIT_DONE". */
   milestone?: string;
+  /** Facility name (matches chart.customFields.facility). */
+  facility?: string;
   from?: string; // YYYY-MM-DD
   to?: string;   // YYYY-MM-DD
   q?: string;
@@ -82,3 +84,7 @@ export const getQaAccuracy = (params: QaFilters) =>
 
 export const listQaCoders = () =>
   get<{ items: Array<{ id: number; name: string }> }>('/qa/coders');
+
+/** Distinct facility values present on charts, optionally scoped by client/location. */
+export const listQaFacilities = (params?: { clientId?: number; locationId?: number }) =>
+  get<{ items: string[] }>('/qa/facilities', params);
