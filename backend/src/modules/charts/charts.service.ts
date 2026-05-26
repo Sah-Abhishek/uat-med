@@ -28,6 +28,7 @@ import {
   UploadedDocument,
 } from './ai-predictor.service';
 import { DocumentStorageService } from './document-storage.service';
+import { DocumentConversionService } from './document-conversion.service';
 
 /** Allowed milestone transitions (see §21.2 of the spec). */
 const TRANSITIONS: Record<ChartMilestone, ChartMilestone[]> = {
@@ -59,6 +60,7 @@ export class ChartsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly aiPredictor: AiPredictorService,
     private readonly storage: DocumentStorageService,
+    private readonly conversion: DocumentConversionService,
     private readonly aiGateway: AiGatewayClient,
     private readonly config: ConfigService,
   ) {}
@@ -484,13 +486,29 @@ async update(id: number, dto: UpdateChartDto) {
       (f, i) => (explicit[i] as ReportType) ?? this.aiPredictor.mapReportType(body.documentType, f.originalname),
     );
 
-    // 1) Persist each upload to S3/MinIO so the chart-detail page can iframe
-    //    it later. We do this BEFORE the gateway call so that even if the AI
-    //    pipeline fails, the documents are still saved against the chart.
-    const stored = await this.storage.uploadMany(files, c.id);
+    // 0) Convert any Word documents (.doc/.docx) to PDF up front. The ICD
+    //    predictor only ingests PDF/image/text, and the inline chart viewer
+    //    can't render native Word either, so we normalize once here and use
+    //    the result for BOTH storage and the gateway. Non-Word files pass
+    //    through untouched; order is preserved so it stays parallel to
+    //    reportTypes.
+    const pdfFiles = await this.conversion.toPdfMany(
+      files.map((f) => ({
+        buffer: f.buffer,
+        originalname: f.originalname,
+        mimetype: f.mimetype,
+        size: f.size,
+      })),
+    );
+
+    // 1) Persist each (converted) upload to S3/MinIO so the chart-detail page
+    //    can iframe it later. We do this BEFORE the gateway call so that even
+    //    if the AI pipeline fails, the documents are still saved against the
+    //    chart.
+    const stored = await this.storage.uploadMany(pdfFiles, c.id);
 
     // 2) Forward the same buffers (in the same order) to the ICD predictor.
-    const inbound: InboundFile[] = files.map((f, i) => ({
+    const inbound: InboundFile[] = pdfFiles.map((f, i) => ({
       buffer: f.buffer,
       filename: f.originalname,
       mimeType: f.mimetype,

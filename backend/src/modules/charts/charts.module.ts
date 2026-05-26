@@ -8,6 +8,7 @@ import { ChartsService } from './charts.service';
 import { AiPredictorService } from './ai-predictor.service';
 import { AiPipelineWatcher } from './ai-pipeline-watcher.service';
 import { DocumentStorageService } from './document-storage.service';
+import { DocumentConversionService } from './document-conversion.service';
 import { Chart } from '../../entities/chart.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
 import { ChartFeedback } from '../../entities/chart-feedback.entity';
@@ -24,7 +25,7 @@ import { User } from '../../entities/user.entity';
     MulterModule.register({ storage: memoryStorage() }),
   ],
   controllers: [ChartsController],
-  providers: [ChartsService, AiPredictorService, AiPipelineWatcher, DocumentStorageService],
-  exports: [DocumentStorageService, AiPredictorService],
+  providers: [ChartsService, AiPredictorService, AiPipelineWatcher, DocumentStorageService, DocumentConversionService],
+  exports: [DocumentStorageService, AiPredictorService, DocumentConversionService],
 })
 export class ChartsModule {}
