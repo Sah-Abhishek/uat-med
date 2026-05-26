@@ -111,7 +111,12 @@ export interface WorklistDetail extends Worklist {
     inProgress: number;
     closed: number;
   };
-  aiStatusCounts: {
+  /**
+   * AI pipeline counts. Optional to tolerate deployment version skew: an older
+   * backend build (frontend ahead of backend) may omit this field. Consumers
+   * must guard against it being undefined.
+   */
+  aiStatusCounts?: {
     queued: number;
     processing: number;
     done: number;

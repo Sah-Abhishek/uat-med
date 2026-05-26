@@ -339,18 +339,21 @@ function LegendRow({ color, label, value }: { color: string; label: string; valu
 
 /* ── AI pipeline progress card ──────────────────────────── */
 function AiPipelineCard({
-  ai,
+  ai: aiProp,
   total,
   documentsCount,
   worklistId,
   canRun,
 }: {
-  ai: NonNullable<Awaited<ReturnType<typeof getWorklist>>>['aiStatusCounts'];
+  ai: Awaited<ReturnType<typeof getWorklist>>['aiStatusCounts'];
   total: number;
   documentsCount: number;
   worklistId: string;
   canRun: boolean;
 }) {
+  // Fall back to zeros so a stale/partial API response (e.g. a backend build
+  // that predates aiStatusCounts) degrades gracefully instead of white-screening.
+  const ai = aiProp ?? { queued: 0, processing: 0, done: 0, errored: 0, none: 0 };
   const qc = useQueryClient();
   const [runResult, setRunResult] = useState<RunAiResult | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
