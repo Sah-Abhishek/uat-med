@@ -14,6 +14,7 @@ import { Chart } from '../../entities/chart.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { ChartMilestone, ChartStatus, Priority } from '../../common/enums';
 import { DocumentStorageService } from '../charts/document-storage.service';
+import { DocumentConversionService } from '../charts/document-conversion.service';
 import { AiPredictorService, type ReportType, type InboundFile } from '../charts/ai-predictor.service';
 import { CreateWorklistDto } from './dto/create-worklist.dto';
 
@@ -116,6 +117,7 @@ export class WorklistBulkService {
     @InjectRepository(Worklist) private readonly worklists: Repository<Worklist>,
     private readonly ds: DataSource,
     private readonly storage: DocumentStorageService,
+    private readonly conversion: DocumentConversionService,
     private readonly aiPredictor: AiPredictorService,
   ) {}
 
@@ -995,12 +997,21 @@ export class WorklistBulkService {
     chart: Chart,
     file: { filename: string; mimetype: string; buffer: Buffer; size: number },
   ): Promise<string> {
+    // Convert Word documents to PDF before storing, so the copy the AI re-send
+    // later downloads from S3 is already a PDF the gateway can ingest. Non-Word
+    // files are returned unchanged.
+    const doc = await this.conversion.toPdf({
+      buffer: file.buffer,
+      originalname: file.filename,
+      mimetype: file.mimetype,
+      size: file.size,
+    });
     const stored = await this.storage.upload(
       {
-        buffer: file.buffer,
-        originalname: file.filename,
-        mimetype: file.mimetype,
-        size: file.size,
+        buffer: doc.buffer,
+        originalname: doc.originalname,
+        mimetype: doc.mimetype,
+        size: doc.size,
       },
       chart.id,
     );
