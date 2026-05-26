@@ -41,6 +41,20 @@ export class DashboardController {
   @ApiOperation({ summary: 'Productivity — daily volume, avg coding minutes, rework count.' })
   productivity(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.productivity(q); }
 
+  @Get('throughput')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Charts allocated vs worked on — today counts + per-day series. Filter by client/location/speciality/facility.' })
+  throughput(@Query() q: { clientId?: number; locationId?: number; specialityId?: number; facility?: string; days?: number }) {
+    return this.svc.throughput(q);
+  }
+
+  @Get('throughput/charts')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Drill-down list of the charts behind the throughput metrics (kind=allocated|worked). Paginated.' })
+  throughputCharts(@Query() q: { kind?: 'allocated' | 'worked'; clientId?: number; locationId?: number; specialityId?: number; facility?: string; days?: number; page?: number; pageSize?: number }) {
+    return this.svc.throughputCharts(q);
+  }
+
   @Get('self')
   @Roles(Role.CODER, Role.AUDITOR)
   @ApiOperation({ summary: 'Self view for coders / auditors.' })

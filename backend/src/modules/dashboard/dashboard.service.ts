@@ -341,6 +341,168 @@ export class DashboardService {
     };
   }
 
+  /* ── Throughput: charts allocated vs worked on, today + per day ──
+   * "Allocated"  = distinct charts that got a chart_allocations row that day.
+   * "Worked on"  = distinct charts with ≥1 chart_code_decision that day.
+   * Both densified across the window via generate_series so the line charts
+   * have no gaps. Optional client/location/speciality/facility scoping (facility
+   * lives on chart.custom_fields, like the QA filters). */
+  async throughput(q: {
+    clientId?: number;
+    locationId?: number;
+    specialityId?: number;
+    facility?: string;
+    days?: number;
+  }) {
+    const days = Math.min(180, Math.max(1, Number(q.days) || 30));
+    const since = startOfDayMinusDays(days - 1);
+
+    // Shared scope clause on charts(c)/worklists(w); $1 is always `since`.
+    const params: unknown[] = [since];
+    const scope: string[] = [];
+    if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
+    if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
+    if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
+    if (q.facility) { params.push(q.facility); scope.push(`c.custom_fields->>'facility' = $${params.length}`); }
+    const scopeSql = scope.length ? ` AND ${scope.join(' AND ')}` : '';
+
+    const seriesSql = (inner: string) => `
+      WITH days AS (
+        SELECT generate_series($1::date, CURRENT_DATE, INTERVAL '1 day')::date AS day
+      )
+      SELECT to_char(days.day, 'YYYY-MM-DD') AS date, COALESCE(agg.count, 0)::int AS count
+      FROM days
+      LEFT JOIN ( ${inner} ) agg ON agg.day = days.day
+      ORDER BY days.day ASC
+    `;
+
+    const allocatedInner = `
+      SELECT date_trunc('day', a.allocated_at)::date AS day, COUNT(DISTINCT a.chart_id)::int AS count
+      FROM chart_allocations a
+      JOIN charts c     ON c.id = a.chart_id
+      JOIN worklists w  ON w.id = c.worklist_id
+      WHERE a.allocated_at >= $1${scopeSql}
+      GROUP BY 1
+    `;
+    const workedInner = `
+      SELECT date_trunc('day', d.decided_at)::date AS day, COUNT(DISTINCT d.chart_id)::int AS count
+      FROM chart_code_decisions d
+      JOIN charts c     ON c.id = d.chart_id
+      JOIN worklists w  ON w.id = c.worklist_id
+      WHERE d.decided_at >= $1${scopeSql}
+      GROUP BY 1
+    `;
+
+    const em = this.charts.manager;
+    const [allocatedPerDay, workedPerDay] = await Promise.all([
+      em.query(seriesSql(allocatedInner), params) as Promise<Array<{ date: string; count: number }>>,
+      em.query(seriesSql(workedInner), params) as Promise<Array<{ date: string; count: number }>>,
+    ]);
+
+    // The series ends on CURRENT_DATE, so the last bucket is "today".
+    const lastCount = (rows: Array<{ count: number }>) => (rows.length ? Number(rows[rows.length - 1].count) : 0);
+
+    return {
+      days,
+      allocatedToday: lastCount(allocatedPerDay),
+      workedToday: lastCount(workedPerDay),
+      allocatedPerDay: allocatedPerDay.map((r) => ({ date: r.date, count: Number(r.count) })),
+      workedPerDay: workedPerDay.map((r) => ({ date: r.date, count: Number(r.count) })),
+    };
+  }
+
+  /** Drill-down: the actual chart records behind the throughput metrics.
+   * `kind='allocated'` → distinct charts allocated in the window (sorted by most
+   * recent allocation); `kind='worked'` → distinct charts with a code decision
+   * in the window (sorted by most recent decision, with a per-chart decision
+   * count). Paginated; same client/location/speciality/facility scoping. */
+  async throughputCharts(q: {
+    kind?: 'allocated' | 'worked';
+    clientId?: number;
+    locationId?: number;
+    specialityId?: number;
+    facility?: string;
+    days?: number;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const kind = q.kind === 'worked' ? 'worked' : 'allocated';
+    const days = Math.min(180, Math.max(1, Number(q.days) || 30));
+    const since = startOfDayMinusDays(days - 1);
+    const page = Math.max(1, Number(q.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(q.pageSize) || 20));
+    const offset = (page - 1) * pageSize;
+
+    const params: unknown[] = [since];
+    const scope: string[] = [];
+    if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
+    if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
+    if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
+    if (q.facility) { params.push(q.facility); scope.push(`c.custom_fields->>'facility' = $${params.length}`); }
+    const scopeSql = scope.length ? ` AND ${scope.join(' AND ')}` : '';
+
+    const src = kind === 'allocated'
+      ? { table: 'chart_allocations a', dateCol: 'a.allocated_at', idCol: 'a.chart_id' }
+      : { table: 'chart_code_decisions d', dateCol: 'd.decided_at', idCol: 'd.chart_id' };
+
+    const em = this.charts.manager;
+    const countRows: Array<{ total: number }> = await em.query(
+      `SELECT COUNT(DISTINCT ${src.idCol})::int AS total
+       FROM ${src.table}
+       JOIN charts c ON c.id = ${src.idCol}
+       JOIN worklists w ON w.id = c.worklist_id
+       WHERE ${src.dateCol} >= $1${scopeSql}`,
+      params,
+    );
+    const total = Number(countRows[0]?.total ?? 0);
+
+    const dateSelect = kind === 'allocated'
+      ? `MAX(${src.dateCol}) AS allocated_at, NULL::timestamptz AS last_worked_at, 0 AS decisions`
+      : `NULL::timestamptz AS allocated_at, MAX(${src.dateCol}) AS last_worked_at, COUNT(*)::int AS decisions`;
+
+    const rows: any[] = await em.query(
+      `SELECT
+         c.id AS chart_id, c.chart_no, w.worklist_number,
+         cl.name AS client_name, loc.name AS location_name, ps.name AS speciality_name,
+         c.milestone,
+         COALESCE(coder.full_name, auditor.full_name) AS assignee_name,
+         ${dateSelect}
+       FROM ${src.table}
+       JOIN charts c ON c.id = ${src.idCol}
+       JOIN worklists w ON w.id = c.worklist_id
+       LEFT JOIN clients              cl  ON cl.id = w.client_id
+       LEFT JOIN locations            loc ON loc.id = w.location_id
+       LEFT JOIN primary_specialities ps  ON ps.id = w.primary_speciality_id
+       LEFT JOIN users coder   ON coder.id   = c.allocated_coder_id
+       LEFT JOIN users auditor ON auditor.id = c.allocated_auditor_id
+       WHERE ${src.dateCol} >= $1${scopeSql}
+       GROUP BY c.id, c.chart_no, w.worklist_number, cl.name, loc.name, ps.name, c.milestone, coder.full_name, auditor.full_name
+       ORDER BY MAX(${src.dateCol}) DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, offset],
+    );
+
+    return {
+      kind,
+      total,
+      page,
+      pageSize,
+      items: rows.map((r) => ({
+        chartId: Number(r.chart_id),
+        chartNo: r.chart_no,
+        worklistNumber: r.worklist_number,
+        clientName: r.client_name,
+        locationName: r.location_name,
+        specialityName: r.speciality_name,
+        milestone: r.milestone,
+        assigneeName: r.assignee_name,
+        allocatedAt: r.allocated_at,
+        lastWorkedAt: r.last_worked_at,
+        decisions: Number(r.decisions ?? 0),
+      })),
+    };
+  }
+
   /* ── Internals ────────────────────────────────────────── */
 
   private scopeCharts<T>(qb: SelectQueryBuilder<T>, q: FilterQuery): SelectQueryBuilder<T> {
