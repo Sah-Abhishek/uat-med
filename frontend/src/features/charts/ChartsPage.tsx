@@ -719,7 +719,23 @@ function FilterModal({
   return (
     <Modal open={open} onClose={onClose} title="Filter Charts" size="xl">
       <form
-        onSubmit={handleSubmit((d) => { onApply(d); onClose(); })}
+        onSubmit={handleSubmit((d) => {
+          // Drop blank selects / empty-or-NaN numbers before applying. An
+          // untouched select submits value="" and an empty number input
+          // submits NaN; the backend's @IsEnum / @IsInt reject both, so we
+          // treat them as "no filter on this field" rather than send them.
+          const cleaned = Object.fromEntries(
+            Object.entries(d).filter(
+              ([, v]) =>
+                v !== '' &&
+                v !== undefined &&
+                v !== null &&
+                !(typeof v === 'number' && Number.isNaN(v)),
+            ),
+          ) as ChartListParams;
+          onApply(cleaned);
+          onClose();
+        })}
         className="space-y-4"
       >
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -768,6 +784,16 @@ function FilterModal({
               <option value="AUDIT_IN_PROGRESS">Auditing</option>
               <option value="AUDIT_DONE">Audit Done</option>
               <option value="CLOSED">Closed</option>
+            </Select>
+          </div>
+          <div>
+            <Label>AI Status</Label>
+            <Select {...register('aiStatus')}>
+              <option value="">Any</option>
+              <option value="QUEUED">Queued</option>
+              <option value="PROCESSING">Processing</option>
+              <option value="DONE">Done</option>
+              <option value="ERRORED">Errored</option>
             </Select>
           </div>
           <div>

@@ -4,6 +4,20 @@ import { Type } from 'class-transformer';
 import { PageParamsDto } from '../../../common/dto/page-params.dto';
 import { ChartMilestone, ChartStatus, Priority } from '../../../common/enums';
 
+/**
+ * AI-pipeline status, derived from `custom_fields` rather than a column.
+ * Mirrors the frontend `deriveAiStatus` + the summary() tile counts:
+ * pending takes precedence (QUEUED/PROCESSING), then a prior error (ERRORED),
+ * then a stored prediction (DONE). 'NONE' isn't filterable — there's nothing
+ * useful to narrow to — so it's intentionally omitted.
+ */
+export enum AiStatusFilter {
+  QUEUED = 'QUEUED',
+  PROCESSING = 'PROCESSING',
+  DONE = 'DONE',
+  ERRORED = 'ERRORED',
+}
+
 export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional({ enum: Priority }) @IsOptional() @IsEnum(Priority) priority?: Priority;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() worklistId?: number;
@@ -14,6 +28,7 @@ export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional() @IsOptional() @IsString() chartNo?: string;
   @ApiPropertyOptional({ enum: ChartStatus }) @IsOptional() @IsEnum(ChartStatus) chartStatus?: ChartStatus;
   @ApiPropertyOptional({ enum: ChartMilestone }) @IsOptional() @IsEnum(ChartMilestone) milestone?: ChartMilestone;
+  @ApiPropertyOptional({ enum: AiStatusFilter }) @IsOptional() @IsEnum(AiStatusFilter) aiStatus?: AiStatusFilter;
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateTo?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateOfServiceFrom?: string;

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { Chart } from '../../entities/chart.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
 import { ChartFeedback } from '../../entities/chart-feedback.entity';
@@ -15,7 +15,7 @@ import { AiGatewayClient, type ReviewActionPayload } from '../ai-gateway/ai-gate
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
-import { QueryChartsDto } from './dto/query-charts.dto';
+import { AiStatusFilter, QueryChartsDto } from './dto/query-charts.dto';
 import { UpdateChartDto } from './dto/update-chart.dto';
 import { BulkModifyDto } from './dto/bulk-modify.dto';
 import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
@@ -86,6 +86,9 @@ export class ChartsService {
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
     if (user.role === Role.AUDITOR) qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
 
+    // Hide charts orphaned by a soft-deleted worklist (see helper).
+    this.excludeOrphanedCharts(qb);
+
     if (q.priority) qb.andWhere('c.priority = :p', { p: q.priority });
     if (q.worklistId) qb.andWhere('c.worklist_id = :w', { w: q.worklistId });
     if (q.serialFrom) qb.andWhere('c.serial_no >= :sf', { sf: q.serialFrom });
@@ -95,6 +98,9 @@ export class ChartsService {
     if (q.milestone) qb.andWhere('c.milestone = :m', { m: q.milestone });
     if (q.allocatedUserId) qb.andWhere('(c.allocated_coder_id = :au OR c.allocated_auditor_id = :au)', { au: q.allocatedUserId });
     if (q.primarySpecialityId) qb.andWhere('worklist.primary_speciality_id = :ps', { ps: q.primarySpecialityId });
+    // Narrow to a single AI-pipeline state (e.g. ERRORED) using the same
+    // custom_fields predicates that drive the AI summary tiles.
+    if (q.aiStatus) this.applyAiStatusFilter(qb, q.aiStatus);
     if (q.receivedDateFrom) qb.andWhere('worklist.received_date >= :rdf', { rdf: q.receivedDateFrom });
     if (q.receivedDateTo) qb.andWhere('worklist.received_date <= :rdt', { rdt: q.receivedDateTo });
 
@@ -177,6 +183,9 @@ export class ChartsService {
     const qb = this.charts.createQueryBuilder('c');
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
     if (user.role === Role.AUDITOR) qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
+    // Keep the tiles / tab counts in step with list(): exclude orphaned charts.
+    // Applied to the base qb before any clone so every count below inherits it.
+    this.excludeOrphanedCharts(qb);
 
     const priorityRows = await qb.clone()
       .select('c.priority', 'priority').addSelect('COUNT(*)', 'count').groupBy('c.priority').getRawMany();
@@ -211,23 +220,10 @@ export class ChartsService {
     // Charts can hold all three keys after retries, so the WHERE clauses are
     // ordered to avoid double-counting.
     const aiBase = qb.clone();
-    const queued = await aiBase.clone()
-      .andWhere(`c.custom_fields ? 'pendingPrediction'`)
-      .andWhere(`COALESCE(c.custom_fields->'pendingPrediction'->>'gatewayStatus','PENDING') = 'PENDING'`)
-      .getCount();
-    const processing = await aiBase.clone()
-      .andWhere(`c.custom_fields ? 'pendingPrediction'`)
-      .andWhere(`c.custom_fields->'pendingPrediction'->>'gatewayStatus' = 'STARTED'`)
-      .getCount();
-    const errored = await aiBase.clone()
-      .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)
-      .andWhere(`c.custom_fields ? 'aiPredictionError'`)
-      .getCount();
-    const done = await aiBase.clone()
-      .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)
-      .andWhere(`NOT (c.custom_fields ? 'aiPredictionError')`)
-      .andWhere(`c.custom_fields ? 'aiPrediction'`)
-      .getCount();
+    const queued = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.QUEUED).getCount();
+    const processing = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.PROCESSING).getCount();
+    const errored = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.ERRORED).getCount();
+    const done = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.DONE).getCount();
 
     // Today's completed / incomplete count — matches the dashboard self()
     // tiles for the same user, using `chart_status_changed_at` so that bulk
@@ -248,6 +244,56 @@ export class ChartsService {
       statusToday: { complete: completeToday, incomplete: incompleteToday },
       aiStatusCounts: { queued, processing, done, errored },
     };
+  }
+
+  /**
+   * Exclude charts orphaned by a soft-deleted worklist. Soft-removing a
+   * worklist only stamps its own `deleted_at` — it does NOT cascade to charts
+   * (the FK's ON DELETE CASCADE is DB-level and fires on physical deletes only),
+   * so those charts keep `deleted_at IS NULL` and would otherwise stay visible
+   * in the list/queue even though GET /worklists/:id 404s for them. Implemented
+   * as a correlated EXISTS rather than a join predicate so it's correct even on
+   * a LEFT join (where `worklist.deleted_at IS NULL` would wrongly keep orphans)
+   * and usable on the summary query, which doesn't join the worklist at all.
+   */
+  private excludeOrphanedCharts(qb: SelectQueryBuilder<Chart>): SelectQueryBuilder<Chart> {
+    return qb.andWhere(
+      'EXISTS (SELECT 1 FROM worklists w WHERE w.id = c.worklist_id AND w.deleted_at IS NULL)',
+    );
+  }
+
+  /**
+   * Narrow a chart query to a single AI-pipeline state. The states are derived
+   * from `custom_fields` and are mutually exclusive: pending takes precedence
+   * (QUEUED/PROCESSING) over a prior aiPredictionError (ERRORED), which takes
+   * precedence over a stored aiPrediction (DONE). Shared by `list()` (the AI
+   * Status filter) and `summary()` (the AI tile counts) so the two never drift.
+   */
+  private applyAiStatusFilter(
+    qb: SelectQueryBuilder<Chart>,
+    status: AiStatusFilter,
+  ): SelectQueryBuilder<Chart> {
+    switch (status) {
+      case AiStatusFilter.QUEUED:
+        return qb
+          .andWhere(`c.custom_fields ? 'pendingPrediction'`)
+          .andWhere(`COALESCE(c.custom_fields->'pendingPrediction'->>'gatewayStatus','PENDING') = 'PENDING'`);
+      case AiStatusFilter.PROCESSING:
+        return qb
+          .andWhere(`c.custom_fields ? 'pendingPrediction'`)
+          .andWhere(`c.custom_fields->'pendingPrediction'->>'gatewayStatus' = 'STARTED'`);
+      case AiStatusFilter.ERRORED:
+        return qb
+          .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)
+          .andWhere(`c.custom_fields ? 'aiPredictionError'`);
+      case AiStatusFilter.DONE:
+        return qb
+          .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)
+          .andWhere(`NOT (c.custom_fields ? 'aiPredictionError')`)
+          .andWhere(`c.custom_fields ? 'aiPrediction'`);
+      default:
+        return qb;
+    }
   }
 
   async detail(id: number) {

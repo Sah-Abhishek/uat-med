@@ -32,6 +32,9 @@ export interface ChartListParams {
   chartNo?: string;
   chartStatus?: ChartStatus;
   milestone?: ChartMilestone;
+  /** AI-pipeline state, derived server-side from custom_fields. Use 'ERRORED'
+   * to surface only charts whose AI prediction failed. */
+  aiStatus?: 'QUEUED' | 'PROCESSING' | 'DONE' | 'ERRORED';
   receivedDateFrom?: string;
   receivedDateTo?: string;
   dateOfServiceFrom?: string;
