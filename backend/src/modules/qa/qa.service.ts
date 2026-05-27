@@ -32,6 +32,7 @@ export class QaService {
     if (f.clientId)        { where.push(`${wAlias}.client_id = :clientId`); params.clientId = Number(f.clientId); }
     if (f.locationId)      { where.push(`${wAlias}.location_id = :locationId`); params.locationId = Number(f.locationId); }
     if (f.specialityId)    { where.push(`${wAlias}.primary_speciality_id = :specialityId`); params.specialityId = Number(f.specialityId); }
+    if (f.worklistId)      { where.push(`${wAlias}.id = :worklistId`); params.worklistId = Number(f.worklistId); }
     if (f.coderId)         { where.push(`${cAlias}.allocated_coder_id = :coderId`); params.coderId = Number(f.coderId); }
     if (f.auditorId)       { where.push(`${cAlias}.allocated_auditor_id = :auditorId`); params.auditorId = Number(f.auditorId); }
     if (f.milestone) {
@@ -97,6 +98,7 @@ export class QaService {
         w.client_id,
         w.location_id,
         w.primary_speciality_id,
+        w.worklist_number,
         cl.name AS client_name,
         loc.name AS location_name,
         ps.name AS speciality_name,
@@ -132,6 +134,7 @@ export class QaService {
       chartId: Number(r.chart_id),
       chartNo: r.chart_no,
       mrNumber: r.mr_number,
+      worklistNumber: r.worklist_number,
       milestone: r.milestone,
       clientId: Number(r.client_id),
       clientName: r.client_name,
@@ -330,6 +333,52 @@ export class QaService {
     `);
     return {
       items: rows.map((r: any) => ({ id: Number(r.id), name: r.full_name })),
+    };
+  }
+
+  /**
+   * Distinct worklists that have at least one submitted chart (≥1 decision
+   * row) — drives the "Worklist name" filter dropdown. Optionally scoped by
+   * client so the suggestions match the rest of the active filters.
+   */
+  async worklists(clientId?: number, search?: string, limit = 10) {
+    // Total available (scoped by client, ignoring search) — lets the UI decide
+    // whether to show an in-dropdown search box (only when > limit exist).
+    const countWhere: string[] = [];
+    const countParams: unknown[] = [];
+    if (clientId) { countParams.push(clientId); countWhere.push(`w.client_id = $${countParams.length}`); }
+    const countRows = await this.ds.query(
+      `SELECT COUNT(DISTINCT w.id)::int AS total
+       FROM chart_code_decisions d
+       JOIN charts    c ON c.id = d.chart_id
+       JOIN worklists w ON w.id = c.worklist_id
+       ${countWhere.length ? `WHERE ${countWhere.join(' AND ')}` : ''}`,
+      countParams,
+    );
+    const total = Number(countRows[0]?.total ?? 0);
+
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (clientId) { params.push(clientId); where.push(`w.client_id = $${params.length}`); }
+    if (search?.trim()) {
+      params.push(`%${search.trim()}%`);
+      where.push(`w.worklist_number ILIKE $${params.length}`);
+    }
+    params.push(Math.min(50, Math.max(1, Number(limit) || 10)));
+    const limitIdx = params.length;
+    const rows = await this.ds.query(
+      `SELECT DISTINCT w.id, w.worklist_number
+       FROM chart_code_decisions d
+       JOIN charts    c ON c.id = d.chart_id
+       JOIN worklists w ON w.id = c.worklist_id
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY w.worklist_number ASC
+       LIMIT $${limitIdx}`,
+      params,
+    );
+    return {
+      items: rows.map((r: any) => ({ id: Number(r.id), name: r.worklist_number as string })),
+      total,
     };
   }
 
