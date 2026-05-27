@@ -37,6 +37,16 @@ export class QaController {
     return this.svc.coders();
   }
 
+  @Get('worklists')
+  @ApiOperation({ summary: 'Distinct worklists with at least one submitted chart (optionally scoped by client, filtered by `search` on worklist number, capped by `limit`) — for the worklist filter dropdown.' })
+  worklists(@Query() q: { clientId?: string; search?: string; limit?: string }) {
+    return this.svc.worklists(
+      q.clientId ? Number(q.clientId) : undefined,
+      q.search,
+      q.limit ? Number(q.limit) : undefined,
+    );
+  }
+
   @Get('facilities')
   @ApiOperation({ summary: 'Distinct facility values present on charts (optionally scoped by client/location) — for the filter dropdown.' })
   facilities(@Query() q: { clientId?: string; locationId?: string }) {

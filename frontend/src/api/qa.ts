@@ -8,6 +8,7 @@ export interface QaFilters {
   specialityId?: number;
   coderId?: number;
   auditorId?: number;
+  worklistId?: number;
   /** Comma-separated list of milestone enum values, e.g. "CODING_DONE,AUDIT_DONE". */
   milestone?: string;
   /** Facility name (matches chart.customFields.facility). */
@@ -21,6 +22,7 @@ export interface QaSubmissionRow {
   chartId: number;
   chartNo: string | null;
   mrNumber: string | null;
+  worklistNumber: string | null;
   milestone: string;
   clientId: number;
   clientName: string | null;
@@ -88,6 +90,14 @@ export const getQaAccuracy = (params: QaFilters) =>
 
 export const listQaCoders = () =>
   get<{ items: Array<{ id: number; name: string }> }>('/qa/coders');
+
+/**
+ * Worklists (by worklist number) that have at least one submitted chart.
+ * Optionally scoped by client, filtered by `search` (matches worklist number),
+ * and capped by `limit` (default 10 server-side) — drives the searchable dropdown.
+ */
+export const listQaWorklists = (params?: { clientId?: number; search?: string; limit?: number }) =>
+  get<{ items: Array<{ id: number; name: string }>; total: number }>('/qa/worklists', params);
 
 /** Distinct facility values present on charts, optionally scoped by client/location. */
 export const listQaFacilities = (params?: { clientId?: number; locationId?: number }) =>

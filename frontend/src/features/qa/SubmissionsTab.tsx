@@ -36,6 +36,7 @@ export function SubmissionsTab({ filters, onResetFilters }: Props) {
   const items = sortRows(q.data?.items ?? [], sort, {
     lastSubmitted: (r) => r.lastSubmittedAt,
     chartNo: (r) => r.chartNo,
+    worklist: (r) => r.worklistNumber,
     client: (r) => r.clientName,
     specialty: (r) => r.specialityName,
     coder: (r) => r.coderName,
@@ -67,6 +68,7 @@ export function SubmissionsTab({ filters, onResetFilters }: Props) {
               <tr className="text-left text-[10px] uppercase tracking-wide text-ink-muted">
                 <QaTh column="lastSubmitted" sort={sort} onSort={onSort}>Last submitted</QaTh>
                 <QaTh column="chartNo" sort={sort} onSort={onSort}>Chart #</QaTh>
+                <QaTh column="worklist" sort={sort} onSort={onSort}>Worklist</QaTh>
                 <QaTh column="client" sort={sort} onSort={onSort}>Client / Location</QaTh>
                 <QaTh column="specialty" sort={sort} onSort={onSort}>Specialty</QaTh>
                 <QaTh column="coder" sort={sort} onSort={onSort}>Coder</QaTh>
@@ -85,7 +87,7 @@ export function SubmissionsTab({ filters, onResetFilters }: Props) {
                 ))
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-6 py-12">
+                  <td colSpan={12} className="px-6 py-12">
                     <div className="flex flex-col items-center gap-3 text-center">
                       <FileSearch className="w-8 h-8 text-ink-muted/60" />
                       <div>
@@ -192,6 +194,9 @@ function SubmissionRow({ row, onClick }: { row: QaSubmissionRow; onClick: () => 
         </div>
       </td>
       <td className="px-3 py-2.5 font-mono font-semibold text-ink">{row.chartNo ?? '—'}</td>
+      <td className="px-3 py-2.5 text-sm text-ink whitespace-nowrap">
+        {row.worklistNumber ?? <span className="text-ink-muted">—</span>}
+      </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
         <div className="text-sm text-ink">{row.clientName ?? '—'}</div>
         <div className="text-[11px] text-ink-muted">{row.locationName ?? '—'}</div>
@@ -286,7 +291,7 @@ function MilestonePill({ milestone }: { milestone: string }) {
 function SkeletonRow() {
   return (
     <tr className="border-t border-line">
-      {Array.from({ length: 11 }).map((_, i) => (
+      {Array.from({ length: 12 }).map((_, i) => (
         <td key={i} className="px-3 py-3">
           <div className="h-3 rounded bg-surface-sunken/60 animate-pulse" />
         </td>

@@ -411,6 +411,128 @@ export class DashboardService {
     };
   }
 
+  /* ── AI processing status: pipeline state across all charts ──
+   * Buckets every chart by its AI-pipeline state (mutually exclusive, same
+   * precedence as charts.summary / deriveAiStatus): an in-flight
+   * pendingPrediction wins over a prior aiPredictionError, which wins over a
+   * completed aiPrediction. Returns the three user-facing buckets:
+   *   processed   = done (aiPrediction present)
+   *   error       = aiPredictionError, no pending
+   *   inProgress  = pendingPrediction present (queued or processing)
+   * Optional client/location/speciality/facility scoping, like throughput. */
+  async aiProcessingStatus(q: {
+    clientId?: number;
+    locationId?: number;
+    specialityId?: number;
+    facility?: string;
+  }) {
+    const params: unknown[] = [];
+    const scope: string[] = [];
+    if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
+    if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
+    if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
+    if (q.facility) { params.push(q.facility); scope.push(`c.custom_fields->>'facility' = $${params.length}`); }
+    const scopeSql = scope.length ? `WHERE ${scope.join(' AND ')}` : '';
+
+    const sql = `
+      SELECT
+        COUNT(*) FILTER (
+          WHERE c.custom_fields ? 'pendingPrediction'
+        )::int AS in_progress,
+        COUNT(*) FILTER (
+          WHERE NOT (c.custom_fields ? 'pendingPrediction')
+            AND c.custom_fields ? 'aiPredictionError'
+        )::int AS error,
+        COUNT(*) FILTER (
+          WHERE NOT (c.custom_fields ? 'pendingPrediction')
+            AND NOT (c.custom_fields ? 'aiPredictionError')
+            AND c.custom_fields ? 'aiPrediction'
+        )::int AS processed
+      FROM charts c
+      JOIN worklists w ON w.id = c.worklist_id
+      ${scopeSql}
+    `;
+
+    const [row] = (await this.charts.manager.query(sql, params)) as Array<{
+      in_progress: number;
+      error: number;
+      processed: number;
+    }>;
+
+    return {
+      processed: Number(row?.processed ?? 0),
+      error: Number(row?.error ?? 0),
+      inProgress: Number(row?.in_progress ?? 0),
+    };
+  }
+
+  /* ── AI processing status, day by day ──
+   * Per-day counts of charts that entered each pipeline state on a given day,
+   * keyed off the timestamps stored in custom_fields:
+   *   processed   → aiPrediction.generatedAt
+   *   error       → aiPredictionError.failedAt
+   *   inProgress  → pendingPrediction.startedAt
+   * Each series is densified across the window via generate_series so the line
+   * chart has no gaps. Same client/location/speciality/facility scoping. */
+  async aiProcessingStatusSeries(q: {
+    clientId?: number;
+    locationId?: number;
+    specialityId?: number;
+    facility?: string;
+    days?: number;
+  }) {
+    const days = Math.min(180, Math.max(1, Number(q.days) || 30));
+    const since = startOfDayMinusDays(days - 1);
+
+    const params: unknown[] = [since];
+    const scope: string[] = [];
+    if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
+    if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
+    if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
+    if (q.facility) { params.push(q.facility); scope.push(`c.custom_fields->>'facility' = $${params.length}`); }
+    const scopeSql = scope.length ? ` AND ${scope.join(' AND ')}` : '';
+
+    const seriesSql = (inner: string) => `
+      WITH days AS (
+        SELECT generate_series($1::date, CURRENT_DATE, INTERVAL '1 day')::date AS day
+      )
+      SELECT to_char(days.day, 'YYYY-MM-DD') AS date, COALESCE(agg.count, 0)::int AS count
+      FROM days
+      LEFT JOIN ( ${inner} ) agg ON agg.day = days.day
+      ORDER BY days.day ASC
+    `;
+
+    // Each inner query reads a JSON timestamp, casts it to a date, and counts
+    // charts whose state-entry fell on that day within the window.
+    const inner = (key: string, tsField: string) => `
+      SELECT date_trunc('day', (c.custom_fields->'${key}'->>'${tsField}')::timestamptz)::date AS day,
+             COUNT(*)::int AS count
+      FROM charts c
+      JOIN worklists w ON w.id = c.worklist_id
+      WHERE c.custom_fields ? '${key}'
+        AND NULLIF(c.custom_fields->'${key}'->>'${tsField}', '') IS NOT NULL
+        AND (c.custom_fields->'${key}'->>'${tsField}')::timestamptz >= $1${scopeSql}
+      GROUP BY 1
+    `;
+
+    const em = this.charts.manager;
+    const [processedPerDay, errorPerDay, inProgressPerDay] = await Promise.all([
+      em.query(seriesSql(inner('aiPrediction', 'generatedAt')), params) as Promise<Array<{ date: string; count: number }>>,
+      em.query(seriesSql(inner('aiPredictionError', 'failedAt')), params) as Promise<Array<{ date: string; count: number }>>,
+      em.query(seriesSql(inner('pendingPrediction', 'startedAt')), params) as Promise<Array<{ date: string; count: number }>>,
+    ]);
+
+    const norm = (rows: Array<{ date: string; count: number }>) =>
+      rows.map((r) => ({ date: r.date, count: Number(r.count) }));
+
+    return {
+      days,
+      processedPerDay: norm(processedPerDay),
+      errorPerDay: norm(errorPerDay),
+      inProgressPerDay: norm(inProgressPerDay),
+    };
+  }
+
   /** Drill-down: the actual chart records behind the throughput metrics.
    * `kind='allocated'` → distinct charts allocated in the window (sorted by most
    * recent allocation); `kind='worked'` → distinct charts with a code decision

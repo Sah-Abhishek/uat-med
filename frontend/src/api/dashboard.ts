@@ -55,6 +55,27 @@ export interface ThroughputStats {
 export const getThroughput = (params: ThroughputFilters = {}) =>
   get<ThroughputStats>('/dashboard/throughput', params);
 
+/** AI pipeline processing-status counts across charts (scoped like throughput). */
+export interface AiProcessingStatus {
+  processed: number;
+  error: number;
+  inProgress: number;
+}
+
+export const getAiProcessingStatus = (params: ThroughputFilters = {}) =>
+  get<AiProcessingStatus>('/dashboard/ai-status', params);
+
+/** Per-day AI processing-status series (scoped like throughput). */
+export interface AiProcessingStatusSeries {
+  days: number;
+  processedPerDay: Array<{ date: string; count: number }>;
+  errorPerDay: Array<{ date: string; count: number }>;
+  inProgressPerDay: Array<{ date: string; count: number }>;
+}
+
+export const getAiProcessingStatusSeries = (params: ThroughputFilters = {}) =>
+  get<AiProcessingStatusSeries>('/dashboard/ai-status/series', params);
+
 export interface ThroughputChartRow {
   chartId: number;
   chartNo: string | null;
