@@ -8,6 +8,7 @@ export class QaFiltersDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() specialityId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() coderId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() auditorId?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() worklistId?: number;
 
   /** Comma-separated list of milestones, e.g. CODING_DONE,AUDIT_DONE. */
   @ApiPropertyOptional() @IsOptional() @IsString() milestone?: string;

@@ -48,6 +48,20 @@ export class DashboardController {
     return this.svc.throughput(q);
   }
 
+  @Get('ai-status')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'AI processing-status counts (processed / error / inProgress) across charts. Filter by client/location/speciality/facility.' })
+  aiStatus(@Query() q: { clientId?: number; locationId?: number; specialityId?: number; facility?: string }) {
+    return this.svc.aiProcessingStatus(q);
+  }
+
+  @Get('ai-status/series')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'AI processing-status per-day series (processed / error / inProgress). Filter by client/location/speciality/facility/days.' })
+  aiStatusSeries(@Query() q: { clientId?: number; locationId?: number; specialityId?: number; facility?: string; days?: number }) {
+    return this.svc.aiProcessingStatusSeries(q);
+  }
+
   @Get('throughput/charts')
   @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Drill-down list of the charts behind the throughput metrics (kind=allocated|worked). Paginated.' })

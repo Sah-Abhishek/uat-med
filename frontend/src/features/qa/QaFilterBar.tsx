@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -7,7 +8,7 @@ import {
   listLocations,
   listPrimarySpecialities,
 } from '@/api/configurations';
-import { listQaCoders, type QaFilters } from '@/api/qa';
+import { listQaCoders, listQaWorklists, type QaFilters } from '@/api/qa';
 import { cn } from '@/lib/utils';
 
 const MILESTONES = [
@@ -45,6 +46,17 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
     queryKey: ['qa', 'coders'],
     queryFn: listQaCoders,
   });
+  const [worklistSearch, setWorklistSearch] = useState('');
+  const worklistsQ = useQuery({
+    queryKey: ['qa', 'worklists', filters.clientId, worklistSearch],
+    queryFn: () =>
+      listQaWorklists({
+        clientId: filters.clientId || undefined,
+        search: worklistSearch || undefined,
+        limit: 10,
+      }),
+    placeholderData: (prev) => prev,
+  });
 
   const selectedMilestones = (filters.milestone ?? '').split(',').filter(Boolean);
   const toggleMilestone = (key: string) => {
@@ -57,6 +69,7 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
     !!filters.clientId ||
     !!filters.locationId ||
     !!filters.specialityId ||
+    !!filters.worklistId ||
     !!filters.coderId ||
     !!filters.milestone ||
     !!filters.q ||
@@ -67,7 +80,7 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
     <div className="rounded-xl border border-line bg-surface-sunken/30 p-4 space-y-3">
       {/* Row 1: date range + dropdowns + search + reset */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <div className="md:col-span-3">
+        <div className="md:col-span-2">
           <RangeDatePicker
             value={{ from: filters.from ?? null, to: filters.to ?? null }}
             onChange={(v) => onChange({ from: v.from ?? undefined, to: v.to ?? undefined })}
@@ -78,7 +91,7 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
         <div className="md:col-span-2">
           <FancySelect
             value={filters.clientId ? String(filters.clientId) : ''}
-            onChange={(v) => onChange({ clientId: v ? Number(v) : undefined, locationId: undefined })}
+            onChange={(v) => onChange({ clientId: v ? Number(v) : undefined, locationId: undefined, worklistId: undefined })}
             options={[
               { value: '', label: 'All clients' },
               ...(clientsQ.data?.items ?? []).map((c) => ({
@@ -123,6 +136,25 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
 
         <div className="md:col-span-2">
           <FancySelect
+            value={filters.worklistId ? String(filters.worklistId) : ''}
+            onChange={(v) => onChange({ worklistId: v ? Number(v) : undefined })}
+            options={[
+              { value: '', label: 'All worklists' },
+              ...(worklistsQ.data?.items ?? []).map((w) => ({
+                value: String(w.id),
+                label: w.name,
+              })),
+            ]}
+            placeholder="Worklist name"
+            searchable={(worklistsQ.data?.total ?? 0) > 10}
+            onSearch={setWorklistSearch}
+            loading={worklistsQ.isFetching}
+            searchPlaceholder="Search worklists…"
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <FancySelect
             value={filters.coderId ? String(filters.coderId) : ''}
             onChange={(v) => onChange({ coderId: v ? Number(v) : undefined })}
             options={[
@@ -134,19 +166,6 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
             ]}
             placeholder="All coders"
           />
-        </div>
-
-        <div className="md:col-span-1 flex justify-end">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onReset}
-            disabled={!hasAny}
-            leftIcon={<X className="w-3 h-3" />}
-            title="Reset all filters"
-          >
-            Reset
-          </Button>
         </div>
       </div>
 
@@ -183,6 +202,16 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
             className="pl-8 w-[220px]"
           />
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onReset}
+          disabled={!hasAny}
+          leftIcon={<X className="w-3 h-3" />}
+          title="Reset all filters"
+        >
+          Reset
+        </Button>
       </div>
     </div>
   );

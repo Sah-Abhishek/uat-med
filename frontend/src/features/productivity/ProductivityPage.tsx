@@ -7,13 +7,18 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import { Activity, CalendarRange, Gauge, Loader2, UserPlus, X } from 'lucide-react';
+import { Activity, CalendarRange, Gauge, Loader2, Sparkles, UserPlus, X } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -26,6 +31,8 @@ import {
 } from '@/api/configurations';
 import { listQaFacilities } from '@/api/qa';
 import {
+  getAiProcessingStatus,
+  getAiProcessingStatusSeries,
   getThroughput,
   getThroughputCharts,
   type ThroughputFilters,
@@ -149,6 +156,12 @@ export function ProductivityPage() {
           >
             <ComparisonChart rows={combined} />
           </ChartCard>
+
+          {/* ── AI processing status (live) ───────────────── */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <ProcessingStatusCard filters={filters} />
+            <ProcessingStatusTrend filters={filters} />
+          </div>
 
           {/* ── Drill-down table ──────────────────────────── */}
           <ChartsTable filters={filters} />
@@ -529,6 +542,134 @@ function ComparisonChart({ rows }: { rows: Array<{ date: string; Allocated: numb
         <Area type="monotone" dataKey="Worked on" stroke={COLOR_WORKED} strokeWidth={2.5} strokeDasharray="6 3" fill="url(#cmpWorked)" dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} animationDuration={700} animationEasing="ease-out" />
       </AreaChart>
     </ResponsiveContainer>
+  );
+}
+
+/* ── AI processing status (live donut) ───────────────────── */
+
+/* Processed = green, In progress = amber, Error = red. */
+const COLOR_PROCESSED = '#10B981';
+const COLOR_INPROGRESS = '#F59E0B';
+const COLOR_ERROR = '#EF4444';
+
+function ProcessingStatusCard({ filters }: { filters: ThroughputFilters }) {
+  // Polls every 10s (matching the server-side pipeline watcher tick) so the
+  // donut auto-updates as charts move through QUEUED → PROCESSING → DONE/ERROR.
+  const q = useQuery({
+    queryKey: ['dashboard', 'ai-status', filters],
+    queryFn: () => getAiProcessingStatus(filters),
+    placeholderData: (prev) => prev,
+    refetchInterval: 10_000,
+  });
+  const data = q.data;
+  const loading = !data;
+  const total = data ? data.processed + data.inProgress + data.error : 0;
+
+  const slices = [
+    { name: 'Processed', value: data?.processed ?? 0, color: COLOR_PROCESSED },
+    { name: 'In progress', value: data?.inProgress ?? 0, color: COLOR_INPROGRESS },
+    { name: 'Error', value: data?.error ?? 0, color: COLOR_ERROR },
+  ];
+  const nonZero = slices.filter((s) => s.value > 0);
+
+  return (
+    <ChartCard
+      title="Total AI processing status"
+      subtitle="Live pipeline state across charts — auto-updates every 10s"
+      icon={<Sparkles className="w-3.5 h-3.5" />}
+      loading={loading}
+      empty={!loading && total === 0}
+    >
+      <div className="h-full flex items-center gap-6">
+        <div className="relative flex-1 h-full min-w-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={nonZero}
+                dataKey="value"
+                nameKey="name"
+                innerRadius="62%"
+                outerRadius="88%"
+                paddingAngle={nonZero.length > 1 ? 2 : 0}
+                stroke="none"
+                animationDuration={500}
+                animationEasing="ease-out"
+              >
+                {nonZero.map((s) => (
+                  <Cell key={s.name} fill={s.color} />
+                ))}
+              </Pie>
+              <Tooltip
+                content={<ChartTooltip formatItem={(e) => ({ label: e.name, value: e.value, color: e.payload?.color })} />}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <span className="text-2xl font-bold text-ink tabular-nums">{total.toLocaleString()}</span>
+            <span className="text-[11px] text-ink-muted">total charts</span>
+          </div>
+        </div>
+        <div className="space-y-3 pr-2 shrink-0">
+          {slices.map((s) => (
+            <div key={s.name} className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color }} />
+              <span className="text-sm text-ink-muted w-24">{s.name}</span>
+              <span className="text-sm font-bold text-ink tabular-nums ml-auto">{s.value.toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </ChartCard>
+  );
+}
+
+/* ── AI processing status, day by day (live line chart) ──── */
+
+function ProcessingStatusTrend({ filters }: { filters: ThroughputFilters }) {
+  // Same 10s polling as the donut so the trend keeps pace with the pipeline.
+  const q = useQuery({
+    queryKey: ['dashboard', 'ai-status', 'series', filters],
+    queryFn: () => getAiProcessingStatusSeries(filters),
+    placeholderData: (prev) => prev,
+    refetchInterval: 10_000,
+  });
+  const data = q.data;
+  const loading = !data;
+
+  // Merge the three densified series (same dates, same order) by index.
+  const rows = (data?.processedPerDay ?? []).map((p, i) => ({
+    date: shortDate(p.date),
+    Processed: p.count,
+    'In progress': data?.inProgressPerDay[i]?.count ?? 0,
+    Error: data?.errorPerDay[i]?.count ?? 0,
+  }));
+
+  const allZero =
+    noData(data?.processedPerDay) && noData(data?.inProgressPerDay) && noData(data?.errorPerDay);
+
+  return (
+    <ChartCard
+      title="Processing status per day"
+      subtitle="Charts entering each pipeline state each day — auto-updates every 10s"
+      icon={<Sparkles className="w-3.5 h-3.5" />}
+      loading={loading}
+      empty={!loading && allZero}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={rows} margin={{ top: 5, right: 16, bottom: 5, left: 0 }}>
+          <CartesianGrid stroke={COLOR_GRID} strokeDasharray="4 4" strokeOpacity={0.6} vertical={false} />
+          <XAxis dataKey="date" stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={16} />
+          <YAxis stroke={COLOR_AXIS} tick={{ fontSize: 11 }} allowDecimals={false} axisLine={false} tickLine={false} />
+          <Tooltip
+            content={<ChartTooltip formatItem={(e) => ({ label: e.name, value: e.value, color: e.color })} />}
+          />
+          <Legend wrapperStyle={legendStyle} iconType="circle" iconSize={9} />
+          <Line type="monotone" dataKey="Processed" stroke={COLOR_PROCESSED} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} animationDuration={500} animationEasing="ease-out" />
+          <Line type="monotone" dataKey="In progress" stroke={COLOR_INPROGRESS} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} animationDuration={500} animationEasing="ease-out" />
+          <Line type="monotone" dataKey="Error" stroke={COLOR_ERROR} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} animationDuration={500} animationEasing="ease-out" />
+        </LineChart>
+      </ResponsiveContainer>
+    </ChartCard>
   );
 }
 

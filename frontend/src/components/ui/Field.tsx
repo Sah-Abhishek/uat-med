@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes, type LabelHTMLAttributes, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
-import { ChevronDown, Check, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, Check, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Search, Loader2 } from 'lucide-react';
 
 /* ── Label ────────────────────────────────── */
 interface LabelProps extends LabelHTMLAttributes<HTMLLabelElement> {
@@ -144,6 +144,17 @@ interface FancySelectProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Show a search box at the top of the popover. */
+  searchable?: boolean;
+  /**
+   * When provided, search is server-driven: called (debounced ~250ms) with the
+   * typed query so the parent can fetch matching records. When omitted but
+   * `searchable` is true, the provided `options` are filtered locally by label.
+   */
+  onSearch?: (query: string) => void;
+  /** Spinner in the search box while server results load (server-driven mode). */
+  loading?: boolean;
+  searchPlaceholder?: string;
 }
 export function FancySelect({
   value,
@@ -152,11 +163,21 @@ export function FancySelect({
   placeholder = 'Select…',
   disabled,
   className,
+  searchable,
+  onSearch,
+  loading,
+  searchPlaceholder = 'Search…',
 }: FancySelectProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [query, setQuery] = useState('');
+  // Remember the label of the chosen option so the trigger keeps showing it
+  // even after server-driven search swaps `options` to a different result set
+  // that no longer contains the selected value.
+  const [stickyLabel, setStickyLabel] = useState<string | null>(null);
 
   // Reposition relative to trigger; flip above when no room below.
   useLayoutEffect(() => {
@@ -204,8 +225,40 @@ export function FancySelect({
     if (disabled) setOpen(false);
   }, [disabled]);
 
+  // Reset the query when the popover closes and focus the box when it opens.
+  useEffect(() => {
+    if (!open) {
+      setQuery('');
+    } else if (searchable) {
+      // Focus after the portal paints.
+      const t = setTimeout(() => searchRef.current?.focus(), 0);
+      return () => clearTimeout(t);
+    }
+  }, [open, searchable]);
+
+  // Server-driven search: debounce the query up to the parent. When `query`
+  // resets to '' on close, this also tells the parent to reload the default set.
+  useEffect(() => {
+    if (!searchable || !onSearch) return;
+    const t = setTimeout(() => onSearch(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query, searchable, onSearch]);
+
   const selected = options.find((o) => o.value === value);
-  const display = selected?.label ?? placeholder;
+  // Keep the trigger label stable across server-driven option swaps.
+  useEffect(() => {
+    if (selected) setStickyLabel(selected.label);
+    else if (!value) setStickyLabel(null);
+  }, [selected, value]);
+  const display = selected?.label ?? (value ? stickyLabel : null) ?? placeholder;
+  const hasSelectedLabel = !!selected || (!!value && !!stickyLabel);
+
+  // In local-filter mode, narrow the options client-side; in server mode the
+  // parent already returns matches, so show them as-is.
+  const visibleOptions =
+    searchable && !onSearch && query.trim()
+      ? options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()))
+      : options;
 
   return (
     <div className={cn('relative', className)}>
@@ -224,7 +277,7 @@ export function FancySelect({
         <span
           className={cn(
             'flex-1 text-left truncate',
-            selected ? 'font-semibold text-ink' : 'text-ink-subtle',
+            hasSelectedLabel ? 'font-semibold text-ink' : 'text-ink-subtle',
           )}
         >
           {display}
@@ -243,33 +296,56 @@ export function FancySelect({
             ref={popoverRef}
             style={{ top: position.top, left: position.left, width: position.width }}
             className={cn(
-              'fixed z-[100]',
+              'fixed z-[100] flex flex-col',
               'bg-surface border border-line rounded-xl shadow-pop dark:shadow-pop-dark p-1',
-              'max-h-[300px] overflow-y-auto',
+              'max-h-[300px]',
             )}
           >
-            {options.map((o) => {
-              const isSelected = o.value === value;
-              return (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition text-left',
-                    isSelected
-                      ? 'bg-primary-soft text-primary-ink dark:text-primary font-semibold'
-                      : 'text-ink hover:bg-surface-sunken font-medium',
-                  )}
-                >
-                  <span className="flex-1 truncate">{o.label}</span>
-                  {isSelected && <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />}
-                </button>
-              );
-            })}
+            {searchable && (
+              <div className="relative px-1 pt-0.5 pb-1.5 shrink-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-subtle pointer-events-none" />
+                {loading && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-subtle animate-spin" />
+                )}
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="w-full h-8 pl-8 pr-8 rounded-lg border border-line bg-surface-sunken/40 text-sm text-ink placeholder:text-ink-subtle focus:outline-none focus:border-primary/60"
+                />
+              </div>
+            )}
+            <div className="overflow-y-auto">
+              {visibleOptions.length === 0 ? (
+                <div className="px-3 py-4 text-center text-xs text-ink-muted">
+                  {loading ? 'Searching…' : 'No matches'}
+                </div>
+              ) : (
+                visibleOptions.map((o) => {
+                  const isSelected = o.value === value;
+                  return (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => {
+                        onChange(o.value);
+                        setOpen(false);
+                      }}
+                      className={cn(
+                        'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition text-left',
+                        isSelected
+                          ? 'bg-primary-soft text-primary-ink dark:text-primary font-semibold'
+                          : 'text-ink hover:bg-surface-sunken font-medium',
+                      )}
+                    >
+                      <span className="flex-1 truncate">{o.label}</span>
+                      {isSelected && <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>,
           document.body,
         )}
@@ -1090,7 +1166,6 @@ export function OptionsBuilder({ value, onChange, placeholder = 'Type an option�
 }
 
 /* ── Search input with icon ─────────────── */
-import { Search } from 'lucide-react';
 export function SearchInput({
   className,
   ...rest
