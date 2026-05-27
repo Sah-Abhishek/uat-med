@@ -131,6 +131,20 @@ export const selfAllocateCharts = (chartIds: number[]) =>
 export const bulkDeleteCharts = (chartIds: number[]) =>
   del<{ deleted: number }>('/charts/bulk', { chartIds });
 
+export interface RetryErroredResult {
+  /** Errored charts re-queued for the AI pipeline. */
+  queued: number;
+  /** Errored charts skipped (no documents to reprocess). */
+  skipped: Array<{ chartId: string; reason: 'no_documents' }>;
+}
+
+/** Re-queue the AI pipeline for every AI-errored chart system-wide. The
+ * endpoint lives under /worklists (that's where the serial AI-dispatch queue
+ * is implemented) but the action is global and skips charts orphaned by a
+ * soft-deleted worklist. Manager / Team Lead only. */
+export const retryAiErroredCharts = () =>
+  post<RetryErroredResult>('/worklists/retry-ai-errored');
+
 /* ── Columns visibility ────────────────────────────────── */
 
 export interface ColumnPref {

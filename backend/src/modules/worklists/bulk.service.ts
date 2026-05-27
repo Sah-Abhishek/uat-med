@@ -88,6 +88,14 @@ export interface ClearStuckAiResult {
   chartIds: string[];
 }
 
+export interface RetryErroredResult {
+  /** Errored charts that were re-queued for the AI pipeline. */
+  queued: number;
+  /** Errored charts skipped — currently only those with no documents to
+   * reprocess (reprocess re-reads the stored docs from object storage). */
+  skipped: Array<{ chartId: string; reason: 'no_documents' }>;
+}
+
 interface WorklistAiQueueState {
   /** Chart IDs awaiting dispatch (FIFO). */
   pending: number[];
@@ -818,6 +826,85 @@ export class WorklistBulkService {
     }
     if (cleared.length > 0) await this.charts.save(charts.filter((c) => cleared.includes(String(c.id))));
     return { cleared: cleared.length, chartIds: cleared };
+  }
+
+  /**
+   * Re-queue the AI pipeline for EVERY errored chart system-wide, in one shot.
+   * "Errored" mirrors charts.summary / deriveAiStatus: an `aiPredictionError`
+   * with no in-flight `pendingPrediction`. Soft-deleted charts (handled by the
+   * query builder's default `deleted_at IS NULL`) and charts orphaned by a
+   * soft-deleted worklist are excluded — we never resurrect gateway work for a
+   * worklist that 404s. Each eligible chart is cleared of its error and marked
+   * `awaitingDispatch` so it shows as "Queued" immediately, then handed to the
+   * same per-worklist serial worker `runAiOnWorklist` uses, so the gateway still
+   * sees one start at a time. `AiPipelineWatcher` finalizes each run.
+   */
+  async retryAllErroredCharts(): Promise<RetryErroredResult> {
+    const errored = await this.charts
+      .createQueryBuilder('c')
+      .where(`NOT (c.custom_fields ? 'pendingPrediction')`)
+      .andWhere(`c.custom_fields ? 'aiPredictionError'`)
+      // Exclude orphans: charts whose worklist was soft-deleted. The worklist
+      // 404s, so it shouldn't keep consuming AI gateway runs.
+      .andWhere(
+        `EXISTS (SELECT 1 FROM worklists w WHERE w.id = c.worklist_id AND w.deleted_at IS NULL)`,
+      )
+      .getMany();
+
+    const now = new Date().toISOString();
+    const skipped: RetryErroredResult['skipped'] = [];
+    const eligibleByWorklist = new Map<number, number[]>();
+    const toSave: Chart[] = [];
+
+    for (const c of errored) {
+      const cf = (c.customFields ?? {}) as Record<string, unknown>;
+      const docs = (cf.uploadedDocs as Array<{ key?: string }> | undefined) ?? [];
+      if (docs.length === 0) {
+        skipped.push({ chartId: String(c.id), reason: 'no_documents' });
+        continue;
+      }
+      const { aiPredictionError: _drop, ...keep } = cf;
+      c.customFields = {
+        ...keep,
+        pendingPrediction: {
+          encounterId: '',
+          taskId: '',
+          reportIds: [],
+          startedAt: now,
+          gatewayStatus: 'PENDING',
+          awaitingDispatch: true,
+        },
+      };
+      toSave.push(c);
+      const wid = Number(c.worklistId);
+      const arr = eligibleByWorklist.get(wid) ?? [];
+      arr.push(c.id);
+      eligibleByWorklist.set(wid, arr);
+    }
+
+    if (toSave.length > 0) await this.charts.save(toSave);
+
+    // Enqueue per worklist and ensure each worklist's serial worker is running.
+    // Reuses the exact dispatch machinery as runAiOnWorklist so the two share
+    // the same one-start-at-a-time guarantee and the same watcher finalization.
+    for (const [worklistId, chartIds] of eligibleByWorklist) {
+      const state = this.aiQueues.get(worklistId) ?? { pending: [], running: false, abort: false };
+      state.pending.push(...chartIds);
+      state.abort = false;
+      this.aiQueues.set(worklistId, state);
+      if (!state.running) {
+        state.running = true;
+        setImmediate(() => {
+          this.runAiQueueWorker(worklistId).catch((err) => {
+            this.log.error(`AI queue worker (worklist ${worklistId}) crashed: ${(err as Error).message}`);
+            const s = this.aiQueues.get(worklistId);
+            if (s) s.running = false;
+          });
+        });
+      }
+    }
+
+    return { queued: toSave.length, skipped };
   }
 
   /** Trim a JSON value to a non-empty string, or undefined. */

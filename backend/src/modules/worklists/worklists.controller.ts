@@ -104,6 +104,19 @@ export class WorklistsController {
     return this.bulk.createFromExcel(dto, file, user.id);
   }
 
+  /* ── Bulk: retry the AI pipeline for every errored chart (global) ──
+   * Static route declared before /:id so the param route doesn't swallow it.
+   * Lives under /worklists because the serial AI-dispatch queue is implemented
+   * in WorklistBulkService; the action itself is system-wide. */
+  @Post('retry-ai-errored')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({
+    summary: 'Re-queue the AI pipeline for every AI-errored chart system-wide (skips orphaned / soft-deleted charts).',
+  })
+  retryAiErrored() {
+    return this.bulk.retryAllErroredCharts();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Full detail for the worklist detail page.' })
   detail(@Param('id', ParseIntPipe) id: number) {

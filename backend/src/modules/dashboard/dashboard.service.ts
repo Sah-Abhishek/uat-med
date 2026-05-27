@@ -427,7 +427,9 @@ export class DashboardService {
     facility?: string;
   }) {
     const params: unknown[] = [];
-    const scope: string[] = [];
+    // Exclude soft-deleted charts and charts orphaned by a soft-deleted
+    // worklist, so the productivity AI stats agree with the charts list / tiles.
+    const scope: string[] = ['c.deleted_at IS NULL', 'w.deleted_at IS NULL'];
     if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
     if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
     if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
@@ -485,7 +487,8 @@ export class DashboardService {
     const since = startOfDayMinusDays(days - 1);
 
     const params: unknown[] = [since];
-    const scope: string[] = [];
+    // Same orphan / soft-delete exclusion as aiProcessingStatus.
+    const scope: string[] = ['c.deleted_at IS NULL', 'w.deleted_at IS NULL'];
     if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
     if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
     if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }

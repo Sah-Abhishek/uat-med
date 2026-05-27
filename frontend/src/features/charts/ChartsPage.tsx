@@ -1,23 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import {
   listCharts,
   getChartsSummary,
   bulkModifyCharts,
   selfAllocateCharts,
+  retryAiErroredCharts,
   getActiveTimer,
   type AllocationAction,
   type BulkModifyDto,
   type ChartListParams,
 } from '@/api/charts';
 import { listUsers } from '@/api/users';
+import { listPrimarySpecialities } from '@/api/configurations';
 import type { ApiErrorShape, Priority } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, Select, SearchInput, Radio } from '@/components/ui/Field';
+import { Input, Label, SearchInput, Radio, FancySelect } from '@/components/ui/Field';
 import {
   Modal,
   ModalFooter,
@@ -62,6 +64,7 @@ import {
   UserPlus,
   Clock,
   ChevronRight,
+  RotateCcw,
 } from 'lucide-react';
 
 const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
@@ -72,6 +75,34 @@ const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
   { key: 'LOW', label: 'Low' },
   // Stored as FINALIZED in the DB; rendered as "Done" everywhere in the UI.
   { key: 'FINALIZED', label: 'Done' },
+];
+
+// Option lists for the stylized FancySelect filters. Each leads with an "Any"
+// entry (empty value) so the field can be cleared back to "no filter"; the
+// submit handler strips empty values before they reach the API.
+const CHART_STATUS_OPTIONS = [
+  { value: '', label: 'Any' },
+  { value: 'OPEN', label: 'Open' },
+  { value: 'COMPLETE', label: 'Complete' },
+  { value: 'INCOMPLETE', label: 'Incomplete' },
+  { value: 'HOLD', label: 'Hold' },
+];
+const MILESTONE_OPTIONS = [
+  { value: '', label: 'Any' },
+  { value: 'READY_TO_CODE', label: 'Ready to Code' },
+  { value: 'CODING_IN_PROGRESS', label: 'Coding' },
+  { value: 'CODING_DONE', label: 'Coding Done' },
+  { value: 'READY_TO_AUDIT', label: 'Ready to Audit' },
+  { value: 'AUDIT_IN_PROGRESS', label: 'Auditing' },
+  { value: 'AUDIT_DONE', label: 'Audit Done' },
+  { value: 'CLOSED', label: 'Closed' },
+];
+const AI_STATUS_OPTIONS = [
+  { value: '', label: 'Any' },
+  { value: 'QUEUED', label: 'Queued' },
+  { value: 'PROCESSING', label: 'Processing' },
+  { value: 'DONE', label: 'Done' },
+  { value: 'ERRORED', label: 'Errored' },
 ];
 
 /* ── Configurable column catalog ──────────────────────────
@@ -343,6 +374,7 @@ export function ChartsPage() {
   const user = useAuth((s) => s.user)!;
   const isManager = can(user, 'chart.bulkModify');
   const isCoderOrAuditor = user.role === 'CODER' || user.role === 'AUDITOR';
+  const qc = useQueryClient();
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -355,6 +387,7 @@ export function ChartsPage() {
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [modifyOpen, setModifyOpen] = useState(false);
   const [selfAllocateOpen, setSelfAllocateOpen] = useState(false);
+  const [retryOpen, setRetryOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => loadVisibleColumns());
   const columnsBtnRef = useRef<HTMLButtonElement | null>(null);
 
@@ -431,6 +464,19 @@ export function ChartsPage() {
     },
   });
 
+  // Bulk "retry all errored" — flips every AI-errored chart back to Queued and
+  // hands them to the server-side dispatch queue. Invalidate so the tiles +
+  // list update at once; the existing 5s pipeline poll then tracks progress.
+  const retryMutation = useMutation({
+    mutationFn: retryAiErroredCharts,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['charts'] });
+      setRetryOpen(false);
+    },
+  });
+
+  const erroredCount = summary.data?.aiStatusCounts?.errored ?? 0;
+
   const totalPages = list.data ? Math.max(1, Math.ceil(list.data.total / pageSize)) : 1;
 
   // Sort the current page's rows in the browser by the clicked column. Keyed by
@@ -499,13 +545,32 @@ export function ChartsPage() {
         </div>
       )}
 
-      {/* AI pipeline status tiles — counts are mutually exclusive per chart. */}
+      {/* AI pipeline status + bulk retry. Counts are mutually exclusive per
+          chart and auto-refresh every 5s while anything is in flight. */}
       {summary.data?.aiStatusCounts && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <SummaryTile label="AI Queued" value={summary.data.aiStatusCounts.queued} tone="sky" />
-          <SummaryTile label="AI Processing" value={summary.data.aiStatusCounts.processing} tone="butter" />
-          <SummaryTile label="AI Done" value={summary.data.aiStatusCounts.done} tone="mint" />
-          <SummaryTile label="AI Errored" value={summary.data.aiStatusCounts.errored} tone="coral" />
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-[11px] font-bold uppercase tracking-[0.1em] text-ink-subtle">
+              AI Pipeline
+            </h2>
+            {isManager && (
+              <Button
+                variant="soft"
+                leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+                disabled={erroredCount === 0}
+                loading={retryMutation.isPending}
+                onClick={() => setRetryOpen(true)}
+              >
+                Retry all errored ({erroredCount})
+              </Button>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <SummaryTile label="AI Queued" value={summary.data.aiStatusCounts.queued} tone="sky" />
+            <SummaryTile label="AI Processing" value={summary.data.aiStatusCounts.processing} tone="butter" />
+            <SummaryTile label="AI Done" value={summary.data.aiStatusCounts.done} tone="mint" />
+            <SummaryTile label="AI Errored" value={summary.data.aiStatusCounts.errored} tone="coral" />
+          </div>
         </div>
       )}
 
@@ -680,6 +745,16 @@ export function ChartsPage() {
         selectedIds={Array.from(selected)}
         onComplete={() => { setSelected(new Set()); setSelfAllocateOpen(false); }}
       />
+      <ConfirmModal
+        open={retryOpen}
+        onClose={() => setRetryOpen(false)}
+        onConfirm={() => retryMutation.mutate()}
+        message={`Re-queue ${erroredCount} errored chart${erroredCount === 1 ? '' : 's'} through the AI pipeline? They'll move to Queued and process one at a time. Charts whose worklist was deleted are skipped.`}
+        variant="primary"
+        confirmLabel="Retry all"
+        cancelLabel="Cancel"
+        loading={retryMutation.isPending}
+      />
     </div>
   );
 }
@@ -714,7 +789,24 @@ function FilterModal({
   value: ChartListParams;
   onApply: (v: ChartListParams) => void;
 }) {
-  const { register, handleSubmit, reset } = useForm<ChartListParams>({ defaultValues: value });
+  const { register, control, handleSubmit, reset } = useForm<ChartListParams>({ defaultValues: value });
+
+  // Speciality list for its dropdown — all primary specialities (no client
+  // scope here). Fetched only while the modal is open.
+  const specialities = useQuery({
+    queryKey: ['configurations', 'primary-specialities', 'all'],
+    queryFn: () => listPrimarySpecialities(),
+    enabled: open,
+  });
+
+  // Allocated-user dropdown. Users can be many, so search is server-driven:
+  // the FancySelect pushes the typed query here (debounced) and we refetch.
+  const [userSearch, setUserSearch] = useState('');
+  const users = useQuery({
+    queryKey: ['users', 'filter', userSearch],
+    queryFn: () => listUsers({ pageSize: 50, search: userSearch || undefined }),
+    enabled: open,
+  });
 
   return (
     <Modal open={open} onClose={onClose} title="Filter Charts" size="xl">
@@ -756,45 +848,94 @@ function FilterModal({
             <Input type="number" {...register('worklistId', { valueAsNumber: true })} />
           </div>
           <div>
-            <Label>Allocated user ID</Label>
-            <Input type="number" {...register('allocatedUserId', { valueAsNumber: true })} />
+            <Label>Allocated user</Label>
+            <Controller
+              control={control}
+              name="allocatedUserId"
+              render={({ field }) => (
+                <FancySelect
+                  searchable
+                  onSearch={setUserSearch}
+                  loading={users.isFetching}
+                  searchPlaceholder="Search users…"
+                  placeholder="Any user"
+                  value={field.value != null ? String(field.value) : ''}
+                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                  options={[
+                    { value: '', label: 'Any user' },
+                    ...(users.data?.items ?? []).map((u) => ({
+                      value: String(u.id),
+                      label: u.fullName,
+                    })),
+                  ]}
+                />
+              )}
+            />
           </div>
           <div>
-            <Label>Primary Speciality ID</Label>
-            <Input type="number" {...register('primarySpecialityId', { valueAsNumber: true })} />
+            <Label>Primary Speciality</Label>
+            <Controller
+              control={control}
+              name="primarySpecialityId"
+              render={({ field }) => (
+                <FancySelect
+                  searchable
+                  searchPlaceholder="Search specialities…"
+                  placeholder={specialities.isPending ? 'Loading…' : 'Any speciality'}
+                  value={field.value != null ? String(field.value) : ''}
+                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                  options={[
+                    { value: '', label: 'Any speciality' },
+                    ...(specialities.data?.items ?? []).map((s) => ({
+                      value: String(s.id),
+                      label: s.name,
+                    })),
+                  ]}
+                />
+              )}
+            />
           </div>
           <div>
             <Label>Status</Label>
-            <Select {...register('chartStatus')}>
-              <option value="">Any</option>
-              <option value="OPEN">Open</option>
-              <option value="COMPLETE">Complete</option>
-              <option value="INCOMPLETE">Incomplete</option>
-              <option value="HOLD">Hold</option>
-            </Select>
+            <Controller
+              control={control}
+              name="chartStatus"
+              render={({ field }) => (
+                <FancySelect
+                  options={CHART_STATUS_OPTIONS}
+                  value={field.value ?? ''}
+                  onChange={(v) => field.onChange(v || undefined)}
+                />
+              )}
+            />
           </div>
           <div>
             <Label>Milestone</Label>
-            <Select {...register('milestone')}>
-              <option value="">Any</option>
-              <option value="READY_TO_CODE">Ready to Code</option>
-              <option value="CODING_IN_PROGRESS">Coding</option>
-              <option value="CODING_DONE">Coding Done</option>
-              <option value="READY_TO_AUDIT">Ready to Audit</option>
-              <option value="AUDIT_IN_PROGRESS">Auditing</option>
-              <option value="AUDIT_DONE">Audit Done</option>
-              <option value="CLOSED">Closed</option>
-            </Select>
+            <Controller
+              control={control}
+              name="milestone"
+              render={({ field }) => (
+                <FancySelect
+                  options={MILESTONE_OPTIONS}
+                  value={field.value ?? ''}
+                  onChange={(v) => field.onChange(v || undefined)}
+                />
+              )}
+            />
           </div>
           <div>
             <Label>AI Status</Label>
-            <Select {...register('aiStatus')}>
-              <option value="">Any</option>
-              <option value="QUEUED">Queued</option>
-              <option value="PROCESSING">Processing</option>
-              <option value="DONE">Done</option>
-              <option value="ERRORED">Errored</option>
-            </Select>
+            <Controller
+              control={control}
+              name="aiStatus"
+              render={({ field }) => (
+                <FancySelect
+                  options={AI_STATUS_OPTIONS}
+                  value={field.value ?? ''}
+                  onChange={(v) => field.onChange((v || undefined) as ChartListParams['aiStatus'])}
+                />
+              )}
+            />
           </div>
           <div>
             <Label>Received from</Label>
@@ -981,7 +1122,7 @@ function ModifyChartsModal({
     enabled: open,
   });
 
-  const { register, handleSubmit, watch } = useForm<{
+  const { register, control, handleSubmit, watch } = useForm<{
     priority?: Priority | '';
     action: AllocationAction;
     assigneeId?: number;
@@ -1027,14 +1168,24 @@ function ModifyChartsModal({
 
         <div>
           <Label>Change priority</Label>
-          <Select {...register('priority')}>
-            <option value="">Keep current</option>
-            <option value="CRITICAL">Critical</option>
-            <option value="HIGH">High</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="LOW">Low</option>
-            <option value="DONE">Done</option>
-          </Select>
+          <Controller
+            control={control}
+            name="priority"
+            render={({ field }) => (
+              <FancySelect
+                value={field.value ?? ''}
+                onChange={(v) => field.onChange(v)}
+                options={[
+                  { value: '', label: 'Keep current' },
+                  { value: 'CRITICAL', label: 'Critical' },
+                  { value: 'HIGH', label: 'High' },
+                  { value: 'MEDIUM', label: 'Medium' },
+                  { value: 'LOW', label: 'Low' },
+                  { value: 'DONE', label: 'Done' },
+                ]}
+              />
+            )}
+          />
         </div>
 
         <div>
@@ -1055,14 +1206,23 @@ function ModifyChartsModal({
         {(action === 'ALLOCATE_CODING' || action === 'ALLOCATE_AUDITING') && (
           <div>
             <Label required>Assignee</Label>
-            <Select {...register('assigneeId', { valueAsNumber: true })}>
-              <option value="">Select user...</option>
-              {users.data?.items.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.fullName}
-                </option>
-              ))}
-            </Select>
+            <Controller
+              control={control}
+              name="assigneeId"
+              render={({ field }) => (
+                <FancySelect
+                  searchable
+                  searchPlaceholder="Search users…"
+                  placeholder={users.isPending ? 'Loading…' : 'Select user…'}
+                  value={field.value != null ? String(field.value) : ''}
+                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                  options={(users.data?.items ?? []).map((u) => ({
+                    value: String(u.id),
+                    label: u.fullName,
+                  }))}
+                />
+              )}
+            />
           </div>
         )}
 
