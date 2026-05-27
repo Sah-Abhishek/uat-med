@@ -41,6 +41,9 @@ export interface UploadedDocument {
   mimeType: string;
   size: number;
   url: string;
+  /** S3/MinIO object key — needed to re-download (reprocess) or delete the doc.
+   *  Optional for backwards-compat with docs persisted before this was stored. */
+  key?: string;
   reportType: ReportType;
   reportId?: string;
 }

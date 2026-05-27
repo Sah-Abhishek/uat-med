@@ -13,12 +13,18 @@ import {
   ChevronDown,
   ChevronUp,
   Wifi,
+  Trash2,
+  RotateCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Field';
 import { AiStatusChip } from '@/components/ui/Chip';
 import { cn } from '@/lib/utils';
-import { processChartDocuments } from '@/api/charts';
+import {
+  addChartDocuments,
+  removeChartDocument,
+  reprocessChartDocuments,
+} from '@/api/charts';
 import { deriveAiStatus } from '@/api/types';
 import type { AiEncounterResult, AiReportType, UploadedDocument } from '@/api/types';
 
@@ -56,6 +62,11 @@ interface Props {
   onView: (docId: string) => void;
   /** Called once the ICD Predictor pipeline returns. */
   onProcessed?: (result: AiEncounterResult) => void;
+  /** Called when the uploaded-docs list changes without a re-run (add / remove). */
+  onDocsChanged?: (docs: UploadedDocument[]) => void;
+  /** Re-fetch the chart from the server (used after a failed run so whatever
+   *  did upload, plus any recorded error, shows up without a manual reload). */
+  onRefetch?: () => void;
 }
 
 /**
@@ -89,7 +100,7 @@ function fileTypeLabel(type: string) {
   return { label: 'FILE', tone: 'text-ink-muted bg-surface-sunken' };
 }
 
-export function UploadSection({ chartId, uploadedDocs, customFields, onView, onProcessed }: Props) {
+export function UploadSection({ chartId, uploadedDocs, customFields, onView, onProcessed, onDocsChanged, onRefetch }: Props) {
   const [open, setOpen] = useState(true);
   const [docs, setDocs] = useState<StagedDoc[]>([]);
   const [imageGroups, setImageGroups] = useState<ImageGroup[]>([]);
@@ -101,12 +112,19 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
   const [progress, setProgress] = useState(0);
   const [phase, setPhase] = useState<'uploading' | 'analyzing' | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   const docInput = useRef<HTMLInputElement>(null);
   const imgInput = useRef<HTMLInputElement>(null);
 
   const hasStaged = docs.length > 0 || imageGroups.length > 0 || texts.length > 0;
   const hasUploaded = uploadedDocs.length > 0;
+
+  const aiStatus = deriveAiStatus(customFields ?? undefined);
+  // A run is in flight either locally (this tab kicked it off) or server-side
+  // (the watcher is polling an encounter). Disable mutations until it settles.
+  const busy =
+    status === 'uploading' || aiStatus === 'QUEUED' || aiStatus === 'PROCESSING';
 
   function makeStaged(files: FileList | File[]): StagedDoc[] {
     return Array.from(files).map((f) => ({
@@ -182,29 +200,35 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
       return;
     }
 
-    try {
-      const result = await processChartDocuments(
-        chartId,
-        {
-          files: outbound.map((o) => o.file),
-          reportTypes: outbound.map((o) => inferReportType(o.displayName, o.type)),
-        },
-        (pct) => {
-          setProgress(pct);
-          // Once the upload finishes, the server is polling the gateway —
-          // flip the label so the user knows we're not stalled.
-          if (pct >= 100) setPhase('analyzing');
-        },
-      );
+    const onProgress = (pct: number) => {
+      setProgress(pct);
+      // Once the upload finishes, the server is polling the gateway —
+      // flip the label so the user knows we're not stalled.
+      if (pct >= 100) setPhase('analyzing');
+    };
+    const payload = {
+      files: outbound.map((o) => o.file),
+      reportTypes: outbound.map((o) => inferReportType(o.displayName, o.type)),
+    };
 
-      // The server response carries the canonical uploaded list (S3 URLs +
-      // gateway report_ids). Bubble it up so the parent can rerender the
-      // viewer modal and persist it.
+    try {
+      // 1) Upload the staged files first (no AI yet) and commit them to the
+      //    chart. Doing this before the pipeline runs means the uploaded list
+      //    and Retry control appear immediately — and survive a mid-run failure
+      //    (e.g. the orchestrator being down) instead of vanishing with the
+      //    error banner.
+      const { uploadedDocs: next } = await addChartDocuments(chartId, payload, onProgress);
       setDocs([]);
       setImageGroups([]);
       setStagedImages([]);
       setGroupLabel('');
       setTexts([]);
+      onDocsChanged?.(next);
+
+      // 2) Run the pipeline over the chart's FULL document set so the
+      //    prediction reflects everything, not just the files added this round.
+      setPhase('analyzing');
+      const result = await reprocessChartDocuments(chartId);
       setStatus('success');
       setPhase(null);
       onProcessed?.(result);
@@ -214,6 +238,46 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
       setPhase(null);
       const e = err as { message?: string };
       setErrorMsg(e.message ?? 'Failed to process documents.');
+      // Re-sync from the server so whatever DID upload (and any error the
+      // watcher recorded) shows up — and the Retry control becomes available.
+      onRefetch?.();
+    }
+  }
+
+  /** Re-run the pipeline over the docs already on the chart — no re-upload. */
+  async function retry() {
+    setStatus('uploading');
+    setPhase('analyzing');
+    setProgress(100);
+    setErrorMsg(null);
+    try {
+      const result = await reprocessChartDocuments(chartId);
+      setStatus('success');
+      setPhase(null);
+      onProcessed?.(result);
+    } catch (err) {
+      console.error('Reprocess failed', err);
+      setStatus('error');
+      setPhase(null);
+      const e = err as { message?: string };
+      setErrorMsg(e.message ?? 'Failed to reprocess documents.');
+      onRefetch?.();
+    }
+  }
+
+  /** Remove one already-uploaded document (deletes it from S3 too). */
+  async function removeUploaded(docId: string) {
+    setRemovingId(docId);
+    setErrorMsg(null);
+    try {
+      const { uploadedDocs: next } = await removeChartDocument(chartId, docId);
+      onDocsChanged?.(next);
+    } catch (err) {
+      console.error('Remove document failed', err);
+      const e = err as { message?: string };
+      setErrorMsg(e.message ?? 'Failed to remove document.');
+    } finally {
+      setRemovingId(null);
     }
   }
 
@@ -361,12 +425,16 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
           {/* ── Process button ── */}
           <Button
             className="w-full mt-5"
-            disabled={!hasStaged || status === 'uploading'}
+            disabled={!hasStaged || busy}
             loading={status === 'uploading'}
             leftIcon={<Upload className="w-4 h-4" />}
             onClick={processDocuments}
           >
-            {status === 'uploading' ? 'Uploading…' : 'Process Documents'}
+            {status === 'uploading'
+              ? 'Uploading…'
+              : hasUploaded
+              ? 'Add & Re-run AI'
+              : 'Process Documents'}
           </Button>
 
           {/* ── Live progress ── */}
@@ -412,29 +480,38 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
 
           {/* ── AI status + uploaded list ── */}
           {hasUploaded && (() => {
-            const aiStatus = deriveAiStatus(customFields ?? undefined);
-            const Icon =
-              status === 'error' || aiStatus === 'ERRORED'
-                ? AlertCircle
-                : aiStatus === 'QUEUED' || aiStatus === 'PROCESSING'
-                ? Loader2
-                : CheckCircle2;
-            const iconClass =
-              status === 'error' || aiStatus === 'ERRORED'
-                ? 'w-4 h-4 text-danger'
-                : aiStatus === 'QUEUED' || aiStatus === 'PROCESSING'
-                ? 'w-4 h-4 text-warn animate-spin'
-                : 'w-4 h-4 text-success';
+            const errored = status === 'error' || aiStatus === 'ERRORED';
+            const running = aiStatus === 'QUEUED' || aiStatus === 'PROCESSING';
+            const Icon = errored ? AlertCircle : running ? Loader2 : CheckCircle2;
+            const iconClass = errored
+              ? 'w-4 h-4 text-danger'
+              : running
+              ? 'w-4 h-4 text-warn animate-spin'
+              : 'w-4 h-4 text-success';
             return (
               <div className="mt-5 pt-5 border-t border-line">
                 <div className="flex items-center gap-2 mb-3">
                   <Icon className={iconClass} />
                   <span className="text-sm font-semibold text-ink">AI Status</span>
                   <AiStatusChip status={aiStatus} />
+                  {/* Retry runs the pipeline over the current set — add/remove
+                      docs above first to curate it, or retry as-is. */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto"
+                    disabled={busy || uploadedDocs.length === 0}
+                    loading={status === 'uploading' && phase === 'analyzing'}
+                    leftIcon={<RotateCw className="w-3.5 h-3.5" />}
+                    onClick={retry}
+                  >
+                    Retry
+                  </Button>
                 </div>
                 <div className="space-y-1.5">
                   {uploadedDocs.map((d) => {
                     const meta = fileTypeLabel(d.mimeType);
+                    const removing = removingId === d.id;
                     return (
                       <div
                         key={d.id}
@@ -456,6 +533,19 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
                           className="text-xs font-semibold text-primary-ink dark:text-primary bg-primary-soft hover:bg-primary/30 dark:hover:bg-primary/20 px-2 py-1 rounded-pill flex items-center gap-1"
                         >
                           <Eye className="w-3 h-3" /> View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeUploaded(d.id)}
+                          disabled={busy || removing}
+                          title={busy ? 'Wait for the current run to finish' : 'Remove document'}
+                          className="text-ink-subtle hover:text-danger disabled:opacity-40 disabled:cursor-not-allowed p-1"
+                        >
+                          {removing ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
                         </button>
                       </div>
                     );

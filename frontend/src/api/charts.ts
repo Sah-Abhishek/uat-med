@@ -13,6 +13,7 @@ import type {
   Priority,
   Procedure,
   SortDir,
+  UploadedDocument,
 } from './types';
 
 /* ── List ──────────────────────────────────────────────── */
@@ -294,6 +295,31 @@ export async function processChartDocuments(
     },
   );
 
+  // Phases 2–3 — poll until done, then finalize.
+  return pollAndFinalize(chartId, started.encounterId, started.taskId);
+}
+
+/**
+ * Re-run the ICD Predictor over the chart's CURRENT document set — no upload.
+ * The server pulls the already-stored docs from S3, so this just kicks off a
+ * fresh encounter and then reuses the same poll → finalize flow as the initial
+ * run. Curate the set first with {@link addChartDocuments} / {@link removeChartDocument}.
+ */
+export async function reprocessChartDocuments(chartId: string): Promise<AiEncounterResult> {
+  const { data: started } = await api.post<StartProcessDocumentsResponse>(
+    `/charts/${chartId}/reprocess`,
+    {},
+    { timeout: 60 * 1000 },
+  );
+  return pollAndFinalize(chartId, started.encounterId, started.taskId);
+}
+
+/** Shared phase 2 (poll) + phase 3 (finalize) loop for both process & reprocess. */
+async function pollAndFinalize(
+  chartId: string,
+  encounterId: string,
+  taskId: string,
+): Promise<AiEncounterResult> {
   // Phase 2 — poll. Each call is cheap; we cap total wall-clock at 10min.
   const start = Date.now();
   while (true) {
@@ -302,8 +328,8 @@ export async function processChartDocuments(
     }
     await sleep(POLL_INTERVAL_MS);
     const { data: s } = await api.get<EncounterStatusResponse>(
-      `/charts/${chartId}/process-documents/${started.encounterId}/status`,
-      { params: { taskId: started.taskId }, timeout: 30 * 1000 },
+      `/charts/${chartId}/process-documents/${encounterId}/status`,
+      { params: { taskId }, timeout: 30 * 1000 },
     );
     if (s.status === 'SUCCESS') break;
     if (s.status === 'FAILURE') {
@@ -313,12 +339,41 @@ export async function processChartDocuments(
 
   // Phase 3 — finalize.
   const { data: result } = await api.post<AiEncounterResult>(
-    `/charts/${chartId}/process-documents/${started.encounterId}/finalize`,
+    `/charts/${chartId}/process-documents/${encounterId}/finalize`,
     {},
     { timeout: 60 * 1000 },
   );
   return result;
 }
+
+/** Upload documents to a chart without running the AI. Returns the updated list. */
+export async function addChartDocuments(
+  chartId: string,
+  input: ProcessDocumentsInput,
+  onUploadProgress?: (pct: number) => void,
+): Promise<{ uploadedDocs: UploadedDocument[]; added: number }> {
+  const fd = new FormData();
+  input.files.forEach((f) => fd.append('files', f, f.name));
+  if (input.reportTypes?.length) fd.append('reportTypes', input.reportTypes.join(','));
+  if (input.documentType) fd.append('documentType', input.documentType);
+  const { data } = await api.post<{ uploadedDocs: UploadedDocument[]; added: number }>(
+    `/charts/${chartId}/documents`,
+    fd,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 5 * 60 * 1000,
+      onUploadProgress: (e) => {
+        if (!onUploadProgress || !e.total) return;
+        onUploadProgress(Math.round((e.loaded / e.total) * 100));
+      },
+    },
+  );
+  return data;
+}
+
+/** Remove one uploaded document from a chart. Returns the updated list. */
+export const removeChartDocument = (chartId: string, docId: string) =>
+  del<{ uploadedDocs: UploadedDocument[] }>(`/charts/${chartId}/documents/${docId}`);
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));

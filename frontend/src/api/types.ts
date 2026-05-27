@@ -228,6 +228,8 @@ export interface UploadedDocument {
   mimeType: string;
   size: number;
   url: string;
+  /** S3 object key — present on docs uploaded after the add/remove feature landed. */
+  key?: string;
   reportType: AiReportType;
   reportId?: string;
 }

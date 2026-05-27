@@ -241,4 +241,64 @@ export class ChartsController {
   ) {
     return this.svc.finalizeProcessDocuments(id, encounterId);
   }
+
+  /**
+   * Add documents to a chart WITHOUT running the AI pipeline. Lets the user
+   * curate the set before a (re)run — pair with DELETE :id/documents/:docId to
+   * remove and POST :id/reprocess to run over the whole set.
+   */
+  @Post(':id/documents')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @HttpCode(200)
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_FILES, {
+      limits: { fileSize: MAX_FILE_BYTES },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        files: { type: 'array', items: { type: 'string', format: 'binary' } },
+        reportTypes: { type: 'string', description: 'Comma-separated list, one per file in order.' },
+        documentType: { type: 'string', description: 'Optional fallback hint when reportTypes is missing.' },
+      },
+    },
+  })
+  @ApiOperation({ summary: 'Upload documents to a chart (no AI run). Returns the updated uploadedDocs list.' })
+  addDocuments(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() body: ProcessDocumentsDto,
+  ) {
+    if (!files?.length) {
+      throw new BadRequestException({ error: { code: 'bad_request', message: 'No files uploaded.' } });
+    }
+    return this.svc.addDocuments(id, files, body);
+  }
+
+  /** Remove one uploaded document (drops it from the chart + deletes the S3 object). */
+  @Delete(':id/documents/:docId')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Remove an uploaded document from a chart. Returns the updated uploadedDocs list.' })
+  removeDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('docId') docId: string,
+  ) {
+    return this.svc.removeDocument(id, docId);
+  }
+
+  /**
+   * Re-run the ICD Predictor over the chart's current document set without
+   * re-uploading. Returns { encounterId, taskId } so the FE reuses the same
+   * poll → finalize flow as the initial run.
+   */
+  @Post(':id/reprocess')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Retry AI processing over the chart\'s current documents; returns encounterId + taskId.' })
+  reprocess(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.reprocess(id);
+  }
 }

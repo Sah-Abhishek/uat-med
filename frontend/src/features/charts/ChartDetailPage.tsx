@@ -552,6 +552,23 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
             // Refetch so other consumers (e.g. the milestone state) see it.
             qc.invalidateQueries({ queryKey: ['chart', String(chart.id)] });
           }}
+          onDocsChanged={(docs) => {
+            // Add/remove only touches the document list — patch uploadedDocs in
+            // place without disturbing the existing aiPrediction.
+            qc.setQueryData<Chart>(['chart', String(chart.id)], (prev) =>
+              prev
+                ? {
+                    ...prev,
+                    customFields: {
+                      ...(prev.customFields ?? {}),
+                      uploadedDocs: docs,
+                    },
+                  }
+                : prev,
+            );
+            qc.invalidateQueries({ queryKey: ['chart', String(chart.id)] });
+          }}
+          onRefetch={() => qc.invalidateQueries({ queryKey: ['chart', String(chart.id)] })}
         />
 
         <ChartInfoSection

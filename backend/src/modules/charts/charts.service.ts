@@ -536,6 +536,7 @@ async update(id: number, dto: UpdateChartDto) {
       mimeType: s.mimeType,
       size: s.size,
       url: s.url,
+      key: s.key,
       reportType: reportTypes[i],
       reportId: start.reportIds[i],
     }));
@@ -621,6 +622,156 @@ async update(id: number, dto: UpdateChartDto) {
     await this.charts.save(c);
 
     return { ...result, uploadedDocs };
+  }
+
+  /**
+   * Add documents to a chart WITHOUT running the AI pipeline. This is the
+   * upload half of the (now-separated) upload→process flow: the user can curate
+   * the document set — add here, remove via removeDocument — and then trigger a
+   * single run over the whole set with reprocess(). Word docs are converted to
+   * PDF up front (same as the original combined path) and duplicates already on
+   * the chart (same filename + size) are skipped so re-adding can't double up.
+   */
+  async addDocuments(id: number, files: Express.Multer.File[], body: ProcessDocumentsDto) {
+    const c = await this.charts.findOne({ where: { id } });
+    if (!c) throw new NotFoundException();
+    if (c.customFields?.pendingPrediction) {
+      throw new ConflictException('A run is in progress; wait for it to finish before adding documents.');
+    }
+
+    const explicit = (body.reportTypes ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean) as ReportType[];
+    const reportTypes: ReportType[] = files.map(
+      (f, i) => (explicit[i] as ReportType) ?? this.aiPredictor.mapReportType(body.documentType, f.originalname),
+    );
+
+    const pdfFiles = await this.conversion.toPdfMany(
+      files.map((f) => ({ buffer: f.buffer, originalname: f.originalname, mimetype: f.mimetype, size: f.size })),
+    );
+
+    const existing = (c.customFields?.uploadedDocs as UploadedDocument[] | undefined) ?? [];
+    const seen = new Set(existing.map((d) => `${d.filename}::${d.size}`));
+
+    // Keep reportType aligned with each surviving (non-duplicate) file.
+    const fresh = pdfFiles
+      .map((f, i) => ({ file: f, reportType: reportTypes[i] }))
+      .filter(({ file }) => !seen.has(`${file.originalname}::${file.size}`));
+
+    if (!fresh.length) {
+      // Everything submitted is already on the chart — nothing to do.
+      return { uploadedDocs: existing, added: 0 };
+    }
+
+    const stored = await this.storage.uploadMany(fresh.map((t) => t.file), c.id);
+    const newDocs: UploadedDocument[] = stored.map((s, i) => ({
+      id: `${c.id}-${Date.now()}-${i}`,
+      filename: s.filename,
+      mimeType: s.mimeType,
+      size: s.size,
+      url: s.url,
+      key: s.key,
+      reportType: fresh[i].reportType,
+    }));
+
+    const uploadedDocs = [...existing, ...newDocs];
+    c.customFields = { ...(c.customFields ?? {}), uploadedDocs };
+    await this.charts.save(c);
+    return { uploadedDocs, added: newDocs.length };
+  }
+
+  /**
+   * Remove one uploaded document from a chart. Drops it from
+   * customFields.uploadedDocs and best-effort deletes the underlying S3 object.
+   * Blocked while a run is in flight so we don't desync the encounter's
+   * report_ids from the doc list mid-pipeline.
+   */
+  async removeDocument(id: number, docId: string) {
+    const c = await this.charts.findOne({ where: { id } });
+    if (!c) throw new NotFoundException();
+    if (c.customFields?.pendingPrediction) {
+      throw new ConflictException('A run is in progress; cannot remove documents until it finishes.');
+    }
+
+    const existing = (c.customFields?.uploadedDocs as UploadedDocument[] | undefined) ?? [];
+    const target = existing.find((d) => d.id === docId);
+    if (!target) throw new NotFoundException('Document not found on this chart.');
+
+    const key = this.docKey(target);
+    if (key) await this.storage.delete(key);
+
+    const uploadedDocs = existing.filter((d) => d.id !== docId);
+    c.customFields = { ...(c.customFields ?? {}), uploadedDocs };
+    await this.charts.save(c);
+    return { uploadedDocs };
+  }
+
+  /**
+   * Re-run the ICD Predictor over the chart's CURRENT document set without
+   * forcing a re-upload. Pulls each stored doc back from S3, sends the whole
+   * set to a fresh gateway encounter, and re-stitches the new report_ids onto
+   * the docs (each encounter mints its own). Clears any prior error so the
+   * chart resolves to DONE — not ERRORED — once the watcher finalizes.
+   */
+  async reprocess(id: number) {
+    const c = await this.charts.findOne({ where: { id } });
+    if (!c) throw new NotFoundException();
+    if (c.customFields?.pendingPrediction) {
+      throw new ConflictException('A run is already in progress for this chart.');
+    }
+
+    const uploadedDocs = (c.customFields?.uploadedDocs as UploadedDocument[] | undefined) ?? [];
+    if (!uploadedDocs.length) {
+      throw new BadRequestException('No documents to process. Upload at least one document first.');
+    }
+
+    // Re-download each stored doc (in order) and forward to the gateway.
+    const inbound: InboundFile[] = [];
+    for (const d of uploadedDocs) {
+      const key = this.docKey(d);
+      if (!key) {
+        throw new BadRequestException(`Cannot locate stored file for "${d.filename}". Remove and re-add it, then retry.`);
+      }
+      const buffer = await this.storage.download(key);
+      inbound.push({ buffer, filename: d.filename, mimeType: d.mimeType, reportType: d.reportType });
+    }
+
+    const start = await this.aiPredictor.startEncounter(inbound, {
+      mrn: c.mrNumber,
+      encounterDate: c.dos ?? c.admitDate,
+      facility: this.optionalString(c.customFields?.facility),
+      department: this.optionalString(c.customFields?.specialty),
+    });
+
+    // New encounter → new report_ids, parallel to uploadedDocs order.
+    const restitched = uploadedDocs.map((d, i) => ({ ...d, reportId: start.reportIds[i] ?? d.reportId }));
+
+    const { aiPredictionError: _drop, ...keepCustom } = c.customFields ?? {};
+    c.customFields = {
+      ...keepCustom,
+      uploadedDocs: restitched,
+      pendingPrediction: {
+        encounterId: start.encounterId,
+        taskId: start.taskId,
+        reportIds: start.reportIds,
+        startedAt: new Date().toISOString(),
+      },
+    };
+    await this.charts.save(c);
+
+    return {
+      encounterId: start.encounterId,
+      taskId: start.taskId,
+      reportIds: start.reportIds,
+      uploadedDocs: restitched,
+    };
+  }
+
+  /** Resolve an uploaded doc's S3 key, falling back to parsing its URL for
+   *  docs persisted before `key` was stored on the record. */
+  private docKey(d: UploadedDocument): string | null {
+    return d.key ?? this.storage.keyFromUrl(d.url);
   }
 
   private optionalString(v: unknown): string | undefined {

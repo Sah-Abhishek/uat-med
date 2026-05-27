@@ -1,6 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import * as path from 'path';
 
 export interface StoredDocument {
@@ -105,6 +105,37 @@ export class DocumentStorageService {
     }
     const bytes = await body.transformToByteArray();
     return Buffer.from(bytes);
+  }
+
+  /**
+   * Best-effort delete of a previously-stored object. Used when a user removes
+   * an uploaded document from a chart. Failures are logged but NOT thrown — the
+   * caller still wants to drop the doc from the chart even if the S3 object is
+   * already gone or the backend is briefly unreachable (worst case: an orphaned
+   * object, not a stuck UI).
+   */
+  async delete(key: string): Promise<void> {
+    if (!this.client) {
+      this.log.warn(`Skipping delete of ${key} — storage not configured.`);
+      return;
+    }
+    try {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+      this.log.log(`Deleted ${key}`);
+    } catch (err) {
+      this.log.error(`S3 delete failed for ${key}: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Recover the object key from a persisted public URL. Documents uploaded
+   * before we started storing `key` on the chart record only have the
+   * `${endpoint}/${bucket}/${key}` URL, so this lets download()/delete() still
+   * address them. Returns null if the URL doesn't match this store's layout.
+   */
+  keyFromUrl(url: string): string | null {
+    const prefix = `${this.endpoint}/${this.bucket}/`;
+    return url.startsWith(prefix) ? url.slice(prefix.length) : null;
   }
 
   async uploadMany(
