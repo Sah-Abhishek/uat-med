@@ -146,7 +146,7 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
               })),
             ]}
             placeholder="Worklist name"
-            searchable={(worklistsQ.data?.total ?? 0) > 10}
+            searchable
             onSearch={setWorklistSearch}
             loading={worklistsQ.isFetching}
             searchPlaceholder="Search worklists…"
