@@ -9,6 +9,7 @@ import {
   getProductivity,
 } from '@/api/dashboard';
 import { useAuth } from '@/auth/store';
+import { useScope } from '@/scope/store';
 import { can } from '@/permissions';
 import { PageHeader, SectionLabel } from '@/components/layout/PageHeader';
 import { TintedStatCard, IllustrationStatCard, CoralPillStat } from '@/components/ui/StatCards';
@@ -39,6 +40,13 @@ import {
 export function DashboardPage() {
   const user = useAuth((s) => s.user)!;
   const isTeam = can(user, 'dashboard.team');
+  // Global Client / Location scope from the header.
+  const clientId = useScope((s) => s.clientId);
+  const locationId = useScope((s) => s.locationId);
+  const scope = {
+    ...(clientId != null ? { clientId } : {}),
+    ...(locationId != null ? { locationId } : {}),
+  };
 
   const self = useQuery({
     queryKey: ['dashboard', 'self'],
@@ -46,20 +54,20 @@ export function DashboardPage() {
   });
 
   const milestones = useQuery({
-    queryKey: ['dashboard', 'milestones'],
-    queryFn: () => getMilestones(),
+    queryKey: ['dashboard', 'milestones', clientId, locationId],
+    queryFn: () => getMilestones(scope),
     enabled: isTeam,
   });
 
   const status = useQuery({
-    queryKey: ['dashboard', 'status'],
-    queryFn: () => getStatus(),
+    queryKey: ['dashboard', 'status', clientId, locationId],
+    queryFn: () => getStatus(scope),
     enabled: isTeam,
   });
 
   const unallocated = useQuery({
-    queryKey: ['dashboard', 'unallocated'],
-    queryFn: () => getUnallocated(),
+    queryKey: ['dashboard', 'unallocated', clientId, locationId],
+    queryFn: () => getUnallocated(scope),
     enabled: isTeam,
   });
 
@@ -211,9 +219,13 @@ export function DashboardPage() {
 /* ── Analytics: 3 collapsible cards × N chart tiles each ─ */
 
 function AnalyticsPanels() {
-  // No filters wired yet — left empty so the panels respect the user's role
-  // scope on the backend without forcing an extra round-trip on mount.
-  const filters = {};
+  // Scope the analytics panels by the global header Client / Location filter.
+  const clientId = useScope((s) => s.clientId);
+  const locationId = useScope((s) => s.locationId);
+  const filters = {
+    ...(clientId != null ? { clientId } : {}),
+    ...(locationId != null ? { locationId } : {}),
+  };
 
   const allocation = useQuery({
     queryKey: ['dashboard', 'allocation-stats', filters],

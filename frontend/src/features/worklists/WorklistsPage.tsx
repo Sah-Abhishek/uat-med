@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
@@ -28,6 +28,7 @@ import { Modal, ModalFooter, Pagination, Avatar, DualProgressBar } from '@/compo
 import { WorklistStatusChip } from '@/components/ui/Chip';
 import { SortableHeader } from '@/components/ui/SortableHeader';
 import { useCan } from '@/hooks/useCan';
+import { useScope } from '@/scope/store';
 import { useTableSort, sortRows } from '@/hooks/useTableSort';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
@@ -53,16 +54,30 @@ export function WorklistsPage() {
   // initial undefined keeps the server's default order (received date desc).
   const { sort, toggle: onSort } = useTableSort({ sortBy: undefined, sortDir: 'asc' });
 
+  // Global Client / Location scope from the header.
+  const clientId = useScope((s) => s.clientId);
+  const locationId = useScope((s) => s.locationId);
+  const scope = {
+    ...(clientId != null ? { clientId } : {}),
+    ...(locationId != null ? { locationId } : {}),
+  };
+
+  // Reset to page 1 when the scope changes — old rows may fall out of view.
+  useEffect(() => {
+    setPage(1);
+  }, [clientId, locationId]);
+
   const summary = useQuery({
-    queryKey: ['worklists', 'summary'],
-    queryFn: getStatusSummary,
+    queryKey: ['worklists', 'summary', clientId, locationId],
+    queryFn: () => getStatusSummary(scope),
   });
 
   const list = useQuery({
-    queryKey: ['worklists', { page, pageSize, filters }],
+    queryKey: ['worklists', { page, pageSize, filters, clientId, locationId }],
     queryFn: () =>
       listWorklists({
         ...filters,
+        ...scope,
         page,
         pageSize,
         sortBy: 'receivedDate',

@@ -46,8 +46,11 @@ export class ChartsController {
 
   @Get('summary')
   @ApiOperation({ summary: 'Counters for priority tabs and top status cards.' })
-  summary(@CurrentUser() user: AuthenticatedUser) {
-    return this.svc.summary(user);
+  summary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() q: { clientId?: number; locationId?: number },
+  ) {
+    return this.svc.summary(user, q);
   }
 
   @Get('active-timer')

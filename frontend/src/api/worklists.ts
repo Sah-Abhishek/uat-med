@@ -26,8 +26,9 @@ export interface WorklistListParams {
 export const listWorklists = (params: WorklistListParams = {}) =>
   get<Paginated<Worklist>>('/worklists', params);
 
-export const getStatusSummary = () =>
-  get<WorklistStatusSummary>('/worklists/status-summary');
+export const getStatusSummary = (
+  params: { clientId?: number; locationId?: number } = {},
+) => get<WorklistStatusSummary>('/worklists/status-summary', params);
 
 export const getWorklist = (id: string) =>
   get<WorklistDetail>(`/worklists/${id}`);

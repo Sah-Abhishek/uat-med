@@ -98,6 +98,9 @@ export class ChartsService {
     if (q.milestone) qb.andWhere('c.milestone = :m', { m: q.milestone });
     if (q.allocatedUserId) qb.andWhere('(c.allocated_coder_id = :au OR c.allocated_auditor_id = :au)', { au: q.allocatedUserId });
     if (q.primarySpecialityId) qb.andWhere('worklist.primary_speciality_id = :ps', { ps: q.primarySpecialityId });
+    // Global header scope (Client / Location). The worklist is already joined.
+    if (q.clientId) qb.andWhere('worklist.client_id = :cid', { cid: q.clientId });
+    if (q.locationId) qb.andWhere('worklist.location_id = :lid', { lid: q.locationId });
     // Narrow to a single AI-pipeline state (e.g. ERRORED) using the same
     // custom_fields predicates that drive the AI summary tiles.
     if (q.aiStatus) this.applyAiStatusFilter(qb, q.aiStatus);
@@ -179,13 +182,22 @@ export class ChartsService {
     return new PaginatedResponseDto(mapped, total, q.page, q.pageSize);
   }
 
-  async summary(user: AuthenticatedUser) {
+  async summary(user: AuthenticatedUser, q: { clientId?: number; locationId?: number } = {}) {
     const qb = this.charts.createQueryBuilder('c');
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
     if (user.role === Role.AUDITOR) qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
     // Keep the tiles / tab counts in step with list(): exclude orphaned charts.
     // Applied to the base qb before any clone so every count below inherits it.
     this.excludeOrphanedCharts(qb);
+    // Global header scope (Client / Location). summary() doesn't join the
+    // worklist by default, so join it here (alias `ws` — `w` is taken by the
+    // orphan-guard subquery) only when a scope is set. Chart→worklist is
+    // many-to-one, so the join can't inflate the COUNTs below.
+    if (q.clientId || q.locationId) {
+      qb.innerJoin('worklists', 'ws', 'ws.id = c.worklist_id');
+      if (q.clientId) qb.andWhere('ws.client_id = :cid', { cid: Number(q.clientId) });
+      if (q.locationId) qb.andWhere('ws.location_id = :lid', { lid: Number(q.locationId) });
+    }
 
     const priorityRows = await qb.clone()
       .select('c.priority', 'priority').addSelect('COUNT(*)', 'count').groupBy('c.priority').getRawMany();

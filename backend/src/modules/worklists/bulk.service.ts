@@ -4,6 +4,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
@@ -96,29 +98,28 @@ export interface RetryErroredResult {
   skipped: Array<{ chartId: string; reason: 'no_documents' }>;
 }
 
-interface WorklistAiQueueState {
-  /** Chart IDs awaiting dispatch (FIFO). */
-  pending: number[];
-  /** True while runWorker is in its dispatch loop. */
-  running: boolean;
-  /** Set by clearStuckAiRuns; the worker checks this between dispatches. */
-  abort: boolean;
-}
-
-/** Wall-clock ceiling for waiting on a single chart's gateway run. */
-const WORKER_WAIT_MAX_MS = 30 * 60 * 1000;
-/** Poll cadence while the worker waits for the previous chart to settle. */
-const WORKER_POLL_MS = 5_000;
+/**
+ * Cadence of the AI-dispatch reconciler loop (see `reconcileTick`). The DB is
+ * the queue: every tick we scan for charts with `pendingPrediction.awaitingDispatch=true`
+ * and dispatch one per worklist that isn't already running on the gateway.
+ * Picking 5s balances latency (user sees Queued → Processing within seconds)
+ * against DB load (two cheap indexed JSONB queries per tick).
+ */
+const RECONCILE_TICK_MS = 5_000;
 
 @Injectable()
-export class WorklistBulkService {
+export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(WorklistBulkService.name);
   /**
-   * In-memory per-worklist AI dispatch queue. Single-instance only — multi-
-   * instance prod would need Redis, but the rest of the app keeps similar
-   * state in memory (active timers, column prefs), so this matches.
+   * Chart IDs currently being dispatched to the gateway *in this process*.
+   * Short-lived guard against double-dispatch when a tick fires while a
+   * previous startEncounter is still in flight. The DB (the
+   * `awaitingDispatch: true` flag) is the durable queue — this Set is lost on
+   * restart, but the very next reconcile tick rediscovers any chart left
+   * mid-dispatch from `awaitingDispatch=true` rows in the DB and resumes.
    */
-  private readonly aiQueues = new Map<number, WorklistAiQueueState>();
+  private readonly dispatching = new Set<number>();
+  private reconcilerTimer: NodeJS.Timeout | null = null;
 
   constructor(
     @InjectRepository(Chart) private readonly charts: Repository<Chart>,
@@ -128,6 +129,92 @@ export class WorklistBulkService {
     private readonly conversion: DocumentConversionService,
     private readonly aiPredictor: AiPredictorService,
   ) {}
+
+  onModuleInit() {
+    this.reconcilerTimer = setInterval(() => {
+      this.reconcileTick().catch((err) =>
+        this.log.error(`AI reconciler tick failed: ${(err as Error).message}`),
+      );
+    }, RECONCILE_TICK_MS);
+    // Don't keep the event loop alive solely for this timer (matches the
+    // AiPipelineWatcher pattern).
+    this.reconcilerTimer.unref?.();
+    this.log.log(`AI dispatch reconciler started (every ${RECONCILE_TICK_MS}ms)`);
+  }
+
+  onModuleDestroy() {
+    if (this.reconcilerTimer) clearInterval(this.reconcilerTimer);
+    this.reconcilerTimer = null;
+  }
+
+  /**
+   * The reconciler loop. The DB is the queue:
+   *   - `awaitingDispatch=true`         → "queued, waiting to be sent to gateway"
+   *   - `pendingPrediction` with set `encounterId` → "running on gateway"
+   *
+   * Each tick: find every awaiting chart (oldest first), bucket by worklist,
+   * and for each worklist that isn't already running a chart on the gateway,
+   * dispatch the oldest one. Fire-and-forget so the tick returns quickly; the
+   * `dispatching` Set keeps a second tick from re-dispatching the same chart
+   * while its startEncounter is still in flight. On any thrown error we stamp
+   * `aiPredictionError` on the chart so it doesn't loop forever.
+   */
+  private async reconcileTick(): Promise<void> {
+    // 1) Find every chart awaiting dispatch (oldest first). Orphans excluded —
+    // never resurrect work for a chart whose worklist was soft-deleted.
+    const awaitingRows: Array<{ id: string | number; worklistId: string | number }> =
+      await this.charts
+        .createQueryBuilder('c')
+        .select('c.id', 'id')
+        .addSelect('c.worklist_id', 'worklistId')
+        .where(`c.custom_fields->'pendingPrediction'->>'awaitingDispatch' = 'true'`)
+        .andWhere(
+          `EXISTS (SELECT 1 FROM worklists w WHERE w.id = c.worklist_id AND w.deleted_at IS NULL)`,
+        )
+        .orderBy(`c.custom_fields->'pendingPrediction'->>'startedAt'`, 'ASC')
+        .getRawMany();
+    if (awaitingRows.length === 0) return;
+
+    // 2) Worklists with a chart already running on the gateway (post-dispatch,
+    // `encounterId` set). One-dispatch-per-worklist is enforced here so the
+    // gateway never sees two starts from the same worklist simultaneously.
+    const inFlightRows: Array<{ worklistId: string | number }> = await this.charts
+      .createQueryBuilder('c')
+      .select('DISTINCT c.worklist_id', 'worklistId')
+      .where(`c.custom_fields ? 'pendingPrediction'`)
+      .andWhere(`COALESCE(c.custom_fields->'pendingPrediction'->>'awaitingDispatch','') != 'true'`)
+      .andWhere(`COALESCE(c.custom_fields->'pendingPrediction'->>'encounterId','') != ''`)
+      .getRawMany();
+    const busy = new Set<number>(inFlightRows.map((r) => Number(r.worklistId)));
+
+    // 3) Bucket awaiting charts by worklist, then dispatch the oldest one for
+    // each worklist that's free.
+    const byWorklist = new Map<number, number[]>();
+    for (const r of awaitingRows) {
+      const wid = Number(r.worklistId);
+      const arr = byWorklist.get(wid) ?? [];
+      arr.push(Number(r.id));
+      byWorklist.set(wid, arr);
+    }
+
+    for (const [worklistId, chartIds] of byWorklist) {
+      if (busy.has(worklistId)) continue;
+      if (chartIds.some((id) => this.dispatching.has(id))) continue;
+      const chartId = chartIds[0]; // oldest, thanks to the ORDER BY above
+      this.dispatching.add(chartId);
+      // Fire-and-forget. Each dispatch can take seconds (S3 download + gateway
+      // start); the tick must return quickly so the next one can run.
+      void this.dispatchOneChartToGateway(chartId)
+        .catch((err) => {
+          const msg = (err as Error).message;
+          this.log.error(`AI dispatch chart=${chartId} (worklist=${worklistId}): ${msg}`);
+          return this.markChartGatewayError(chartId, msg);
+        })
+        .finally(() => {
+          this.dispatching.delete(chartId);
+        });
+    }
+  }
 
   /* ── Excel preview (no writes) ─────────────────────────── */
   async preview(worklistId: number, file: Express.Multer.File): Promise<BulkImportPreview> {
@@ -654,55 +741,16 @@ export class WorklistBulkService {
     }
     if (eligible.length > 0) await this.charts.save(eligible);
 
-    // Enqueue + ensure a worker is running.
-    const state = this.aiQueues.get(worklistId) ?? { pending: [], running: false, abort: false };
-    state.pending.push(...eligible.map((c) => c.id));
-    state.abort = false;
-    this.aiQueues.set(worklistId, state);
-
-    if (!state.running) {
-      state.running = true;
-      // Fire-and-forget: the HTTP response returns immediately.
-      setImmediate(() => {
-        this.runAiQueueWorker(worklistId).catch((err) => {
-          this.log.error(`AI queue worker (worklist ${worklistId}) crashed: ${(err as Error).message}`);
-          const s = this.aiQueues.get(worklistId);
-          if (s) s.running = false;
-        });
-      });
-    }
+    // The DB rows we just wrote (`awaitingDispatch: true`) ARE the queue. The
+    // reconciler will pick them up on its next tick; kick it once now so the
+    // first dispatch happens within ~ms instead of waiting up to a full tick.
+    if (eligible.length > 0) void this.reconcileTick().catch(() => undefined);
 
     return {
       eligible: eligible.length,
       triggered: eligible.length,
       skipped,
     };
-  }
-
-  /** Per-worklist background worker. Dispatches one chart at a time. */
-  private async runAiQueueWorker(worklistId: number): Promise<void> {
-    const state = this.aiQueues.get(worklistId);
-    if (!state) return;
-    try {
-      while (state.pending.length > 0 && !state.abort) {
-        const chartId = state.pending.shift()!;
-        try {
-          const dispatched = await this.dispatchOneChartToGateway(chartId);
-          // Wait for the watcher to finalize this chart (or for it to fail)
-          // before pulling the next one off the queue. This is what makes the
-          // dispatch truly serial — the gateway never sees a second start
-          // until the first has settled.
-          if (dispatched) await this.waitForChartCompletion(chartId);
-        } catch (err) {
-          this.log.error(`AI queue: chart ${chartId} failed: ${(err as Error).message}`);
-          await this.markChartGatewayError(chartId, (err as Error).message);
-        }
-      }
-    } finally {
-      state.running = false;
-      // Drop the entry once it's empty so a future run starts fresh.
-      if (state.pending.length === 0) this.aiQueues.delete(worklistId);
-    }
   }
 
   private async dispatchOneChartToGateway(chartId: number): Promise<boolean> {
@@ -763,21 +811,6 @@ export class WorklistBulkService {
     return true;
   }
 
-  /** Block until the chart's pendingPrediction is gone, or the cap is hit. */
-  private async waitForChartCompletion(chartId: number): Promise<void> {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < WORKER_WAIT_MAX_MS) {
-      await new Promise((r) => setTimeout(r, WORKER_POLL_MS));
-      const c = await this.charts.findOne({ where: { id: chartId } });
-      if (!c) return;
-      const cf = (c.customFields ?? {}) as Record<string, unknown>;
-      // Done = pendingPrediction removed (watcher finalized it) OR an error
-      // was recorded. Either way, the chart is settled and we can move on.
-      if (!cf.pendingPrediction || cf.aiPredictionError) return;
-    }
-    this.log.warn(`AI queue: chart ${chartId} did not settle within ${WORKER_WAIT_MAX_MS}ms; advancing anyway.`);
-  }
-
   private async markChartGatewayError(chartId: number, message: string): Promise<void> {
     const c = await this.charts.findOne({ where: { id: chartId } });
     if (!c) return;
@@ -806,15 +839,11 @@ export class WorklistBulkService {
   async clearStuckAiRuns(worklistId: number): Promise<ClearStuckAiResult> {
     await this.ensureWorklist(worklistId);
 
-    // Tell any running dispatch worker to stop and drop everything still in
-    // line. The worker checks `abort` between dispatches and won't pick up
-    // the next chart even if we've already pushed it.
-    const state = this.aiQueues.get(worklistId);
-    if (state) {
-      state.abort = true;
-      state.pending = [];
-    }
-
+    // The DB is the queue: wiping `pendingPrediction` is enough — the next
+    // reconciler tick will see no `awaitingDispatch=true` rows and not try to
+    // dispatch anything. A dispatch already in flight for one of these charts
+    // (between startEncounter and save) re-reads the chart and aborts when it
+    // finds the flag gone, so we don't write a stale encounterId back.
     const charts = await this.charts.find({ where: { worklistId } });
     const cleared: string[] = [];
     for (const c of charts) {
@@ -835,9 +864,8 @@ export class WorklistBulkService {
    * query builder's default `deleted_at IS NULL`) and charts orphaned by a
    * soft-deleted worklist are excluded — we never resurrect gateway work for a
    * worklist that 404s. Each eligible chart is cleared of its error and marked
-   * `awaitingDispatch` so it shows as "Queued" immediately, then handed to the
-   * same per-worklist serial worker `runAiOnWorklist` uses, so the gateway still
-   * sees one start at a time. `AiPipelineWatcher` finalizes each run.
+   * `awaitingDispatch: true`; the reconciler picks them up on its next tick
+   * (one per worklist at a time) and `AiPipelineWatcher` finalizes each run.
    */
   async retryAllErroredCharts(): Promise<RetryErroredResult> {
     const errored = await this.charts
@@ -853,7 +881,6 @@ export class WorklistBulkService {
 
     const now = new Date().toISOString();
     const skipped: RetryErroredResult['skipped'] = [];
-    const eligibleByWorklist = new Map<number, number[]>();
     const toSave: Chart[] = [];
 
     for (const c of errored) {
@@ -876,33 +903,12 @@ export class WorklistBulkService {
         },
       };
       toSave.push(c);
-      const wid = Number(c.worklistId);
-      const arr = eligibleByWorklist.get(wid) ?? [];
-      arr.push(c.id);
-      eligibleByWorklist.set(wid, arr);
     }
 
     if (toSave.length > 0) await this.charts.save(toSave);
-
-    // Enqueue per worklist and ensure each worklist's serial worker is running.
-    // Reuses the exact dispatch machinery as runAiOnWorklist so the two share
-    // the same one-start-at-a-time guarantee and the same watcher finalization.
-    for (const [worklistId, chartIds] of eligibleByWorklist) {
-      const state = this.aiQueues.get(worklistId) ?? { pending: [], running: false, abort: false };
-      state.pending.push(...chartIds);
-      state.abort = false;
-      this.aiQueues.set(worklistId, state);
-      if (!state.running) {
-        state.running = true;
-        setImmediate(() => {
-          this.runAiQueueWorker(worklistId).catch((err) => {
-            this.log.error(`AI queue worker (worklist ${worklistId}) crashed: ${(err as Error).message}`);
-            const s = this.aiQueues.get(worklistId);
-            if (s) s.running = false;
-          });
-        });
-      }
-    }
+    // Same pattern as runAiOnWorklist: the DB is the queue, kick the reconciler
+    // once so the first dispatches start within ms rather than waiting a tick.
+    if (toSave.length > 0) void this.reconcileTick().catch(() => undefined);
 
     return { queued: toSave.length, skipped };
   }

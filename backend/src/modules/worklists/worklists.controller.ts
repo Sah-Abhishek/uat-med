@@ -50,8 +50,8 @@ export class WorklistsController {
 
   @Get('status-summary')
   @ApiOperation({ summary: 'Counters for the three status cards (OPEN / IN_PROGRESS / CLOSED).' })
-  statusSummary() {
-    return this.svc.statusSummary();
+  statusSummary(@Query() q: { clientId?: number; locationId?: number }) {
+    return this.svc.statusSummary(q);
   }
 
   /* ── Bulk: Excel template (static, non-:id route — declared before /:id) ── */

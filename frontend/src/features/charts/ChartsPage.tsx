@@ -53,6 +53,7 @@ const AI_ROW_TINT: Record<AiStatus, string> = {
     'bg-danger-soft/80 hover:bg-danger-soft shadow-[inset_4px_0_0_0_theme(colors.danger.DEFAULT)]',
 };
 import { useAuth } from '@/auth/store';
+import { useScope } from '@/scope/store';
 import { can } from '@/permissions';
 import { SortableHeader } from '@/components/ui/SortableHeader';
 import { useTableSort, sortRows } from '@/hooks/useTableSort';
@@ -375,6 +376,9 @@ export function ChartsPage() {
   const isManager = can(user, 'chart.bulkModify');
   const isCoderOrAuditor = user.role === 'CODER' || user.role === 'AUDITOR';
   const qc = useQueryClient();
+  // Global Client / Location scope from the header.
+  const scopeClientId = useScope((s) => s.clientId);
+  const scopeLocationId = useScope((s) => s.locationId);
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -394,6 +398,13 @@ export function ChartsPage() {
   useEffect(() => {
     saveVisibleColumns(visibleColumns);
   }, [visibleColumns]);
+
+  // When the global Client / Location scope changes, jump back to page 1 and
+  // drop the current selection — the old rows may no longer be in view.
+  useEffect(() => {
+    setPage(1);
+    setSelected(new Set());
+  }, [scopeClientId, scopeLocationId]);
 
   // Coders aren't allowed into the worklist detail page, so the Worklist #
   // cell renders as plain text for them and as a link for everyone else.
@@ -422,8 +433,12 @@ export function ChartsPage() {
   }, [visibleColumns]);
 
   const summary = useQuery({
-    queryKey: ['charts', 'summary'],
-    queryFn: getChartsSummary,
+    queryKey: ['charts', 'summary', scopeClientId, scopeLocationId],
+    queryFn: () =>
+      getChartsSummary({
+        clientId: scopeClientId ?? undefined,
+        locationId: scopeLocationId ?? undefined,
+      }),
     // Keep the AI Queued / Processing tiles moving while any chart on the
     // current page is in flight — same trigger as the list refetch below.
     refetchInterval: (query) => {
@@ -441,8 +456,10 @@ export function ChartsPage() {
       sortBy: 'createdAt',
       sortDir: 'desc',
       ...(tab !== 'ALL' ? { priority: tab } : {}),
+      ...(scopeClientId != null ? { clientId: scopeClientId } : {}),
+      ...(scopeLocationId != null ? { locationId: scopeLocationId } : {}),
     }),
-    [filters, page, pageSize, tab],
+    [filters, page, pageSize, tab, scopeClientId, scopeLocationId],
   );
 
   const list = useQuery({

@@ -29,6 +29,9 @@ export interface ChartListParams {
   serialTo?: number;
   allocatedUserId?: number | string;
   primarySpecialityId?: number;
+  /** Global header scope (Client / Location). */
+  clientId?: number;
+  locationId?: number;
   chartNo?: string;
   chartStatus?: ChartStatus;
   milestone?: ChartMilestone;
@@ -44,7 +47,9 @@ export interface ChartListParams {
 export const listCharts = (params: ChartListParams = {}) =>
   get<Paginated<Chart>>('/charts', params);
 
-export const getChartsSummary = () => get<ChartSummary>('/charts/summary');
+export const getChartsSummary = (
+  params: { clientId?: number; locationId?: number } = {},
+) => get<ChartSummary>('/charts/summary', params);
 
 /* ── Detail / update ────────────────────────────────────── */
 

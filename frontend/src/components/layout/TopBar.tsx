@@ -3,6 +3,7 @@ import { Bell, Search, Sun, Moon, LogOut, ChevronDown, Check } from 'lucide-reac
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/theme/store';
 import { useAuth } from '@/auth/store';
+import { useScope } from '@/scope/store';
 import { logout } from '@/api/auth';
 import { MSAL_CONFIGURED, signOutMicrosoft } from '@/auth/msal';
 import { listClients, listLocations } from '@/api/configurations';
@@ -20,8 +21,13 @@ export function TopBar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const [scopeClient, setScopeClient] = useState<ScopeId>('all');
-  const [scopeLocation, setScopeLocation] = useState<ScopeId>('all');
+  // Client / Location scope is global (see scope/store) so pages can read it.
+  const clientId = useScope((s) => s.clientId);
+  const locationId = useScope((s) => s.locationId);
+  const setClient = useScope((s) => s.setClient);
+  const setLocation = useScope((s) => s.setLocation);
+  const scopeClient: ScopeId = clientId ?? 'all';
+  const scopeLocation: ScopeId = locationId ?? 'all';
 
   const clients = useQuery({
     queryKey: ['configurations', 'clients'],
@@ -29,9 +35,9 @@ export function TopBar() {
     enabled: !!user,
   });
   const locations = useQuery({
-    queryKey: ['configurations', 'locations', scopeClient],
-    queryFn: () => listLocations(scopeClient as number),
-    enabled: !!user && scopeClient !== 'all',
+    queryKey: ['configurations', 'locations', clientId],
+    queryFn: () => listLocations(clientId as number),
+    enabled: !!user && clientId != null,
   });
 
   useEffect(() => {
@@ -74,17 +80,14 @@ export function TopBar() {
       <ScopePicker
         label="Client"
         value={scopeClient}
-        onChange={(v) => {
-          setScopeClient(v);
-          setScopeLocation('all');
-        }}
+        onChange={(v) => setClient(v === 'all' ? null : v)}
         options={(clients.data?.items ?? []).map((c) => ({ id: c.id, name: c.name }))}
       />
 
       <ScopePicker
         label="Location"
         value={scopeLocation}
-        onChange={setScopeLocation}
+        onChange={(v) => setLocation(v === 'all' ? null : v)}
         options={
           scopeClient === 'all'
             ? []

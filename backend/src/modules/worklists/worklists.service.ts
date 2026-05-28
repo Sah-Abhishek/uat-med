@@ -77,9 +77,13 @@ export class WorklistsService {
     return new PaginatedResponseDto(augmented, total, q.page, q.pageSize);
   }
 
-  async statusSummary() {
-    const rows = await this.worklists
-      .createQueryBuilder('w').select('w.status', 'status').addSelect('COUNT(*)', 'count').groupBy('w.status').getRawMany();
+  async statusSummary(q: { clientId?: number; locationId?: number } = {}) {
+    const qb = this.worklists
+      .createQueryBuilder('w').select('w.status', 'status').addSelect('COUNT(*)', 'count');
+    // Global header scope (Client / Location).
+    if (q.clientId) qb.andWhere('w.client_id = :cid', { cid: Number(q.clientId) });
+    if (q.locationId) qb.andWhere('w.location_id = :lid', { lid: Number(q.locationId) });
+    const rows = await qb.groupBy('w.status').getRawMany();
     const out = { open: 0, inProgress: 0, closed: 0 };
     rows.forEach(r => {
       if (r.status === WorklistStatus.OPEN) out.open = Number(r.count);
