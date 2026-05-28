@@ -23,6 +23,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { QaModule } from './modules/qa/qa.module';
 import { AiGatewayModule } from './modules/ai-gateway/ai-gateway.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { BillingModule } from './modules/billing/billing.module';
 import { CoderRulesModule } from './modules/coder-rules/coder-rules.module';
 
 @Module({
@@ -79,6 +80,7 @@ import { CoderRulesModule } from './modules/coder-rules/coder-rules.module';
     QaModule,
     CoderRulesModule,
     AdminModule,
+    BillingModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

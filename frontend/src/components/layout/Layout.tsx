@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Sparkles,
   Gauge,
+  Receipt,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -43,6 +44,7 @@ const NAV: NavItem[] = [
   { to: '/ai-analytics', label: 'AI Analytics', icon: Sparkles, requires: 'qa.view' },
   { to: '/productivity', label: 'Productivity', icon: Gauge, requires: 'dashboard.team' },
   { to: '/coder-rules', label: 'Coder Rules', icon: BookOpenCheck, requires: 'coderRules.manage' },
+  { to: '/billing', label: 'Billing', icon: Receipt, requires: 'billing.view' },
   { to: '/admin/code-decisions', label: 'Code Decisions', icon: ShieldCheck, requires: 'admin.codeDecisions.view' },
 ];
 
