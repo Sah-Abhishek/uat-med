@@ -654,14 +654,37 @@ export class DashboardService {
     const pageSize = Math.min(200, Math.max(1, Number(q.pageSize) || 25));
     const offset = (page - 1) * pageSize;
 
-    // Build the worklists EXISTS predicate. Always excludes orphaned worklists;
-    // tacks on optional client/location filters when present.
-    const params: unknown[] = [userId, date];
-    const wScope: string[] = ['w.deleted_at IS NULL'];
-    if (q.clientId)   { params.push(Number(q.clientId));   wScope.push(`w.client_id = $${params.length}`); }
-    if (q.locationId) { params.push(Number(q.locationId)); wScope.push(`w.location_id = $${params.length}`); }
-    const worklistExists =
-      `EXISTS (SELECT 1 FROM worklists w WHERE w.id = c.worklist_id AND ${wScope.join(' AND ')})`;
+    // Build the worklists EXISTS predicate given the starting parameter
+    // offset (i.e. how many params come BEFORE the scope values). The summary
+    // query passes [userId, date, ...scope] so its scope starts at $3; the
+    // table/count queries pass [userId, ...scope] so their scope starts at $2.
+    // Mixing those up triggers a "bind message supplies N parameters, but
+    // prepared statement requires M" error from Postgres.
+    const buildScope = (startOffset: number) => {
+      const filters: string[] = ['w.deleted_at IS NULL'];
+      const vals: unknown[] = [];
+      if (q.clientId) {
+        vals.push(Number(q.clientId));
+        filters.push(`w.client_id = $${startOffset + vals.length}`);
+      }
+      if (q.locationId) {
+        vals.push(Number(q.locationId));
+        filters.push(`w.location_id = $${startOffset + vals.length}`);
+      }
+      return {
+        vals,
+        exists: `EXISTS (SELECT 1 FROM worklists w WHERE w.id = c.worklist_id AND ${filters.join(' AND ')})`,
+      };
+    };
+
+    // Summary query uses $1 (userId), $2 (date), then scope.
+    const summaryScope = buildScope(2);
+    const summaryParams = [userId, date, ...summaryScope.vals];
+    const worklistExistsSummary = summaryScope.exists;
+    // Table + count queries use $1 (userId), then scope — no date placeholder.
+    const tableScope = buildScope(1);
+    const tableParams = [userId, ...tableScope.vals];
+    const worklistExistsTable = tableScope.exists;
 
     const summarySql = `
       WITH user_assigned_on_date AS (
@@ -670,7 +693,7 @@ export class DashboardService {
         JOIN charts c ON c.id = ca.chart_id AND c.deleted_at IS NULL
         WHERE ca.user_id = $1
           AND ca.allocated_at::date = $2::date
-          AND ${worklistExists}
+          AND ${worklistExistsSummary}
       ),
       user_first_decided AS (
         SELECT cd.chart_id, MIN(cd.decided_at) AS first_decided_at
@@ -690,11 +713,11 @@ export class DashboardService {
             SELECT DISTINCT cd.chart_id
             FROM chart_code_decisions cd
             JOIN charts c ON c.id = cd.chart_id AND c.deleted_at IS NULL
-            WHERE cd.decided_by_user_id = $1 AND ${worklistExists}
+            WHERE cd.decided_by_user_id = $1 AND ${worklistExistsSummary}
           ) e
         )::int AS eventually_worked
     `;
-    const [summary] = await this.charts.manager.query(summarySql, params);
+    const [summary] = await this.charts.manager.query(summarySql, summaryParams);
 
     const tableSql = `
       WITH user_decisions AS (
@@ -722,7 +745,7 @@ export class DashboardService {
       FROM user_decisions ud
       JOIN charts c ON c.id = ud.chart_id AND c.deleted_at IS NULL
       LEFT JOIN user_first_alloc ufa USING (chart_id)
-      WHERE ${worklistExists}
+      WHERE ${worklistExistsTable}
       ORDER BY ud.first_decided_at DESC
       LIMIT ${pageSize} OFFSET ${offset}
     `;
@@ -731,12 +754,12 @@ export class DashboardService {
         SELECT DISTINCT cd.chart_id
         FROM chart_code_decisions cd
         JOIN charts c ON c.id = cd.chart_id AND c.deleted_at IS NULL
-        WHERE cd.decided_by_user_id = $1 AND ${worklistExists}
+        WHERE cd.decided_by_user_id = $1 AND ${worklistExistsTable}
       ) t
     `;
     const [rows, countRows] = await Promise.all([
-      this.charts.manager.query(tableSql, params) as Promise<Array<Record<string, unknown>>>,
-      this.charts.manager.query(countSql, params) as Promise<Array<{ total: number }>>,
+      this.charts.manager.query(tableSql, tableParams) as Promise<Array<Record<string, unknown>>>,
+      this.charts.manager.query(countSql, tableParams) as Promise<Array<{ total: number }>>,
     ]);
 
     return {

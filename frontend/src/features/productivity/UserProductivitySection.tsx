@@ -37,6 +37,86 @@ function formatDuration(ms: number): string {
   return hh > 0 ? `${hh}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
 }
 
+/* ── Day breakdown chart: a single horizontal stacked bar ────────
+ * Visualizes "of the N charts assigned today, this many were finished same-
+ * day, this many carried over, this many are still pending". One row,
+ * three segments, a legend with counts — no axes, no tooltips, no recharts
+ * overhead. The whole point is to read it in under a second.
+ *
+ * Colors map to the same semantic tokens used by the KPI tiles:
+ *   success → same-day (positive)
+ *   warn    → carried over (attention, not alarm)
+ *   neutral → pending (no judgment)
+ * Deliberately avoids danger/red — none of these states are a failure.
+ */
+function DayBreakdownBar({
+  assigned,
+  sameDay,
+  carried,
+  loading,
+}: {
+  assigned: number;
+  sameDay: number;
+  carried: number;
+  loading?: boolean;
+}) {
+  const pending = Math.max(0, assigned - sameDay - carried);
+  if (loading) {
+    return (
+      <div className="rounded-card border border-line bg-surface p-4">
+        <div className="h-3 w-32 bg-surface-sunken rounded animate-pulse mb-3" />
+        <div className="h-3 w-full bg-surface-sunken rounded-full animate-pulse" />
+      </div>
+    );
+  }
+  if (assigned === 0) {
+    return (
+      <div className="rounded-card border border-line bg-surface px-4 py-5 text-center">
+        <p className="text-xs text-ink-muted">
+          No charts assigned on this day — nothing to break down.
+        </p>
+      </div>
+    );
+  }
+  const pct = (n: number) => `${(n / assigned) * 100}%`;
+  return (
+    <div className="rounded-card border border-line bg-surface p-4">
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">
+          Day breakdown
+        </h3>
+        <span className="text-xs text-ink-muted tabular-nums">
+          Of {formatNumber(assigned)} assigned
+        </span>
+      </div>
+      <div
+        className="h-3 rounded-full bg-surface-sunken overflow-hidden flex"
+        role="img"
+        aria-label={`Day breakdown: ${sameDay} same-day, ${carried} carried over, ${pending} pending`}
+      >
+        {sameDay > 0 && <div className="bg-success" style={{ width: pct(sameDay) }} />}
+        {carried > 0 && <div className="bg-warn" style={{ width: pct(carried) }} />}
+        {pending > 0 && <div className="bg-ink-subtle/40" style={{ width: pct(pending) }} />}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3 text-xs">
+        <LegendDot color="bg-success" label="Same-day" value={sameDay} />
+        <LegendDot color="bg-warn" label="Carried over" value={carried} />
+        <LegendDot color="bg-ink-subtle/40" label="Pending" value={pending} />
+      </div>
+    </div>
+  );
+}
+
+function LegendDot({ color, label, value }: { color: string; label: string; value: number }) {
+  return (
+    <span className="inline-flex items-center gap-2 text-ink-muted">
+      <span className={cn('w-2.5 h-2.5 rounded-full inline-block', color)} aria-hidden />
+      <span>{label}</span>
+      <span className="font-bold text-ink tabular-nums">{formatNumber(value)}</span>
+    </span>
+  );
+}
+
 /* ── Local tile (mirrors the SummaryTile pattern used elsewhere) ─── */
 
 type Tone = 'mint' | 'sky' | 'indigo' | 'butter' | 'coral' | 'teal';
@@ -204,6 +284,16 @@ export function UserProductivitySection() {
               loading={dataQ.isPending}
             />
           </div>
+        )}
+
+        {/* Day breakdown chart */}
+        {!empty && (
+          <DayBreakdownBar
+            assigned={summary?.assignedThatDay ?? 0}
+            sameDay={summary?.workedSameDay ?? 0}
+            carried={summary?.carriedOver ?? 0}
+            loading={dataQ.isPending}
+          />
         )}
 
         {/* Table */}
