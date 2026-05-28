@@ -22,6 +22,7 @@ export function QaPage() {
       clientId: params.get('clientId') ? Number(params.get('clientId')) : undefined,
       locationId: params.get('locationId') ? Number(params.get('locationId')) : undefined,
       specialityId: params.get('specialityId') ? Number(params.get('specialityId')) : undefined,
+      worklistId: params.get('worklistId') ? Number(params.get('worklistId')) : undefined,
       coderId: params.get('coderId') ? Number(params.get('coderId')) : undefined,
       milestone: params.get('milestone') || undefined,
       from: params.get('from') || undefined,
