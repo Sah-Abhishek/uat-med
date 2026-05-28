@@ -107,6 +107,25 @@ export interface RetryErroredResult {
  */
 const RECONCILE_TICK_MS = 5_000;
 
+/**
+ * Global ceiling on dispatches in flight at any moment, across all worklists.
+ * The reconciler still serializes per-worklist, but without a global cap a
+ * 40-chart retry across 30 worklists would fire 30 parallel startEncounter()
+ * calls and stampede the gateway — observed in prod as "2 succeed, 28 fail
+ * with transient errors". Tune via env to match the gateway's tenant capacity.
+ */
+const MAX_CONCURRENT_DISPATCHES = Math.max(
+  1,
+  Number(process.env.AI_DISPATCH_MAX_CONCURRENT) || 2,
+);
+
+/**
+ * How many transient failures we tolerate before giving up on a chart and
+ * marking it permanently Errored. Each tick is one retry attempt (5s apart),
+ * so 5 attempts ≈ 25s of transient-error tolerance per chart.
+ */
+const MAX_DISPATCH_ATTEMPTS = 5;
+
 @Injectable()
 export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(WorklistBulkService.name);
@@ -198,22 +217,103 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
     }
 
     for (const [worklistId, chartIds] of byWorklist) {
+      // Global concurrency cap. Per-worklist serialization is enforced by the
+      // `busy` check below; this protects the gateway from a wide cross-
+      // worklist stampede when many worklists each have queued work.
+      if (this.dispatching.size >= MAX_CONCURRENT_DISPATCHES) break;
       if (busy.has(worklistId)) continue;
       if (chartIds.some((id) => this.dispatching.has(id))) continue;
       const chartId = chartIds[0]; // oldest, thanks to the ORDER BY above
       this.dispatching.add(chartId);
       // Fire-and-forget. Each dispatch can take seconds (S3 download + gateway
-      // start); the tick must return quickly so the next one can run.
+      // start); the tick must return quickly so the next one can run. Errors
+      // are classified — transient (gateway 5xx/429, network) loops the chart
+      // back into the queue (up to MAX_DISPATCH_ATTEMPTS); permanent errors
+      // (4xx, bad payload) stamp aiPredictionError immediately.
       void this.dispatchOneChartToGateway(chartId)
-        .catch((err) => {
-          const msg = (err as Error).message;
-          this.log.error(`AI dispatch chart=${chartId} (worklist=${worklistId}): ${msg}`);
+        .catch(async (err) => {
+          const msg = (err as Error)?.message ?? String(err);
+          if (this.isTransientDispatchError(err)) {
+            const willRetry = await this.recordTransientDispatchError(chartId, msg);
+            if (willRetry) {
+              this.log.warn(
+                `AI dispatch chart=${chartId} (worklist=${worklistId}): transient (${msg}); will retry`,
+              );
+              return;
+            }
+            this.log.error(
+              `AI dispatch chart=${chartId} (worklist=${worklistId}): transient exhausted after ${MAX_DISPATCH_ATTEMPTS} attempts (${msg})`,
+            );
+            return this.markChartGatewayError(
+              chartId,
+              `Gave up after ${MAX_DISPATCH_ATTEMPTS} transient failures; last error: ${msg}`,
+            );
+          }
+          this.log.error(
+            `AI dispatch chart=${chartId} (worklist=${worklistId}): permanent (${msg})`,
+          );
           return this.markChartGatewayError(chartId, msg);
         })
         .finally(() => {
           this.dispatching.delete(chartId);
         });
     }
+  }
+
+  /** Heuristic: gateway 5xx/429/408, common Node network error codes, and
+   * timeout/connection-reset text patterns are treated as transient (worth
+   * retrying). Everything else is treated as permanent. */
+  private isTransientDispatchError(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const e = err as { code?: string; response?: { status?: number }; message?: string };
+    if (e.code && ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH', 'EAI_AGAIN'].includes(e.code)) {
+      return true;
+    }
+    const status = e.response?.status;
+    if (status === 408 || status === 429 || (typeof status === 'number' && status >= 500)) {
+      return true;
+    }
+    const msg = (e.message ?? '').toLowerCase();
+    if (
+      msg.includes('timeout') ||
+      msg.includes('econnreset') ||
+      msg.includes('econnrefused') ||
+      msg.includes('socket hang up') ||
+      msg.includes('network error')
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Record a transient failure on the chart so it stays in the queue (next
+   * reconciler tick retries it). Returns false once the attempt count hits
+   * `MAX_DISPATCH_ATTEMPTS`, telling the caller to give up and mark it Errored.
+   */
+  private async recordTransientDispatchError(chartId: number, message: string): Promise<boolean> {
+    const c = await this.charts.findOne({ where: { id: chartId } });
+    if (!c) return false;
+    const cf = (c.customFields ?? {}) as Record<string, unknown>;
+    const pending = cf.pendingPrediction as Record<string, unknown> | undefined;
+    // If pendingPrediction is gone, the user/admin cleared the chart mid-dispatch —
+    // don't resurrect it. Caller should also skip markChartGatewayError below.
+    if (!pending) return true;
+    const prevAttempts = typeof pending.attempts === 'number' ? pending.attempts : 0;
+    const attempts = prevAttempts + 1;
+    if (attempts >= MAX_DISPATCH_ATTEMPTS) return false;
+    c.customFields = {
+      ...cf,
+      pendingPrediction: {
+        ...pending,
+        attempts,
+        lastTransientError: message,
+        // Belt-and-braces: ensure we stay in the queue for the next tick.
+        awaitingDispatch: true,
+      },
+    };
+    await this.charts.save(c);
+    return true;
   }
 
   /* ── Excel preview (no writes) ─────────────────────────── */
@@ -763,7 +863,14 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
     if (!pending?.awaitingDispatch) return false;
 
     const docs = (cf.uploadedDocs as Array<{ key: string; filename: string; mimeType?: string }> | undefined) ?? [];
-    if (docs.length === 0) return false;
+    if (docs.length === 0) {
+      // Belt-and-braces: runAiOnWorklist / retryAllErroredCharts already skip
+      // no-docs charts before marking them awaiting, so this only fires if a
+      // chart was hand-edited or its docs were deleted post-mark. Either way,
+      // mark it Errored so the reconciler doesn't loop on it forever.
+      await this.markChartGatewayError(chartId, 'No documents to dispatch.');
+      return false;
+    }
 
     const inbound: InboundFile[] = [];
     for (const d of docs) {
