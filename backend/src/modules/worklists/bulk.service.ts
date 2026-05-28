@@ -862,7 +862,9 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
     // line — its pendingPrediction will be gone. Skip silently.
     if (!pending?.awaitingDispatch) return false;
 
-    const docs = (cf.uploadedDocs as Array<{ key: string; filename: string; mimeType?: string }> | undefined) ?? [];
+    const docs =
+      (cf.uploadedDocs as Array<{ key?: string; url?: string; filename: string; mimeType?: string }> | undefined) ??
+      [];
     if (docs.length === 0) {
       // Belt-and-braces: runAiOnWorklist / retryAllErroredCharts already skip
       // no-docs charts before marking them awaiting, so this only fires if a
@@ -874,7 +876,19 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
 
     const inbound: InboundFile[] = [];
     for (const d of docs) {
-      const buf = await this.storage.download(d.key);
+      // Legacy uploads predate the `key` field — recover it from the URL the
+      // same way ChartsService.docKey() does for per-chart reprocess. Without
+      // this fallback `storage.download(undefined)` throws an AWS SDK error
+      // ("No value provided for input HTTP label: Key.") which my classifier
+      // marks as a permanent gateway error — even though the gateway never got
+      // called and the real issue is just a missing field on this row.
+      const key = d.key ?? (d.url ? this.storage.keyFromUrl(d.url) : null);
+      if (!key) {
+        throw new Error(
+          `Cannot locate stored file for "${d.filename}" (no key and URL doesn't match this store).`,
+        );
+      }
+      const buf = await this.storage.download(key);
       const reportType: ReportType = this.aiPredictor.mapReportType(undefined, d.filename);
       inbound.push({
         buffer: buf,
