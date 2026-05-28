@@ -46,13 +46,42 @@ const COLOR_WORKED = '#10B981';
 const COLOR_AXIS = '#94A3B8';
 const COLOR_GRID = '#E2E8F0';
 
+// "today" / "yesterday" are special single-day picks (the latter needs the
+// window's end-anchor capped at yesterday); everything else is a sliding
+// "last N days" window ending today. encodeWindow / decodeWindow translate
+// between the dropdown's string value and the {days, endsAt} filter pair.
 const WINDOW_OPTIONS = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
   { value: '7', label: 'Last 7 days' },
   { value: '14', label: 'Last 14 days' },
   { value: '30', label: 'Last 30 days' },
   { value: '60', label: 'Last 60 days' },
   { value: '90', label: 'Last 90 days' },
 ];
+
+function ymdLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+function decodeWindow(v: string): { days: number; endsAt: string | undefined } {
+  if (v === 'today') return { days: 1, endsAt: undefined };
+  if (v === 'yesterday') {
+    const y = new Date();
+    y.setDate(y.getDate() - 1);
+    return { days: 1, endsAt: ymdLocal(y) };
+  }
+  return { days: Number(v) || 30, endsAt: undefined };
+}
+
+function encodeWindow(filters: ThroughputFilters): string {
+  if (filters.endsAt) return 'yesterday';
+  if (filters.days === 1) return 'today';
+  return String(filters.days ?? 30);
+}
 
 export function ProductivityPage() {
   const [filters, setFilters] = useState<ThroughputFilters>({ days: 30 });
@@ -69,6 +98,10 @@ export function ProductivityPage() {
 
   const avg = (rows?: Array<{ count: number }>) =>
     rows && rows.length ? Math.round(rows.reduce((s, r) => s + r.count, 0) / rows.length) : 0;
+
+  // Last-day KPI tiles reflect the end-anchor: "today" for the sliding
+  // windows, "yesterday" when the Yesterday preset is selected.
+  const lastDayLabel = filters.endsAt ? 'yesterday' : 'today';
 
   // Merge the two series by date for the comparison chart.
   const combined = (data?.allocatedPerDay ?? []).map((a, i) => ({
@@ -97,13 +130,13 @@ export function ProductivityPage() {
           {/* ── KPI tiles ─────────────────────────────────── */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <KpiTile
-              label="Allocated today"
+              label={`Allocated ${lastDayLabel}`}
               value={loading ? '…' : data.allocatedToday.toLocaleString()}
               icon={<UserPlus className="w-4 h-4" />}
               tone="indigo"
             />
             <KpiTile
-              label="Worked on today"
+              label={`Worked on ${lastDayLabel}`}
               value={loading ? '…' : data.workedToday.toLocaleString()}
               icon={<Activity className="w-4 h-4" />}
               tone="success"
@@ -345,8 +378,8 @@ function FilterBar({
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
         <div className="md:col-span-2">
           <FancySelect
-            value={String(filters.days ?? 30)}
-            onChange={(v) => onChange({ days: Number(v) })}
+            value={encodeWindow(filters)}
+            onChange={(v) => onChange(decodeWindow(v))}
             options={WINDOW_OPTIONS}
             placeholder="Window"
           />

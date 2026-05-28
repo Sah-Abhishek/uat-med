@@ -44,7 +44,7 @@ export class DashboardController {
   @Get('throughput')
   @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Charts allocated vs worked on — today counts + per-day series. Filter by client/location/speciality/facility.' })
-  throughput(@Query() q: { clientId?: number; locationId?: number; specialityId?: number; facility?: string; userId?: number; days?: number }) {
+  throughput(@Query() q: { clientId?: number; locationId?: number; specialityId?: number; facility?: string; userId?: number; days?: number; endsAt?: string }) {
     return this.svc.throughput(q);
   }
 
@@ -58,14 +58,14 @@ export class DashboardController {
   @Get('ai-status/series')
   @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'AI processing-status per-day series (processed / error / inProgress). Filter by client/location/speciality/facility/days.' })
-  aiStatusSeries(@Query() q: { clientId?: number; locationId?: number; specialityId?: number; facility?: string; userId?: number; days?: number }) {
+  aiStatusSeries(@Query() q: { clientId?: number; locationId?: number; specialityId?: number; facility?: string; userId?: number; days?: number; endsAt?: string }) {
     return this.svc.aiProcessingStatusSeries(q);
   }
 
   @Get('throughput/charts')
   @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Drill-down list of the charts behind the throughput metrics (kind=allocated|worked). Paginated.' })
-  throughputCharts(@Query() q: { kind?: 'allocated' | 'worked'; clientId?: number; locationId?: number; specialityId?: number; facility?: string; userId?: number; days?: number; page?: number; pageSize?: number }) {
+  throughputCharts(@Query() q: { kind?: 'allocated' | 'worked'; clientId?: number; locationId?: number; specialityId?: number; facility?: string; userId?: number; days?: number; endsAt?: string; page?: number; pageSize?: number }) {
     return this.svc.throughputCharts(q);
   }
 

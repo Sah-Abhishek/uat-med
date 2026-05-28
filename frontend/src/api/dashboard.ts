@@ -46,6 +46,9 @@ export interface ThroughputFilters {
    * for worked-count it means "charts this user submitted decisions on". */
   userId?: number;
   days?: number;
+  /** YYYY-MM-DD — caps the window's end (defaults to today). Used by the
+   * "Yesterday" preset; the rest of the presets leave it unset. */
+  endsAt?: string;
 }
 
 export interface ThroughputStats {

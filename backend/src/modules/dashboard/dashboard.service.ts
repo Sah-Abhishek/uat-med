@@ -354,12 +354,18 @@ export class DashboardService {
     facility?: string;
     userId?: number;
     days?: number;
+    /** ISO YYYY-MM-DD — caps the window's end. Defaults to today. */
+    endsAt?: string;
   }) {
     const days = Math.min(180, Math.max(1, Number(q.days) || 30));
-    const since = startOfDayMinusDays(days - 1);
+    // End anchor (today by default; set to yesterday's date for the
+    // "Yesterday" picker). `since` walks back `days-1` from there.
+    const endDate = endAnchor(q.endsAt);
+    const since = new Date(endDate);
+    since.setDate(endDate.getDate() - (days - 1));
 
-    // Shared scope clause on charts(c)/worklists(w); $1 is always `since`.
-    const params: unknown[] = [since];
+    // $1 = since, $2 = endDate; scope params start at $3.
+    const params: unknown[] = [since, endDate];
     const scope: string[] = [];
     if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
     if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
@@ -379,7 +385,7 @@ export class DashboardService {
 
     const seriesSql = (inner: string) => `
       WITH days AS (
-        SELECT generate_series($1::date, CURRENT_DATE, INTERVAL '1 day')::date AS day
+        SELECT generate_series($1::date, $2::date, INTERVAL '1 day')::date AS day
       )
       SELECT to_char(days.day, 'YYYY-MM-DD') AS date, COALESCE(agg.count, 0)::int AS count
       FROM days
@@ -392,7 +398,8 @@ export class DashboardService {
       FROM chart_allocations a
       JOIN charts c     ON c.id = a.chart_id
       JOIN worklists w  ON w.id = c.worklist_id
-      WHERE a.allocated_at >= $1${scopeSql}${allocatedUserSql}
+      WHERE a.allocated_at >= $1
+        AND a.allocated_at < ($2::date + INTERVAL '1 day')${scopeSql}${allocatedUserSql}
       GROUP BY 1
     `;
     const workedInner = `
@@ -400,7 +407,8 @@ export class DashboardService {
       FROM chart_code_decisions d
       JOIN charts c     ON c.id = d.chart_id
       JOIN worklists w  ON w.id = c.worklist_id
-      WHERE d.decided_at >= $1${scopeSql}${workedUserSql}
+      WHERE d.decided_at >= $1
+        AND d.decided_at < ($2::date + INTERVAL '1 day')${scopeSql}${workedUserSql}
       GROUP BY 1
     `;
 
@@ -500,11 +508,15 @@ export class DashboardService {
     facility?: string;
     userId?: number;
     days?: number;
+    endsAt?: string;
   }) {
     const days = Math.min(180, Math.max(1, Number(q.days) || 30));
-    const since = startOfDayMinusDays(days - 1);
+    const endDate = endAnchor(q.endsAt);
+    const since = new Date(endDate);
+    since.setDate(endDate.getDate() - (days - 1));
 
-    const params: unknown[] = [since];
+    // $1 = since, $2 = endDate; scope params start at $3.
+    const params: unknown[] = [since, endDate];
     // Same orphan / soft-delete exclusion as aiProcessingStatus.
     const scope: string[] = ['c.deleted_at IS NULL', 'w.deleted_at IS NULL'];
     if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
@@ -520,7 +532,7 @@ export class DashboardService {
 
     const seriesSql = (inner: string) => `
       WITH days AS (
-        SELECT generate_series($1::date, CURRENT_DATE, INTERVAL '1 day')::date AS day
+        SELECT generate_series($1::date, $2::date, INTERVAL '1 day')::date AS day
       )
       SELECT to_char(days.day, 'YYYY-MM-DD') AS date, COALESCE(agg.count, 0)::int AS count
       FROM days
@@ -537,7 +549,8 @@ export class DashboardService {
       JOIN worklists w ON w.id = c.worklist_id
       WHERE c.custom_fields ? '${key}'
         AND NULLIF(c.custom_fields->'${key}'->>'${tsField}', '') IS NOT NULL
-        AND (c.custom_fields->'${key}'->>'${tsField}')::timestamptz >= $1${scopeSql}
+        AND (c.custom_fields->'${key}'->>'${tsField}')::timestamptz >= $1
+        AND (c.custom_fields->'${key}'->>'${tsField}')::timestamptz < ($2::date + INTERVAL '1 day')${scopeSql}
       GROUP BY 1
     `;
 
@@ -572,17 +585,21 @@ export class DashboardService {
     facility?: string;
     userId?: number;
     days?: number;
+    endsAt?: string;
     page?: number;
     pageSize?: number;
   }) {
     const kind = q.kind === 'worked' ? 'worked' : 'allocated';
     const days = Math.min(180, Math.max(1, Number(q.days) || 30));
-    const since = startOfDayMinusDays(days - 1);
+    const endDate = endAnchor(q.endsAt);
+    const since = new Date(endDate);
+    since.setDate(endDate.getDate() - (days - 1));
     const page = Math.max(1, Number(q.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(q.pageSize) || 20));
     const offset = (page - 1) * pageSize;
 
-    const params: unknown[] = [since];
+    // $1 = since, $2 = endDate; scope params start at $3.
+    const params: unknown[] = [since, endDate];
     const scope: string[] = [];
     if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
     if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
@@ -607,7 +624,7 @@ export class DashboardService {
        FROM ${src.table}
        JOIN charts c ON c.id = ${src.idCol}
        JOIN worklists w ON w.id = c.worklist_id
-       WHERE ${src.dateCol} >= $1${scopeSql}${userSql}`,
+       WHERE ${src.dateCol} >= $1 AND ${src.dateCol} < ($2::date + INTERVAL '1 day')${scopeSql}${userSql}`,
       params,
     );
     const total = Number(countRows[0]?.total ?? 0);
@@ -631,7 +648,7 @@ export class DashboardService {
        LEFT JOIN primary_specialities ps  ON ps.id = w.primary_speciality_id
        LEFT JOIN users coder   ON coder.id   = c.allocated_coder_id
        LEFT JOIN users auditor ON auditor.id = c.allocated_auditor_id
-       WHERE ${src.dateCol} >= $1${scopeSql}${userSql}
+       WHERE ${src.dateCol} >= $1 AND ${src.dateCol} < ($2::date + INTERVAL '1 day')${scopeSql}${userSql}
        GROUP BY c.id, c.chart_no, w.worklist_number, cl.name, loc.name, ps.name, c.milestone, coder.full_name, auditor.full_name
        ORDER BY MAX(${src.dateCol}) DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -685,6 +702,18 @@ function startOfDayMinusDays(d: number): Date {
   t.setHours(0, 0, 0, 0);
   t.setDate(t.getDate() - d);
   return t;
+}
+
+/** Resolve the end-anchor of a date window: parses YYYY-MM-DD as a local
+ * midnight Date, or returns today's midnight when no `endsAt` is given.
+ * Used by throughput / series queries so picks like "Yesterday" can cap the
+ * window's end instead of always running to CURRENT_DATE. */
+function endAnchor(endsAt?: string): Date {
+  if (!endsAt) return startOfDayMinusDays(0);
+  const [yy, mm, dd] = endsAt.split('-').map(Number);
+  const d = new Date(yy, (mm || 1) - 1, dd || 1);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 function dateKey(d: Date | string): string {
