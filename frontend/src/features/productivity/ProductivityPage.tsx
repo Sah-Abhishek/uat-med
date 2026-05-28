@@ -30,6 +30,7 @@ import {
   listPrimarySpecialities,
 } from '@/api/configurations';
 import { listQaFacilities } from '@/api/qa';
+import { listUsers } from '@/api/users';
 import {
   getAiProcessingStatus,
   getAiProcessingStatusSeries,
@@ -38,7 +39,6 @@ import {
   type ThroughputFilters,
 } from '@/api/dashboard';
 import { cn, formatDate } from '@/lib/utils';
-import { UserProductivitySection } from './UserProductivitySection';
 
 /* Allocated = indigo, Worked = green. Kept distinct so the comparison reads clearly. */
 const COLOR_ALLOCATED = '#6366F1';
@@ -166,9 +166,6 @@ export function ProductivityPage() {
 
           {/* ── Drill-down table ──────────────────────────── */}
           <ChartsTable filters={filters} />
-
-          {/* ── Per-user productivity ─────────────────────── */}
-          <UserProductivitySection />
         </>
       )}
     </div>
@@ -329,8 +326,19 @@ function FilterBar({
   });
   const facilityOptions = facilitiesQ.data?.items ?? [];
 
+  // User dropdown — server-driven search since the user list can be large.
+  const [userSearch, setUserSearch] = useState('');
+  const usersQ = useQuery({
+    queryKey: ['users', 'productivity-filter', userSearch],
+    queryFn: () => listUsers({ pageSize: 50, search: userSearch || undefined }),
+  });
+
   const hasAny =
-    !!filters.clientId || !!filters.locationId || !!filters.specialityId || !!filters.facility;
+    !!filters.clientId ||
+    !!filters.locationId ||
+    !!filters.specialityId ||
+    !!filters.facility ||
+    !!filters.userId;
 
   return (
     <div className="rounded-xl border border-line bg-surface-sunken/30 p-4">
@@ -378,7 +386,7 @@ function FilterBar({
             disabled={facilityOptions.length === 0}
           />
         </div>
-        <div className="md:col-span-3">
+        <div className="md:col-span-2">
           <FancySelect
             value={filters.specialityId ? String(filters.specialityId) : ''}
             onChange={(v) => onChange({ specialityId: v ? Number(v) : undefined })}
@@ -389,11 +397,29 @@ function FilterBar({
             placeholder="All specialties"
           />
         </div>
-        <div className="md:col-span-1 flex justify-end">
-          <Button type="button" variant="ghost" onClick={onReset} disabled={!hasAny} leftIcon={<X className="w-3 h-3" />} title="Reset filters">
-            Reset
-          </Button>
+        <div className="md:col-span-2">
+          <FancySelect
+            searchable
+            onSearch={setUserSearch}
+            loading={usersQ.isFetching}
+            searchPlaceholder="Search users…"
+            value={filters.userId ? String(filters.userId) : ''}
+            onChange={(v) => onChange({ userId: v ? Number(v) : undefined })}
+            options={[
+              { value: '', label: 'All users' },
+              ...(usersQ.data?.items ?? []).map((u) => ({
+                value: String(u.id),
+                label: u.fullName,
+              })),
+            ]}
+            placeholder="All users"
+          />
         </div>
+      </div>
+      <div className="flex justify-end mt-3">
+        <Button type="button" variant="ghost" onClick={onReset} disabled={!hasAny} leftIcon={<X className="w-3 h-3" />} title="Reset filters">
+          Reset
+        </Button>
       </div>
     </div>
   );

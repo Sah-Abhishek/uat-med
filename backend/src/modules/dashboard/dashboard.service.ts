@@ -7,7 +7,6 @@ import { ChartFeedback } from '../../entities/chart-feedback.entity';
 import { ChartMilestone, ChartStatus, WorklistStatus } from '../../common/enums';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { Role } from '../../common/enums/roles.enum';
-import { UserProductivityQueryDto } from './dto/user-productivity.dto';
 
 /** Number of trailing days the time-series panels report. */
 const SERIES_DAYS = 14;
@@ -353,6 +352,7 @@ export class DashboardService {
     locationId?: number;
     specialityId?: number;
     facility?: string;
+    userId?: number;
     days?: number;
   }) {
     const days = Math.min(180, Math.max(1, Number(q.days) || 30));
@@ -366,6 +366,16 @@ export class DashboardService {
     if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
     if (q.facility) { params.push(q.facility); scope.push(`c.custom_fields->>'facility' = $${params.length}`); }
     const scopeSql = scope.length ? ` AND ${scope.join(' AND ')}` : '';
+    // User scope is per-source (allocated_count uses chart_allocations.user_id,
+    // worked_count uses chart_code_decisions.decided_by_user_id), so we push
+    // the userId once and inline the right column per inner query.
+    let allocatedUserSql = '';
+    let workedUserSql = '';
+    if (q.userId) {
+      params.push(Number(q.userId));
+      allocatedUserSql = ` AND a.user_id = $${params.length}`;
+      workedUserSql = ` AND d.decided_by_user_id = $${params.length}`;
+    }
 
     const seriesSql = (inner: string) => `
       WITH days AS (
@@ -382,7 +392,7 @@ export class DashboardService {
       FROM chart_allocations a
       JOIN charts c     ON c.id = a.chart_id
       JOIN worklists w  ON w.id = c.worklist_id
-      WHERE a.allocated_at >= $1${scopeSql}
+      WHERE a.allocated_at >= $1${scopeSql}${allocatedUserSql}
       GROUP BY 1
     `;
     const workedInner = `
@@ -390,7 +400,7 @@ export class DashboardService {
       FROM chart_code_decisions d
       JOIN charts c     ON c.id = d.chart_id
       JOIN worklists w  ON w.id = c.worklist_id
-      WHERE d.decided_at >= $1${scopeSql}
+      WHERE d.decided_at >= $1${scopeSql}${workedUserSql}
       GROUP BY 1
     `;
 
@@ -426,6 +436,7 @@ export class DashboardService {
     locationId?: number;
     specialityId?: number;
     facility?: string;
+    userId?: number;
   }) {
     const params: unknown[] = [];
     // Exclude soft-deleted charts and charts orphaned by a soft-deleted
@@ -435,6 +446,11 @@ export class DashboardService {
     if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
     if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
     if (q.facility) { params.push(q.facility); scope.push(`c.custom_fields->>'facility' = $${params.length}`); }
+    // User scope = charts allocated to this user (their queue's AI state).
+    if (q.userId) {
+      params.push(Number(q.userId));
+      scope.push(`EXISTS (SELECT 1 FROM chart_allocations a WHERE a.chart_id = c.id AND a.user_id = $${params.length})`);
+    }
     const scopeSql = scope.length ? `WHERE ${scope.join(' AND ')}` : '';
 
     const sql = `
@@ -482,6 +498,7 @@ export class DashboardService {
     locationId?: number;
     specialityId?: number;
     facility?: string;
+    userId?: number;
     days?: number;
   }) {
     const days = Math.min(180, Math.max(1, Number(q.days) || 30));
@@ -494,6 +511,11 @@ export class DashboardService {
     if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
     if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
     if (q.facility) { params.push(q.facility); scope.push(`c.custom_fields->>'facility' = $${params.length}`); }
+    // User scope = charts allocated to this user.
+    if (q.userId) {
+      params.push(Number(q.userId));
+      scope.push(`EXISTS (SELECT 1 FROM chart_allocations a WHERE a.chart_id = c.id AND a.user_id = $${params.length})`);
+    }
     const scopeSql = scope.length ? ` AND ${scope.join(' AND ')}` : '';
 
     const seriesSql = (inner: string) => `
@@ -548,6 +570,7 @@ export class DashboardService {
     locationId?: number;
     specialityId?: number;
     facility?: string;
+    userId?: number;
     days?: number;
     page?: number;
     pageSize?: number;
@@ -568,8 +591,15 @@ export class DashboardService {
     const scopeSql = scope.length ? ` AND ${scope.join(' AND ')}` : '';
 
     const src = kind === 'allocated'
-      ? { table: 'chart_allocations a', dateCol: 'a.allocated_at', idCol: 'a.chart_id' }
-      : { table: 'chart_code_decisions d', dateCol: 'd.decided_at', idCol: 'd.chart_id' };
+      ? { table: 'chart_allocations a', dateCol: 'a.allocated_at', idCol: 'a.chart_id', userCol: 'a.user_id' }
+      : { table: 'chart_code_decisions d', dateCol: 'd.decided_at', idCol: 'd.chart_id', userCol: 'd.decided_by_user_id' };
+
+    // User scope uses whichever column attributes the action for this `kind`.
+    let userSql = '';
+    if (q.userId) {
+      params.push(Number(q.userId));
+      userSql = ` AND ${src.userCol} = $${params.length}`;
+    }
 
     const em = this.charts.manager;
     const countRows: Array<{ total: number }> = await em.query(
@@ -577,7 +607,7 @@ export class DashboardService {
        FROM ${src.table}
        JOIN charts c ON c.id = ${src.idCol}
        JOIN worklists w ON w.id = c.worklist_id
-       WHERE ${src.dateCol} >= $1${scopeSql}`,
+       WHERE ${src.dateCol} >= $1${scopeSql}${userSql}`,
       params,
     );
     const total = Number(countRows[0]?.total ?? 0);
@@ -601,7 +631,7 @@ export class DashboardService {
        LEFT JOIN primary_specialities ps  ON ps.id = w.primary_speciality_id
        LEFT JOIN users coder   ON coder.id   = c.allocated_coder_id
        LEFT JOIN users auditor ON auditor.id = c.allocated_auditor_id
-       WHERE ${src.dateCol} >= $1${scopeSql}
+       WHERE ${src.dateCol} >= $1${scopeSql}${userSql}
        GROUP BY c.id, c.chart_no, w.worklist_number, cl.name, loc.name, ps.name, c.milestone, coder.full_name, auditor.full_name
        ORDER BY MAX(${src.dateCol}) DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -626,160 +656,6 @@ export class DashboardService {
         lastWorkedAt: r.last_worked_at,
         decisions: Number(r.decisions ?? 0),
       })),
-    };
-  }
-
-  /* ── Per-user productivity ───────────────────────────────
-   * Reviewer-focused view for the Productivity page. For a single user (coder
-   * or auditor) on a given "as-of" day, returns:
-   *   - assignedThatDay : distinct charts allocated to the user on that date
-   *   - workedSameDay   : subset whose first decision by the user fell on that date
-   *   - carriedOver     : subset whose first decision was on a later date
-   *   - eventuallyWorked: distinct charts the user has any decisions on (lifetime)
-   * plus a paginated list of every chart the user has submitted decisions on
-   * (so the user's full working set is reviewable, not just the day in focus).
-   *
-   * "Time on chart" is MAX(decided_at) - MIN(decided_at) for the user on that
-   * chart. It's a proxy for engagement time across decision submissions, not a
-   * true active timer (the timer in startTimer/stopTimer isn't persisted yet).
-   * A single submit collapses to span 0; the frontend renders that as "—".
-   *
-   * Orphaned charts (worklist soft-deleted) are excluded everywhere. Optional
-   * client/location scoping uses the global header scope.
-   */
-  async userProductivity(q: UserProductivityQueryDto) {
-    const userId = Number(q.userId);
-    const date = q.date; // YYYY-MM-DD
-    const page = Math.max(1, Number(q.page) || 1);
-    const pageSize = Math.min(200, Math.max(1, Number(q.pageSize) || 25));
-    const offset = (page - 1) * pageSize;
-
-    // Build the worklists EXISTS predicate given the starting parameter
-    // offset (i.e. how many params come BEFORE the scope values). The summary
-    // query passes [userId, date, ...scope] so its scope starts at $3; the
-    // table/count queries pass [userId, ...scope] so their scope starts at $2.
-    // Mixing those up triggers a "bind message supplies N parameters, but
-    // prepared statement requires M" error from Postgres.
-    const buildScope = (startOffset: number) => {
-      const filters: string[] = ['w.deleted_at IS NULL'];
-      const vals: unknown[] = [];
-      if (q.clientId) {
-        vals.push(Number(q.clientId));
-        filters.push(`w.client_id = $${startOffset + vals.length}`);
-      }
-      if (q.locationId) {
-        vals.push(Number(q.locationId));
-        filters.push(`w.location_id = $${startOffset + vals.length}`);
-      }
-      return {
-        vals,
-        exists: `EXISTS (SELECT 1 FROM worklists w WHERE w.id = c.worklist_id AND ${filters.join(' AND ')})`,
-      };
-    };
-
-    // Summary query uses $1 (userId), $2 (date), then scope.
-    const summaryScope = buildScope(2);
-    const summaryParams = [userId, date, ...summaryScope.vals];
-    const worklistExistsSummary = summaryScope.exists;
-    // Table + count queries use $1 (userId), then scope — no date placeholder.
-    const tableScope = buildScope(1);
-    const tableParams = [userId, ...tableScope.vals];
-    const worklistExistsTable = tableScope.exists;
-
-    const summarySql = `
-      WITH user_assigned_on_date AS (
-        SELECT DISTINCT ca.chart_id
-        FROM chart_allocations ca
-        JOIN charts c ON c.id = ca.chart_id AND c.deleted_at IS NULL
-        WHERE ca.user_id = $1
-          AND ca.allocated_at::date = $2::date
-          AND ${worklistExistsSummary}
-      ),
-      user_first_decided AS (
-        SELECT cd.chart_id, MIN(cd.decided_at) AS first_decided_at
-        FROM chart_code_decisions cd
-        WHERE cd.decided_by_user_id = $1
-        GROUP BY cd.chart_id
-      )
-      SELECT
-        (SELECT COUNT(*) FROM user_assigned_on_date)::int AS assigned_that_day,
-        (SELECT COUNT(*) FROM user_assigned_on_date uad
-           JOIN user_first_decided ufd USING (chart_id)
-           WHERE ufd.first_decided_at::date = $2::date)::int AS worked_same_day,
-        (SELECT COUNT(*) FROM user_assigned_on_date uad
-           JOIN user_first_decided ufd USING (chart_id)
-           WHERE ufd.first_decided_at::date > $2::date)::int AS carried_over,
-        (SELECT COUNT(*) FROM (
-            SELECT DISTINCT cd.chart_id
-            FROM chart_code_decisions cd
-            JOIN charts c ON c.id = cd.chart_id AND c.deleted_at IS NULL
-            WHERE cd.decided_by_user_id = $1 AND ${worklistExistsSummary}
-          ) e
-        )::int AS eventually_worked
-    `;
-    const [summary] = await this.charts.manager.query(summarySql, summaryParams);
-
-    const tableSql = `
-      WITH user_decisions AS (
-        SELECT
-          cd.chart_id,
-          MIN(cd.decided_at) AS first_decided_at,
-          MAX(cd.decided_at) - MIN(cd.decided_at) AS time_span
-        FROM chart_code_decisions cd
-        WHERE cd.decided_by_user_id = $1
-        GROUP BY cd.chart_id
-      ),
-      user_first_alloc AS (
-        SELECT ca.chart_id, MIN(ca.allocated_at) AS first_allocated_at
-        FROM chart_allocations ca
-        WHERE ca.user_id = $1
-        GROUP BY ca.chart_id
-      )
-      SELECT
-        c.id          AS chart_id,
-        c.chart_no    AS chart_no,
-        c.milestone   AS milestone,
-        ufa.first_allocated_at AS assigned_at,
-        ud.first_decided_at    AS first_worked_at,
-        COALESCE(EXTRACT(EPOCH FROM ud.time_span) * 1000, 0)::bigint AS time_spent_ms
-      FROM user_decisions ud
-      JOIN charts c ON c.id = ud.chart_id AND c.deleted_at IS NULL
-      LEFT JOIN user_first_alloc ufa USING (chart_id)
-      WHERE ${worklistExistsTable}
-      ORDER BY ud.first_decided_at DESC
-      LIMIT ${pageSize} OFFSET ${offset}
-    `;
-    const countSql = `
-      SELECT COUNT(*)::int AS total FROM (
-        SELECT DISTINCT cd.chart_id
-        FROM chart_code_decisions cd
-        JOIN charts c ON c.id = cd.chart_id AND c.deleted_at IS NULL
-        WHERE cd.decided_by_user_id = $1 AND ${worklistExistsTable}
-      ) t
-    `;
-    const [rows, countRows] = await Promise.all([
-      this.charts.manager.query(tableSql, tableParams) as Promise<Array<Record<string, unknown>>>,
-      this.charts.manager.query(countSql, tableParams) as Promise<Array<{ total: number }>>,
-    ]);
-
-    return {
-      summary: {
-        assignedThatDay:  Number(summary?.assigned_that_day  ?? 0),
-        workedSameDay:    Number(summary?.worked_same_day    ?? 0),
-        carriedOver:      Number(summary?.carried_over       ?? 0),
-        eventuallyWorked: Number(summary?.eventually_worked  ?? 0),
-      },
-      charts: rows.map((r) => ({
-        chartId:       String(r.chart_id),
-        chartNo:       r.chart_no as string | null,
-        milestone:     r.milestone as string,
-        assignedAt:    r.assigned_at as string | null,
-        firstWorkedAt: r.first_worked_at as string,
-        timeSpentMs:   Number(r.time_spent_ms ?? 0),
-      })),
-      page,
-      pageSize,
-      total: Number(countRows[0]?.total ?? 0),
     };
   }
 

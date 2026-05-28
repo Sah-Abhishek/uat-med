@@ -41,6 +41,10 @@ export interface ThroughputFilters {
   locationId?: number;
   specialityId?: number;
   facility?: string;
+  /** Narrow throughput / AI-status / drill-down to a single user. For
+   * allocated-count and AI-status it means "charts assigned to this user";
+   * for worked-count it means "charts this user submitted decisions on". */
+  userId?: number;
   days?: number;
 }
 
@@ -102,44 +106,3 @@ export const getThroughputCharts = (
   params: ThroughputFilters & { kind?: 'allocated' | 'worked'; page?: number; pageSize?: number },
 ) => get<ThroughputChartsResponse>('/dashboard/throughput/charts', params);
 
-/* ── Per-user productivity (reviewer view) ───────────────────────────── */
-
-export interface UserProductivityParams {
-  userId: number;
-  /** YYYY-MM-DD (the "as-of" day). */
-  date: string;
-  clientId?: number;
-  locationId?: number;
-  page?: number;
-  pageSize?: number;
-}
-
-export interface UserProductivityChartRow {
-  chartId: string;
-  chartNo: string | null;
-  milestone: string;
-  /** Earliest allocation timestamp to this user (across roles). Null if the
-   * user has decisions on a chart never formally allocated to them. */
-  assignedAt: string | null;
-  /** First decision timestamp by this user — the "first worked" anchor. */
-  firstWorkedAt: string;
-  /** MAX(decided_at) - MIN(decided_at) for this user on the chart, in ms.
-   * 0 when there's only one decision submission (single-shot review). */
-  timeSpentMs: number;
-}
-
-export interface UserProductivityResponse {
-  summary: {
-    assignedThatDay: number;
-    workedSameDay: number;
-    carriedOver: number;
-    eventuallyWorked: number;
-  };
-  charts: UserProductivityChartRow[];
-  page: number;
-  pageSize: number;
-  total: number;
-}
-
-export const getUserProductivity = (params: UserProductivityParams) =>
-  get<UserProductivityResponse>('/dashboard/user-productivity', params);
