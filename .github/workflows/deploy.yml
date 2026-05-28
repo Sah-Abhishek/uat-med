@@ -1,0 +1,28 @@
+name: Deploy to UAT
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /root/next-code-updated/uat-med
+            git pull origin master
+            cd backend
+            npm install
+            npm run build
+            cd ../frontend
+            npm install
+            npm run build
+            pm2 restart 9 10

@@ -22,6 +22,31 @@ const MILESTONES = [
   { key: 'CLOSED',             label: 'Closed' },
 ];
 
+// Local-time YYYY-MM-DD. Matches the format the RangeDatePicker emits and what
+// the backend's buildFilters expects (`${from} 00:00:00` / `${to} 23:59:59`).
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+// Monday as start of week (ISO-8601); business reports default to this.
+function startOfWeek(d: Date): Date {
+  const day = d.getDay(); // 0 = Sun … 6 = Sat
+  const diff = day === 0 ? -6 : 1 - day;
+  const r = new Date(d);
+  r.setDate(d.getDate() + diff);
+  return r;
+}
+
+const QUICK_RANGES: Array<{ key: string; label: string; compute: () => { from: string; to: string } }> = [
+  { key: 'today',     label: 'Today',      compute: () => { const t = new Date(); return { from: ymd(t), to: ymd(t) }; } },
+  { key: 'yesterday', label: 'Yesterday',  compute: () => { const y = new Date(); y.setDate(y.getDate() - 1); return { from: ymd(y), to: ymd(y) }; } },
+  { key: 'thisWeek',  label: 'This Week',  compute: () => { const t = new Date(); return { from: ymd(startOfWeek(t)), to: ymd(t) }; } },
+  { key: 'thisMonth', label: 'This Month', compute: () => { const t = new Date(); return { from: ymd(new Date(t.getFullYear(), t.getMonth(), 1)), to: ymd(t) }; } },
+];
+
 interface Props {
   filters: QaFilters;
   onChange: (patch: Partial<QaFilters>) => void;
@@ -167,6 +192,36 @@ export function QaFilterBar({ filters, onChange, onReset }: Props) {
             placeholder="All coders"
           />
         </div>
+      </div>
+
+      {/* Row 1.5: quick date-range presets. Click an active chip again to clear
+          the range. Active state derives by recomputing each preset and
+          comparing — so manually picking the same dates lights the chip too. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] uppercase tracking-wide font-semibold text-ink-muted mr-1">
+          Quick range
+        </span>
+        {QUICK_RANGES.map(({ key, label, compute }) => {
+          const r = compute();
+          const active = filters.from === r.from && filters.to === r.to;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() =>
+                onChange(active ? { from: undefined, to: undefined } : { from: r.from, to: r.to })
+              }
+              className={cn(
+                'inline-flex items-center px-2.5 h-7 rounded-pill text-[11px] font-semibold border transition',
+                active
+                  ? 'border-primary bg-primary text-white'
+                  : 'border-line bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink',
+              )}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Row 2: milestone chips + search */}
