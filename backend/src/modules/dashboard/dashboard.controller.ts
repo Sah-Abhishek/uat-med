@@ -2,6 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { DashboardService } from './dashboard.service';
+import { UserProductivityQueryDto } from './dto/user-productivity.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
@@ -67,6 +68,16 @@ export class DashboardController {
   @ApiOperation({ summary: 'Drill-down list of the charts behind the throughput metrics (kind=allocated|worked). Paginated.' })
   throughputCharts(@Query() q: { kind?: 'allocated' | 'worked'; clientId?: number; locationId?: number; specialityId?: number; facility?: string; days?: number; page?: number; pageSize?: number }) {
     return this.svc.throughputCharts(q);
+  }
+
+  @Get('user-productivity')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({
+    summary:
+      'Per-user productivity for a specific user + as-of date: assigned that day, worked same day, carried over, eventually worked, plus a paginated list of every chart the user has submitted decisions on.',
+  })
+  userProductivity(@Query() q: UserProductivityQueryDto) {
+    return this.svc.userProductivity(q);
   }
 
   @Get('self')

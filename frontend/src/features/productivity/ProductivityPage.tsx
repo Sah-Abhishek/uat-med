@@ -38,6 +38,7 @@ import {
   type ThroughputFilters,
 } from '@/api/dashboard';
 import { cn, formatDate } from '@/lib/utils';
+import { UserProductivitySection } from './UserProductivitySection';
 
 /* Allocated = indigo, Worked = green. Kept distinct so the comparison reads clearly. */
 const COLOR_ALLOCATED = '#6366F1';
@@ -165,6 +166,9 @@ export function ProductivityPage() {
 
           {/* ── Drill-down table ──────────────────────────── */}
           <ChartsTable filters={filters} />
+
+          {/* ── Per-user productivity ─────────────────────── */}
+          <UserProductivitySection />
         </>
       )}
     </div>

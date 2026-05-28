@@ -7,6 +7,7 @@ import { ChartFeedback } from '../../entities/chart-feedback.entity';
 import { ChartMilestone, ChartStatus, WorklistStatus } from '../../common/enums';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { Role } from '../../common/enums/roles.enum';
+import { UserProductivityQueryDto } from './dto/user-productivity.dto';
 
 /** Number of trailing days the time-series panels report. */
 const SERIES_DAYS = 14;
@@ -625,6 +626,137 @@ export class DashboardService {
         lastWorkedAt: r.last_worked_at,
         decisions: Number(r.decisions ?? 0),
       })),
+    };
+  }
+
+  /* ── Per-user productivity ───────────────────────────────
+   * Reviewer-focused view for the Productivity page. For a single user (coder
+   * or auditor) on a given "as-of" day, returns:
+   *   - assignedThatDay : distinct charts allocated to the user on that date
+   *   - workedSameDay   : subset whose first decision by the user fell on that date
+   *   - carriedOver     : subset whose first decision was on a later date
+   *   - eventuallyWorked: distinct charts the user has any decisions on (lifetime)
+   * plus a paginated list of every chart the user has submitted decisions on
+   * (so the user's full working set is reviewable, not just the day in focus).
+   *
+   * "Time on chart" is MAX(decided_at) - MIN(decided_at) for the user on that
+   * chart. It's a proxy for engagement time across decision submissions, not a
+   * true active timer (the timer in startTimer/stopTimer isn't persisted yet).
+   * A single submit collapses to span 0; the frontend renders that as "—".
+   *
+   * Orphaned charts (worklist soft-deleted) are excluded everywhere. Optional
+   * client/location scoping uses the global header scope.
+   */
+  async userProductivity(q: UserProductivityQueryDto) {
+    const userId = Number(q.userId);
+    const date = q.date; // YYYY-MM-DD
+    const page = Math.max(1, Number(q.page) || 1);
+    const pageSize = Math.min(200, Math.max(1, Number(q.pageSize) || 25));
+    const offset = (page - 1) * pageSize;
+
+    // Build the worklists EXISTS predicate. Always excludes orphaned worklists;
+    // tacks on optional client/location filters when present.
+    const params: unknown[] = [userId, date];
+    const wScope: string[] = ['w.deleted_at IS NULL'];
+    if (q.clientId)   { params.push(Number(q.clientId));   wScope.push(`w.client_id = $${params.length}`); }
+    if (q.locationId) { params.push(Number(q.locationId)); wScope.push(`w.location_id = $${params.length}`); }
+    const worklistExists =
+      `EXISTS (SELECT 1 FROM worklists w WHERE w.id = c.worklist_id AND ${wScope.join(' AND ')})`;
+
+    const summarySql = `
+      WITH user_assigned_on_date AS (
+        SELECT DISTINCT ca.chart_id
+        FROM chart_allocations ca
+        JOIN charts c ON c.id = ca.chart_id AND c.deleted_at IS NULL
+        WHERE ca.user_id = $1
+          AND ca.allocated_at::date = $2::date
+          AND ${worklistExists}
+      ),
+      user_first_decided AS (
+        SELECT cd.chart_id, MIN(cd.decided_at) AS first_decided_at
+        FROM chart_code_decisions cd
+        WHERE cd.decided_by_user_id = $1
+        GROUP BY cd.chart_id
+      )
+      SELECT
+        (SELECT COUNT(*) FROM user_assigned_on_date)::int AS assigned_that_day,
+        (SELECT COUNT(*) FROM user_assigned_on_date uad
+           JOIN user_first_decided ufd USING (chart_id)
+           WHERE ufd.first_decided_at::date = $2::date)::int AS worked_same_day,
+        (SELECT COUNT(*) FROM user_assigned_on_date uad
+           JOIN user_first_decided ufd USING (chart_id)
+           WHERE ufd.first_decided_at::date > $2::date)::int AS carried_over,
+        (SELECT COUNT(*) FROM (
+            SELECT DISTINCT cd.chart_id
+            FROM chart_code_decisions cd
+            JOIN charts c ON c.id = cd.chart_id AND c.deleted_at IS NULL
+            WHERE cd.decided_by_user_id = $1 AND ${worklistExists}
+          ) e
+        )::int AS eventually_worked
+    `;
+    const [summary] = await this.charts.manager.query(summarySql, params);
+
+    const tableSql = `
+      WITH user_decisions AS (
+        SELECT
+          cd.chart_id,
+          MIN(cd.decided_at) AS first_decided_at,
+          MAX(cd.decided_at) - MIN(cd.decided_at) AS time_span
+        FROM chart_code_decisions cd
+        WHERE cd.decided_by_user_id = $1
+        GROUP BY cd.chart_id
+      ),
+      user_first_alloc AS (
+        SELECT ca.chart_id, MIN(ca.allocated_at) AS first_allocated_at
+        FROM chart_allocations ca
+        WHERE ca.user_id = $1
+        GROUP BY ca.chart_id
+      )
+      SELECT
+        c.id          AS chart_id,
+        c.chart_no    AS chart_no,
+        c.milestone   AS milestone,
+        ufa.first_allocated_at AS assigned_at,
+        ud.first_decided_at    AS first_worked_at,
+        COALESCE(EXTRACT(EPOCH FROM ud.time_span) * 1000, 0)::bigint AS time_spent_ms
+      FROM user_decisions ud
+      JOIN charts c ON c.id = ud.chart_id AND c.deleted_at IS NULL
+      LEFT JOIN user_first_alloc ufa USING (chart_id)
+      WHERE ${worklistExists}
+      ORDER BY ud.first_decided_at DESC
+      LIMIT ${pageSize} OFFSET ${offset}
+    `;
+    const countSql = `
+      SELECT COUNT(*)::int AS total FROM (
+        SELECT DISTINCT cd.chart_id
+        FROM chart_code_decisions cd
+        JOIN charts c ON c.id = cd.chart_id AND c.deleted_at IS NULL
+        WHERE cd.decided_by_user_id = $1 AND ${worklistExists}
+      ) t
+    `;
+    const [rows, countRows] = await Promise.all([
+      this.charts.manager.query(tableSql, params) as Promise<Array<Record<string, unknown>>>,
+      this.charts.manager.query(countSql, params) as Promise<Array<{ total: number }>>,
+    ]);
+
+    return {
+      summary: {
+        assignedThatDay:  Number(summary?.assigned_that_day  ?? 0),
+        workedSameDay:    Number(summary?.worked_same_day    ?? 0),
+        carriedOver:      Number(summary?.carried_over       ?? 0),
+        eventuallyWorked: Number(summary?.eventually_worked  ?? 0),
+      },
+      charts: rows.map((r) => ({
+        chartId:       String(r.chart_id),
+        chartNo:       r.chart_no as string | null,
+        milestone:     r.milestone as string,
+        assignedAt:    r.assigned_at as string | null,
+        firstWorkedAt: r.first_worked_at as string,
+        timeSpentMs:   Number(r.time_spent_ms ?? 0),
+      })),
+      page,
+      pageSize,
+      total: Number(countRows[0]?.total ?? 0),
     };
   }
 
