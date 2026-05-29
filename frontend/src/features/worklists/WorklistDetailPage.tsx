@@ -267,7 +267,13 @@ export function WorklistDetailPage() {
           )}
         </Card>
 
-        {canAllocate && <AllocateFreshVolume worklistId={id!} unallocatedCount={s.unallocated} />}
+        {canAllocate && (
+          <AllocateFreshVolume
+            worklistId={id!}
+            unallocatedCount={s.unallocated}
+            totalCharts={s.total}
+          />
+        )}
       </div>
 
       <EditWorklistModal
@@ -808,9 +814,11 @@ interface AllocationForm {
 function AllocateFreshVolume({
   worklistId,
   unallocatedCount,
+  totalCharts,
 }: {
   worklistId: string;
   unallocatedCount: number;
+  totalCharts: number;
 }) {
   const qc = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -879,12 +887,32 @@ function AllocateFreshVolume({
         {fields.map((f, i) => (
           <div key={f.id} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
             <div>
-              {i === 0 && <Label className="text-[11px]">From</Label>}
-              <Input type="number" placeholder="From" {...register(`ranges.${i}.from`, { valueAsNumber: true, required: true })} />
+              {i === 0 && (
+                <Label className="text-[11px]">
+                  From {totalCharts > 0 && <span className="text-ink-subtle font-normal">(1–{totalCharts})</span>}
+                </Label>
+              )}
+              <Input
+                type="number"
+                min={1}
+                max={totalCharts > 0 ? totalCharts : undefined}
+                placeholder="From"
+                {...register(`ranges.${i}.from`, { valueAsNumber: true, required: true, min: 1 })}
+              />
             </div>
             <div>
-              {i === 0 && <Label className="text-[11px]">To</Label>}
-              <Input type="number" placeholder="To" {...register(`ranges.${i}.to`, { valueAsNumber: true, required: true })} />
+              {i === 0 && (
+                <Label className="text-[11px]">
+                  To {totalCharts > 0 && <span className="text-ink-subtle font-normal">(1–{totalCharts})</span>}
+                </Label>
+              )}
+              <Input
+                type="number"
+                min={1}
+                max={totalCharts > 0 ? totalCharts : undefined}
+                placeholder="To"
+                {...register(`ranges.${i}.to`, { valueAsNumber: true, required: true, min: 1 })}
+              />
             </div>
             <div>
               {i === 0 && <Label className="text-[11px]">Assign to</Label>}

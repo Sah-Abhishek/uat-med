@@ -249,6 +249,54 @@ export class WorklistsService {
     const w = await this.worklists.findOne({ where: { id } });
     if (!w) throw new NotFoundException();
 
+    // Validate the ranges up front. Previously the service quietly skipped
+    // any serial that didn't exist (a stale "1–20" against a worklist with
+    // 10 charts would allocate 10 and report success), which made the UI
+    // look like the request worked when it half-failed. Now we reject the
+    // whole batch with a single message listing every problem.
+    const issues: string[] = [];
+    const allowedRange = await this.charts.createQueryBuilder('c')
+      .select('MIN(c.serial_no)', 'minSerial')
+      .addSelect('MAX(c.serial_no)', 'maxSerial')
+      .where('c.worklist_id = :id', { id })
+      .getRawOne<{ minSerial: number | null; maxSerial: number | null }>();
+    const maxSerial = Number(allowedRange?.maxSerial ?? 0);
+    const minSerial = Number(allowedRange?.minSerial ?? 0);
+
+    for (const a of dto.allocations) {
+      const from = Number(a.from);
+      const to = Number(a.to);
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) {
+        issues.push(`Range ${a.from}–${a.to} is not a valid serial range.`);
+        continue;
+      }
+      if (maxSerial === 0) {
+        issues.push(`Worklist has no charts to allocate.`);
+        break;
+      }
+      if (from < minSerial || to > maxSerial) {
+        issues.push(`Range ${from}–${to} is outside this worklist's serials (${minSerial}–${maxSerial}).`);
+        continue;
+      }
+      const wanted = range(from, to);
+      const existing = await this.charts.find({
+        where: { worklistId: id, serialNo: In(wanted) },
+        select: { serialNo: true },
+      });
+      const present = new Set(existing.map((c) => Number(c.serialNo)));
+      const missing = wanted.filter((s) => !present.has(s));
+      if (missing.length) {
+        issues.push(
+          `Range ${from}–${to}: serial${missing.length === 1 ? '' : 's'} ${formatMissingSerials(missing)} ${missing.length === 1 ? 'does' : 'do'} not exist (they may have been deleted).`,
+        );
+      }
+    }
+    if (issues.length) {
+      throw new BadRequestException({
+        error: { code: 'invalid_range', message: issues.join(' ') },
+      });
+    }
+
     return this.ds.transaction(async manager => {
       let allocated = 0;
       for (const a of dto.allocations) {
@@ -297,4 +345,25 @@ function range(from: number, to: number): number[] {
   const out: number[] = [];
   for (let i = from; i <= to; i++) out.push(i);
   return out;
+}
+
+/**
+ * Compress missing serials into a compact "1–3, 5, 7–8" string so error
+ * messages stay short even when many serials are missing. Caps the output at
+ * five tokens — anything beyond is summarised as "+ N more".
+ */
+function formatMissingSerials(missing: number[]): string {
+  if (missing.length === 0) return '';
+  const sorted = [...missing].sort((a, b) => a - b);
+  const tokens: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    const n = sorted[i];
+    if (n === prev + 1) { prev = n; continue; }
+    tokens.push(start === prev ? `${start}` : `${start}–${prev}`);
+    start = n; prev = n;
+  }
+  if (tokens.length <= 5) return tokens.join(', ');
+  return `${tokens.slice(0, 5).join(', ')} + ${tokens.length - 5} more`;
 }

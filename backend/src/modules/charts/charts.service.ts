@@ -482,9 +482,70 @@ async update(id: number, dto: UpdateChartDto) {
     return { allocated: cs.length };
   }
 
+  /**
+   * Soft-delete the given charts AND clean up the worklist they belong to so
+   * the page doesn't show stale totals or serial-number gaps:
+   *   1. Soft-delete the rows (deleted_at = now()).
+   *   2. Recompute `worklists.total_charts` from the actual row count — the
+   *      column was set at creation and never decremented, which is why the
+   *      detail card kept showing "12" after deleting 2 of 12.
+   *   3. Re-sequence the surviving charts' serial_no to 1..N so the
+   *      Allocate / Manage Charts UIs aren't full of holes. The unique
+   *      constraint on (worklist_id, serial_no) means we have to bounce
+   *      through negative numbers first.
+   * All three steps run in one transaction; an early failure rolls back.
+   */
   async bulkDelete(chartIds: number[]) {
-    const result = await this.charts.softDelete(chartIds);
-    return { deleted: result.affected ?? 0 };
+    if (!chartIds || chartIds.length === 0) return { deleted: 0 };
+
+    return this.dataSource.transaction(async (manager) => {
+      const cRepo = manager.getRepository(Chart);
+      const wRepo = manager.getRepository(Worklist);
+
+      // Snapshot the worklists touched by this delete so we know which ones
+      // need their counter + serials reflowed.
+      const affected = await cRepo.find({
+        where: { id: In(chartIds) },
+        select: ['id', 'worklistId'],
+      });
+      const affectedWorklistIds = [...new Set(affected.map((c) => Number(c.worklistId)))];
+
+      const result = await cRepo.softDelete(chartIds);
+
+      for (const worklistId of affectedWorklistIds) {
+        // Step 1: park every surviving chart at a negative serial that
+        // mirrors its current value. Negative space is empty (serial_no is a
+        // simple int with no sign constraint), so the unique index is free.
+        await manager.query(
+          `UPDATE charts
+             SET serial_no = -serial_no
+           WHERE worklist_id = $1 AND deleted_at IS NULL`,
+          [worklistId],
+        );
+        // Step 2: re-issue 1..N in the original order (smallest old serial
+        // first → smallest new serial). We sorted DESC over the now-negative
+        // numbers because -1 (was 1) is the largest negative; flip the
+        // direction so the chart that used to be #1 stays #1 if it survived.
+        await manager.query(
+          `WITH ranked AS (
+             SELECT id, ROW_NUMBER() OVER (ORDER BY serial_no DESC) AS new_serial
+               FROM charts
+              WHERE worklist_id = $1 AND deleted_at IS NULL
+           )
+           UPDATE charts SET serial_no = ranked.new_serial
+             FROM ranked
+            WHERE charts.id = ranked.id`,
+          [worklistId],
+        );
+        // Step 3: refresh the stored counter so it never drifts above the
+        // real row count. The list/detail endpoints still take MAX(declared,
+        // rowCount), so we need this column to come down on its own.
+        const rowCount = await cRepo.count({ where: { worklistId } });
+        await wRepo.update({ id: worklistId }, { totalCharts: rowCount });
+      }
+
+      return { deleted: result.affected ?? 0 };
+    });
   }
 
   getColumns(userId: number) {
