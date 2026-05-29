@@ -513,17 +513,38 @@ async update(id: number, dto: UpdateChartDto) {
       const result = await cRepo.softDelete(chartIds);
 
       for (const worklistId of affectedWorklistIds) {
-        // Step 1: park every surviving chart at a negative serial that
-        // mirrors its current value. Negative space is empty (serial_no is a
-        // simple int with no sign constraint), so the unique index is free.
+        // Step 1: park every soft-deleted chart in this worklist (including
+        // ones from prior delete operations) at a far-negative serial. The
+        // (worklist_id, serial_no) unique constraint is not partial — it
+        // applies even to deleted_at IS NOT NULL rows — so if we left these
+        // sitting at, say, serial_no = 3, the re-sequence below would try
+        // to assign 3 to a survivor and Postgres would raise a unique-
+        // constraint violation. ROW_NUMBER() guarantees the parked values
+        // are unique among themselves; the 1_000_000 offset keeps them well
+        // clear of any survivor (worklists never reach that size in
+        // practice and survivors only ever reach the row count, not 1M+).
+        await manager.query(
+          `WITH parked AS (
+             SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn
+               FROM charts
+              WHERE worklist_id = $1 AND deleted_at IS NOT NULL
+           )
+           UPDATE charts SET serial_no = -(1000000 + parked.rn)
+             FROM parked
+            WHERE charts.id = parked.id`,
+          [worklistId],
+        );
+        // Step 2: bounce surviving charts into negative space too, so we
+        // can safely re-issue 1..N without temporarily colliding with their
+        // own current positives.
         await manager.query(
           `UPDATE charts
              SET serial_no = -serial_no
            WHERE worklist_id = $1 AND deleted_at IS NULL`,
           [worklistId],
         );
-        // Step 2: re-issue 1..N in the original order (smallest old serial
-        // first → smallest new serial). We sorted DESC over the now-negative
+        // Step 3: re-issue 1..N in the original order (smallest old serial
+        // first → smallest new serial). We sort DESC over the now-negative
         // numbers because -1 (was 1) is the largest negative; flip the
         // direction so the chart that used to be #1 stays #1 if it survived.
         await manager.query(
@@ -537,7 +558,7 @@ async update(id: number, dto: UpdateChartDto) {
             WHERE charts.id = ranked.id`,
           [worklistId],
         );
-        // Step 3: refresh the stored counter so it never drifts above the
+        // Step 4: refresh the stored counter so it never drifts above the
         // real row count. The list/detail endpoints still take MAX(declared,
         // rowCount), so we need this column to come down on its own.
         const rowCount = await cRepo.count({ where: { worklistId } });
