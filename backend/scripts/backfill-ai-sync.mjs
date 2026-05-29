@@ -73,24 +73,43 @@ function composeReason(dropdown, text) {
   if (d && t) return `${d}: ${t}`;
   return d || t || undefined;
 }
-function buildAction(row) {
-  const codeType = mapCodeType(row.code_type);
+// `enrich` resolves a usable predicted_code_id (+ the gateway's own code_type)
+// for a row whose stored predicted_code_id is missing or stale, by matching the
+// gateway's CURRENT predicted codes for the encounter. Mirrors the live app's
+// enrichment (charts.service.ts). Returns {id, type} or null.
+function resolvePred(row, gwCodes, validIds) {
+  // 1) stored id still valid on the gateway → keep it.
+  if (row.predicted_code_id && validIds.has(row.predicted_code_id)) {
+    return { id: row.predicted_code_id, type: mapCodeType(row.code_type) };
+  }
+  if (!gwCodes) return null;
+  // 2) exact (gateway-type | code) match.
+  const wantType = mapCodeType(row.code_type);
+  const exact = gwCodes.find((c) => c.code_type === wantType && c.icd_code === row.code_value);
+  if (exact) return { id: exact.id, type: exact.code_type };
+  // 3) fall back to code-only match IF unambiguous (handles PROCEDURE↔cpt etc).
+  const byVal = gwCodes.filter((c) => c.icd_code === row.code_value);
+  if (byVal.length === 1) return { id: byVal[0].id, type: byVal[0].code_type };
+  return null;
+}
+
+function buildAction(row, pred) {
   const reason = composeReason(row.reason_dropdown, row.reason_text);
   switch (row.decision) {
     case 'ACCEPTED':
-      if (!row.predicted_code_id) return null;
-      return { action: 'ACCEPT', predicted_code_id: row.predicted_code_id };
+      if (!pred) return null;
+      return { action: 'ACCEPT', predicted_code_id: pred.id };
     case 'REJECTED':
-      if (!row.predicted_code_id) return null;
-      return { action: 'DELETE', predicted_code_id: row.predicted_code_id, code_type: codeType, reason };
+      if (!pred) return null;
+      return { action: 'DELETE', predicted_code_id: pred.id, code_type: pred.type, reason };
     case 'EDITED':
-      if (!row.predicted_code_id) return null;
+      if (!pred) return null;
       return {
         action: 'EDIT',
-        predicted_code_id: row.predicted_code_id,
+        predicted_code_id: pred.id,
         correct_code: (row.edited_code ?? row.code_value).trim(),
         correct_description: row.edited_description?.trim(),
-        code_type: codeType,
+        code_type: pred.type,
         reason,
       };
     case 'ADDED':
@@ -98,7 +117,7 @@ function buildAction(row) {
         action: 'ADD',
         correct_code: (row.edited_code ?? row.code_value).trim(),
         correct_description: row.edited_description?.trim(),
-        code_type: codeType,
+        code_type: mapCodeType(row.code_type),
         reason,
       };
     default:
@@ -168,6 +187,11 @@ async function main() {
     JOIN users  u ON u.id = d.decided_by_user_id
     JOIN charts c ON c.id = d.chart_id
     WHERE d.gateway_correction_id IS NULL
+      -- ACCEPT is audit-only on the gateway and never returns a correction_id,
+      -- so it can never be marked synced locally and a re-run would re-send it
+      -- (duplicate audit rows). It carries no training signal, so skip it and
+      -- keep the backfill idempotent over the corrective actions that matter.
+      AND d.decision <> 'ACCEPTED'
       AND u.status = 'ACTIVE'
       AND u.public_id IS NOT NULL
       AND c.custom_fields->'aiPrediction'->>'encounterId' IS NOT NULL
@@ -188,14 +212,31 @@ async function main() {
     if (processed >= LIMIT_GROUPS) { console.log(`  (stopped at --limit-groups=${LIMIT_GROUPS})`); break; }
     processed++;
 
+    // Re-enrichment: fetch the gateway's CURRENT predicted codes for this
+    // encounter once, so rows whose stored predicted_code_id is missing/stale
+    // can be remapped by code (matches the live app's behaviour).
+    let gwCodes = null, validIds = new Set();
+    try {
+      const cr = await gw('GET', `/api/review/encounter/${encodeURIComponent(g.encounterId)}/codes`);
+      if (cr.ok && Array.isArray(cr.json)) {
+        gwCodes = cr.json;
+        validIds = new Set(gwCodes.map((c) => c.id));
+      }
+    } catch { /* leave gwCodes null → only rows with a valid stored id forward */ }
+
     const actions = [];
     const rowIds = []; // parallel to actions; gateway returns results in order
+    const skipped = [];
     for (const r of g.rows) {
-      const a = buildAction(r);
-      if (!a) continue;
+      const pred = r.decision === 'ADDED' ? {} : resolvePred(r, gwCodes, validIds);
+      const a = buildAction(r, pred);
+      if (!a) { skipped.push(r.id); continue; }
       actions.push(a); rowIds.push(r.id);
     }
-    if (!actions.length) continue;
+    if (!actions.length) {
+      if (skipped.length) console.log(`  - ${g.encounterId.slice(0,8)}… : ${skipped.length} rows unresolvable (no gateway code match) — ids ${skipped.join(',')}`);
+      continue;
+    }
 
     const label = `enc=${g.encounterId.slice(0, 8)}… coder=${g.coderId.slice(0, 8)}… (${actions.length} actions)`;
     if (!COMMIT) {
