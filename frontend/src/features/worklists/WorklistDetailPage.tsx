@@ -20,7 +20,8 @@ import { useCan } from '@/hooks/useCan';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, FancySelect } from '@/components/ui/Field';
+import { Input, Label, FancySelect, DatePicker, RangeDatePicker } from '@/components/ui/Field';
+import { listPrimarySpecialities } from '@/api/configurations';
 import { Modal, ModalFooter, Tabs, PillBadge, Avatar, ConfirmModal } from '@/components/ui/Primitives';
 import { WorklistStatusChip } from '@/components/ui/Chip';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
@@ -923,7 +924,14 @@ function AllocateFreshVolume({
   );
 }
 
-/* ── Edit Worklist modal ────────────────────────────── */
+/* ── Edit Worklist modal ──────────────────────────────
+ * Only the worklist's own editable fields are exposed. Client / Location /
+ * Process are deliberately read-only here — changing the client of a worklist
+ * that already has allocated charts cascades into AI prediction scope and
+ * billing buckets, so it isn't a single-modal operation. `numberOfCharts` was
+ * removed because it isn't a column on the worklist (the table only stores
+ * `total_charts`, which is a counter maintained by chart inserts/deletes) —
+ * sending it had no effect and made the form misleading. */
 function EditWorklistModal({
   open,
   onClose,
@@ -934,15 +942,31 @@ function EditWorklistModal({
   current: NonNullable<Awaited<ReturnType<typeof getWorklist>>>;
 }) {
   const qc = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
 
-  const { register, handleSubmit } = useForm<Partial<CreateWorklistDto>>({
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useForm<Partial<CreateWorklistDto>>({
     defaultValues: {
       worklistNumber: current.worklistNumber,
       primarySpecialityId: current.primarySpecialityId,
       receivedDate: current.receivedDate,
-      numberOfCharts: current.totalCharts,
+      dateOfService: current.dateOfService ?? undefined,
+      dateOfServiceTo: current.dateOfServiceTo ?? undefined,
     },
+  });
+
+  // Specialities are scoped per-client; an edit can only re-pick within the
+  // worklist's existing client (changing client itself is intentionally
+  // disallowed above).
+  const specialitiesQ = useQuery({
+    queryKey: ['configurations', 'primary-specialities', current.clientId],
+    queryFn: () => listPrimarySpecialities(current.clientId),
+    enabled: open,
   });
 
   const mutation = useMutation({
@@ -952,62 +976,131 @@ function EditWorklistModal({
       qc.invalidateQueries({ queryKey: ['worklists'] });
       onClose();
     },
-    onError: (err) => setError((err as unknown as ApiErrorShape).message),
+    onError: (err) => {
+      const e = err as any;
+      setServerError(
+        e?.response?.data?.error?.message ??
+          (e as unknown as ApiErrorShape)?.message ??
+          'Failed to update the worklist.',
+      );
+    },
   });
 
   return (
     <Modal open={open} onClose={onClose} title="Edit Worklist" size="lg">
       <form
-        onSubmit={handleSubmit((d) =>
+        onSubmit={handleSubmit((d) => {
+          setServerError(null);
           mutation.mutate({
-            ...d,
+            worklistNumber: typeof d.worklistNumber === 'string' ? d.worklistNumber.trim() : d.worklistNumber,
             primarySpecialityId: d.primarySpecialityId ? Number(d.primarySpecialityId) : undefined,
-            numberOfCharts: d.numberOfCharts ? Number(d.numberOfCharts) : undefined,
-          }),
-        )}
+            receivedDate: d.receivedDate,
+            dateOfService: d.dateOfService || undefined,
+            dateOfServiceTo: d.dateOfServiceTo || undefined,
+          });
+        })}
         className="space-y-4"
       >
-        {error && (
+        {serverError && (
           <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger border border-danger/30">
-            {error}
+            {serverError}
           </div>
         )}
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <Label>Worklist #</Label>
-            <Input {...register('worklistNumber')} />
+
+        {/* Scope panel — read-only context so the editor can confirm what
+            they're touching without an extra page round-trip. */}
+        <div className="rounded-lg border border-line bg-surface-sunken/30 p-3">
+          <p className="text-[11px] uppercase tracking-wide font-semibold text-ink-muted mb-2">
+            Scope (cannot be changed here)
+          </p>
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <ReadOnlyField label="Client" value={current.client?.name ?? '—'} />
+            <ReadOnlyField label="Location" value={current.location?.name ?? '—'} />
+            <ReadOnlyField label="Process" value={current.process?.name ?? '—'} />
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label>Primary Speciality ID</Label>
+            <Label required>Worklist #</Label>
             <Input
-              type="number"
-              {...register('primarySpecialityId', { valueAsNumber: true })}
+              placeholder="e.g. 19309A"
+              error={errors.worklistNumber?.message}
+              {...register('worklistNumber', { required: 'Required' })}
             />
           </div>
           <div>
-            <Label>Received Date</Label>
-            <Input type="date" {...register('receivedDate')} />
+            <Label required>Received Date</Label>
+            <input type="hidden" {...register('receivedDate', { required: 'Required' })} />
+            <DatePicker
+              value={watch('receivedDate') ?? ''}
+              onChange={(v) => setValue('receivedDate', v, { shouldValidate: true })}
+              placeholder="Select received date"
+              max={new Date().toISOString().slice(0, 10)}
+            />
+            {errors.receivedDate && (
+              <p className="mt-1 text-xs text-danger">{errors.receivedDate.message}</p>
+            )}
           </div>
         </div>
-        <div>
-          <Label>No. of Charts</Label>
-          <Input type="number" {...register('numberOfCharts', { valueAsNumber: true })} />
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label required>Primary Speciality</Label>
+            <input
+              type="hidden"
+              {...register('primarySpecialityId', { required: 'Required', valueAsNumber: true })}
+            />
+            <FancySelect
+              value={watch('primarySpecialityId') ? String(watch('primarySpecialityId')) : ''}
+              placeholder={specialitiesQ.isPending ? 'Loading…' : 'Select speciality'}
+              options={(specialitiesQ.data?.items ?? []).map((s) => ({
+                value: String(s.id),
+                label: s.name,
+              }))}
+              onChange={(v) => setValue('primarySpecialityId', Number(v), { shouldValidate: true })}
+            />
+            {errors.primarySpecialityId && (
+              <p className="mt-1 text-xs text-danger">{errors.primarySpecialityId.message}</p>
+            )}
+          </div>
+          <div>
+            <Label>Date of Service</Label>
+            <input type="hidden" {...register('dateOfService')} />
+            <input type="hidden" {...register('dateOfServiceTo')} />
+            <RangeDatePicker
+              value={{
+                from: watch('dateOfService') ?? null,
+                to: watch('dateOfServiceTo') ?? null,
+              }}
+              onChange={({ from, to }) => {
+                setValue('dateOfService', from ?? undefined);
+                setValue('dateOfServiceTo', to ?? undefined);
+              }}
+              placeholder="Optional — pick a service-date range"
+            />
+          </div>
         </div>
-        <p className="text-[11px] text-ink-muted">
-          To add a worklist without a file, please populate all fields. To add a worklist with a file,
-          please populate all fields except date of service and no. of charts as they will not be
-          considered.
-        </p>
+
         <ModalFooter>
-          <Button variant="ghost" type="button" onClick={onClose}>
+          <Button variant="ghost" type="button" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </Button>
           <Button type="submit" loading={mutation.isPending}>
-            Save
+            Save changes
           </Button>
         </ModalFooter>
       </form>
     </Modal>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-subtle">{label}</p>
+      <p className="text-sm font-semibold text-ink truncate">{value}</p>
+    </div>
   );
 }
 
