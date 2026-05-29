@@ -393,13 +393,20 @@ export class DashboardService {
       ORDER BY days.day ASC
     `;
 
+    // Exclude soft-deleted charts AND charts orphaned by a soft-deleted
+    // worklist. Without these, deleting a worklist still leaves its charts
+    // in the productivity bars / drill-down because chart_allocations and
+    // chart_code_decisions rows survive. Matches the same guard used by
+    // aiProcessingStatus / aiProcessingStatusSeries below.
     const allocatedInner = `
       SELECT date_trunc('day', a.allocated_at)::date AS day, COUNT(DISTINCT a.chart_id)::int AS count
       FROM chart_allocations a
       JOIN charts c     ON c.id = a.chart_id
       JOIN worklists w  ON w.id = c.worklist_id
       WHERE a.allocated_at >= $1
-        AND a.allocated_at < ($2::date + INTERVAL '1 day')${scopeSql}${allocatedUserSql}
+        AND a.allocated_at < ($2::date + INTERVAL '1 day')
+        AND c.deleted_at IS NULL
+        AND w.deleted_at IS NULL${scopeSql}${allocatedUserSql}
       GROUP BY 1
     `;
     const workedInner = `
@@ -408,7 +415,9 @@ export class DashboardService {
       JOIN charts c     ON c.id = d.chart_id
       JOIN worklists w  ON w.id = c.worklist_id
       WHERE d.decided_at >= $1
-        AND d.decided_at < ($2::date + INTERVAL '1 day')${scopeSql}${workedUserSql}
+        AND d.decided_at < ($2::date + INTERVAL '1 day')
+        AND c.deleted_at IS NULL
+        AND w.deleted_at IS NULL${scopeSql}${workedUserSql}
       GROUP BY 1
     `;
 
@@ -618,13 +627,17 @@ export class DashboardService {
       userSql = ` AND ${src.userCol} = $${params.length}`;
     }
 
+    // Same orphan / soft-delete exclusion as throughput() so the drill-down
+    // and the bar charts stay consistent.
     const em = this.charts.manager;
     const countRows: Array<{ total: number }> = await em.query(
       `SELECT COUNT(DISTINCT ${src.idCol})::int AS total
        FROM ${src.table}
        JOIN charts c ON c.id = ${src.idCol}
        JOIN worklists w ON w.id = c.worklist_id
-       WHERE ${src.dateCol} >= $1 AND ${src.dateCol} < ($2::date + INTERVAL '1 day')${scopeSql}${userSql}`,
+       WHERE ${src.dateCol} >= $1 AND ${src.dateCol} < ($2::date + INTERVAL '1 day')
+         AND c.deleted_at IS NULL
+         AND w.deleted_at IS NULL${scopeSql}${userSql}`,
       params,
     );
     const total = Number(countRows[0]?.total ?? 0);
@@ -648,7 +661,9 @@ export class DashboardService {
        LEFT JOIN primary_specialities ps  ON ps.id = w.primary_speciality_id
        LEFT JOIN users coder   ON coder.id   = c.allocated_coder_id
        LEFT JOIN users auditor ON auditor.id = c.allocated_auditor_id
-       WHERE ${src.dateCol} >= $1 AND ${src.dateCol} < ($2::date + INTERVAL '1 day')${scopeSql}${userSql}
+       WHERE ${src.dateCol} >= $1 AND ${src.dateCol} < ($2::date + INTERVAL '1 day')
+         AND c.deleted_at IS NULL
+         AND w.deleted_at IS NULL${scopeSql}${userSql}
        GROUP BY c.id, c.chart_no, w.worklist_number, cl.name, loc.name, ps.name, c.milestone, coder.full_name, auditor.full_name
        ORDER BY MAX(${src.dateCol}) DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
