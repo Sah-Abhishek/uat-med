@@ -14,6 +14,7 @@ import {
   type ChartListParams,
 } from '@/api/charts';
 import { listUsers } from '@/api/users';
+import { listWorklists } from '@/api/worklists';
 import { listPrimarySpecialities } from '@/api/configurations';
 import type { ApiErrorShape, Priority } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -825,6 +826,16 @@ function FilterModal({
     enabled: open,
   });
 
+  // Worklists for the filter dropdown — show the worklist NUMBER (the
+  // human-recognisable name), not the surrogate ID. Worklist counts are
+  // modest, so we fetch a large page once and let FancySelect's built-in
+  // local search filter by label.
+  const worklists = useQuery({
+    queryKey: ['worklists', 'filter-options'],
+    queryFn: () => listWorklists({ pageSize: 200, sortBy: 'receivedDate', sortDir: 'desc' }),
+    enabled: open,
+  });
+
   return (
     <Modal open={open} onClose={onClose} title="Filter Charts" size="xl">
       <form
@@ -861,8 +872,28 @@ function FilterModal({
             <Input type="number" {...register('serialTo', { valueAsNumber: true })} />
           </div>
           <div>
-            <Label>Worklist ID</Label>
-            <Input type="number" {...register('worklistId', { valueAsNumber: true })} />
+            <Label>Worklist</Label>
+            <Controller
+              control={control}
+              name="worklistId"
+              render={({ field }) => (
+                <FancySelect
+                  searchable
+                  searchPlaceholder="Search worklist…"
+                  placeholder={worklists.isPending ? 'Loading…' : 'Any worklist'}
+                  loading={worklists.isFetching}
+                  value={field.value != null && field.value !== '' ? String(field.value) : ''}
+                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                  options={[
+                    { value: '', label: 'Any worklist' },
+                    ...(worklists.data?.items ?? []).map((w) => ({
+                      value: String(w.id),
+                      label: w.worklistNumber,
+                    })),
+                  ]}
+                />
+              )}
+            />
           </div>
           <div>
             <Label>Allocated user</Label>
