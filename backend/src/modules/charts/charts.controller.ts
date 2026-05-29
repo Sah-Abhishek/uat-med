@@ -87,7 +87,7 @@ export class ChartsController {
   }
 
   @Delete('bulk')
-  @Roles(Role.MANAGER)
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Bulk soft-delete charts.' })
   bulkDelete(@Body() dto: BulkIdsDto) {
     return this.svc.bulkDelete(dto.chartIds);

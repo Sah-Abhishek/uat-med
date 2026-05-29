@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
@@ -14,7 +14,7 @@ import {
   type RunAiResult,
 } from '@/api/worklists';
 import { listUsers } from '@/api/users';
-import { listCharts } from '@/api/charts';
+import { bulkDeleteCharts, listCharts } from '@/api/charts';
 import type { ApiErrorShape } from '@/api/types';
 import { useCan } from '@/hooks/useCan';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -22,8 +22,8 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Label, FancySelect, DatePicker, RangeDatePicker } from '@/components/ui/Field';
 import { listPrimarySpecialities } from '@/api/configurations';
-import { Modal, ModalFooter, Tabs, PillBadge, Avatar, ConfirmModal } from '@/components/ui/Primitives';
-import { WorklistStatusChip } from '@/components/ui/Chip';
+import { Modal, ModalFooter, Tabs, PillBadge, Avatar, ConfirmModal, Toast } from '@/components/ui/Primitives';
+import { WorklistStatusChip, MilestoneChip } from '@/components/ui/Chip';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -50,10 +50,12 @@ export function WorklistDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [manageChartsOpen, setManageChartsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'details' | 'activity'>('details');
   const canViewWorklist = useCan('worklist.view');
   const canAllocate = useCan('worklist.allocate');
   const canBulkImport = useCan('worklist.bulkImport');
+  const canDeleteCharts = useCan('chart.bulkDelete');
 
   // Coders never see the entry link on the Charts page; this guard catches the
   // direct-URL path so the worklist detail can't be reached by typing it in.
@@ -171,6 +173,15 @@ export function WorklistDetailPage() {
                 Bulk Upload
               </Button>
             )}
+            {canDeleteCharts && s.total > 0 && (
+              <Button
+                variant="soft-danger"
+                onClick={() => setManageChartsOpen(true)}
+                leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+              >
+                Manage Charts
+              </Button>
+            )}
             <Button
               variant="danger"
               onClick={() => setDeleteOpen(true)}
@@ -277,6 +288,13 @@ export function WorklistDetailPage() {
         worklistNumber={data.worklistNumber}
         existingChartCount={s.total}
       />
+      {canDeleteCharts && (
+        <ManageChartsModal
+          open={manageChartsOpen}
+          onClose={() => setManageChartsOpen(false)}
+          worklistId={id!}
+        />
+      )}
     </div>
   );
 }
@@ -1101,6 +1119,258 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
       <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-subtle">{label}</p>
       <p className="text-sm font-semibold text-ink truncate">{value}</p>
     </div>
+  );
+}
+
+/* ── Manage Charts modal — multi-select + bulk delete ──────
+ * Lists every chart in the worklist with checkboxes, a chart-number search,
+ * and a Delete-selected action that fans out to the bulk-delete endpoint.
+ * Soft-delete only on the backend, so the operation is recoverable by DBA
+ * if a wrong selection slips through — but we still confirm before issuing
+ * the call. */
+function ManageChartsModal({
+  open,
+  onClose,
+  worklistId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  worklistId: string;
+}) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Reset the modal's transient state every time it reopens so a previous
+  // session's selection / search doesn't carry over.
+  useEffect(() => {
+    if (open) {
+      setSearch('');
+      setSelected(new Set());
+      setError(null);
+    }
+  }, [open]);
+
+  const chartsQ = useQuery({
+    queryKey: ['worklist', worklistId, 'manage-charts'],
+    queryFn: () => fetchAllCharts(worklistId),
+    enabled: open && !!worklistId,
+  });
+
+  const charts = chartsQ.data ?? [];
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return charts;
+    return charts.filter((c) => {
+      const chartNo = (c.chartNo ?? '').toLowerCase();
+      const mr = (c.mrNumber ?? '').toLowerCase();
+      const serial = String(c.serialNo);
+      return chartNo.includes(q) || mr.includes(q) || serial.includes(q);
+    });
+  }, [charts, search]);
+
+  const allFilteredIds = filtered.map((c) => c.id);
+  const allFilteredSelected =
+    allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
+  const someFilteredSelected =
+    allFilteredIds.some((id) => selected.has(id)) && !allFilteredSelected;
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllFiltered() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        allFilteredIds.forEach((id) => next.delete(id));
+      } else {
+        allFilteredIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
+  const mutation = useMutation({
+    mutationFn: () => bulkDeleteCharts([...selected].map(Number)),
+    onSuccess: (res) => {
+      const n = res?.deleted ?? selected.size;
+      setToast(`Deleted ${n} chart${n === 1 ? '' : 's'}.`);
+      setConfirmOpen(false);
+      // Invalidate every surface that reads chart counts so the page,
+      // sidebars, dashboards, and charts list all reflect the deletion.
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId] });
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId, 'manage-charts'] });
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId, 'charts-allocations'] });
+      qc.invalidateQueries({ queryKey: ['worklists'] });
+      qc.invalidateQueries({ queryKey: ['charts'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      setSelected(new Set());
+    },
+    onError: (err) => {
+      const e = err as any;
+      setError(
+        e?.response?.data?.error?.message ??
+          (e as unknown as ApiErrorShape)?.message ??
+          'Failed to delete the selected charts.',
+      );
+      setConfirmOpen(false);
+    },
+  });
+
+  return (
+    <>
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Manage charts"
+        subtitle={`${charts.length} chart${charts.length === 1 ? '' : 's'} in this worklist`}
+        size="xl"
+      >
+        <div className="space-y-3">
+          {error && (
+            <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger border border-danger/30">
+              {error}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex-1 min-w-[200px]">
+              <Input
+                placeholder="Search by chart #, MR #, or serial #"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="text-xs text-ink-muted whitespace-nowrap">
+              {selected.size > 0
+                ? `${selected.size} selected`
+                : `${filtered.length} shown`}
+            </div>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={selected.size === 0 || mutation.isPending}
+              onClick={() => {
+                setError(null);
+                setConfirmOpen(true);
+              }}
+              leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+            >
+              Delete selected
+            </Button>
+          </div>
+
+          <div className="border border-line rounded-xl overflow-hidden">
+            <div className="max-h-[420px] overflow-y-auto">
+              {chartsQ.isPending ? (
+                <div className="p-10 flex items-center justify-center text-ink-muted">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                </div>
+              ) : chartsQ.isError ? (
+                <div className="p-10 text-center text-sm text-danger">
+                  Couldn't load charts: {(chartsQ.error as Error).message}
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="p-10 text-center text-sm text-ink-muted">
+                  {charts.length === 0 ? 'No charts in this worklist.' : 'No charts match your search.'}
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="sticky top-0 bg-surface z-10">
+                    <tr>
+                      <th className="table-head w-10">
+                        <input
+                          type="checkbox"
+                          className="checkbox"
+                          aria-label={allFilteredSelected ? 'Clear selection' : 'Select all visible'}
+                          checked={allFilteredSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someFilteredSelected;
+                          }}
+                          onChange={toggleAllFiltered}
+                        />
+                      </th>
+                      <th className="table-head">#</th>
+                      <th className="table-head">Chart #</th>
+                      <th className="table-head">MR #</th>
+                      <th className="table-head">Milestone</th>
+                      <th className="table-head">Coder</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((c) => {
+                      const isSel = selected.has(c.id);
+                      return (
+                        <tr
+                          key={c.id}
+                          className={cn(
+                            'border-t border-line cursor-pointer transition',
+                            isSel ? 'bg-danger-soft/30' : 'hover:bg-surface-sunken/40',
+                          )}
+                          onClick={() => toggleOne(c.id)}
+                        >
+                          <td className="table-cell">
+                            <input
+                              type="checkbox"
+                              className="checkbox"
+                              checked={isSel}
+                              onChange={() => toggleOne(c.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`Select chart ${c.chartNo ?? c.serialNo}`}
+                            />
+                          </td>
+                          <td className="table-cell text-xs text-ink-muted tabular-nums">{c.serialNo}</td>
+                          <td className="table-cell font-semibold text-ink">{c.chartNo ?? '—'}</td>
+                          <td className="table-cell text-ink-muted">{c.mrNumber ?? '—'}</td>
+                          <td className="table-cell text-xs">
+                            <MilestoneChip milestone={c.milestone} />
+                          </td>
+                          <td className="table-cell text-ink-muted text-sm">
+                            {c.allocatedCoderName ?? <span className="text-ink-subtle">Unallocated</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          <ModalFooter>
+            <Button variant="ghost" type="button" onClick={onClose} disabled={mutation.isPending}>
+              Close
+            </Button>
+          </ModalFooter>
+        </div>
+      </Modal>
+
+      <ConfirmModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={() => mutation.mutate()}
+        variant="danger"
+        confirmLabel="Delete charts"
+        loading={mutation.isPending}
+        message={`Delete ${selected.size} chart${selected.size === 1 ? '' : 's'} from this worklist? This soft-deletes the charts (their docs, decisions, and AI history are kept) and reduces the worklist's totals immediately.`}
+      />
+
+      <Toast
+        open={!!toast}
+        message={toast ?? ''}
+        variant="success"
+        onClose={() => setToast(null)}
+      />
+    </>
   );
 }
 
