@@ -29,6 +29,13 @@ export class QaService {
     const where: string[] = [];
     const params: Record<string, unknown> = {};
 
+    // Always exclude soft-deleted charts and orphaned charts (charts whose
+    // worklist has been soft-deleted). Mirrors the exclusion applied across the
+    // charts list, dashboard, and productivity so AI/QA stats never count
+    // orphans. Added unconditionally, so `sql` is always a non-empty WHERE.
+    where.push(`${cAlias}.deleted_at IS NULL`);
+    where.push(`${wAlias}.deleted_at IS NULL`);
+
     if (f.clientId)        { where.push(`${wAlias}.client_id = :clientId`); params.clientId = Number(f.clientId); }
     if (f.locationId)      { where.push(`${wAlias}.location_id = :locationId`); params.locationId = Number(f.locationId); }
     if (f.specialityId)    { where.push(`${wAlias}.primary_speciality_id = :specialityId`); params.specialityId = Number(f.specialityId); }
