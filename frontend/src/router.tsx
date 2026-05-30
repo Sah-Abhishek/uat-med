@@ -6,6 +6,7 @@ import { Layout } from '@/components/layout/Layout';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { WorklistsPage } from '@/features/worklists/WorklistsPage';
 import { WorklistDetailPage } from '@/features/worklists/WorklistDetailPage';
+import { WorklistChartsPage } from '@/features/worklists/WorklistChartsPage';
 import { ChartsPage } from '@/features/charts/ChartsPage';
 import { ChartDetailPage } from '@/features/charts/ChartDetailPage';
 import { HccPage } from '@/features/hcc/HccPage';
@@ -34,6 +35,7 @@ export const router = createBrowserRouter([
           { index: true, element: <DashboardPage /> },
           { path: 'worklists', element: <WorklistsPage /> },
           { path: 'worklists/:id', element: <WorklistDetailPage /> },
+          { path: 'worklists/:id/charts', element: <WorklistChartsPage /> },
           { path: 'charts', element: <ChartsPage /> },
           { path: 'charts/:id', element: <ChartDetailPage /> },
           { path: 'hcc', element: <HccPage /> },

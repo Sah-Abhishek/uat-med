@@ -1520,6 +1520,7 @@ async function fetchAllActiveUsers() {
 }
 
 function AllocationsBreakdown({ worklistId }: { worklistId: string }) {
+  const navigate = useNavigate();
   const charts = useQuery({
     queryKey: ['worklist', worklistId, 'charts-allocations'],
     queryFn: () => fetchAllCharts(worklistId),
@@ -1551,9 +1552,19 @@ function AllocationsBreakdown({ worklistId }: { worklistId: string }) {
 
   return (
     <div className="px-6 py-5 border-t border-line">
-      <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-3">
-        Chart allocations
-      </p>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold">
+          Chart allocations
+        </p>
+        <Button
+          variant="soft"
+          size="sm"
+          leftIcon={<FileText className="w-3.5 h-3.5" />}
+          onClick={() => navigate(`/worklists/${worklistId}/charts`)}
+        >
+          View charts
+        </Button>
+      </div>
       {charts.isPending ? (
         <div className="h-10 rounded bg-surface-sunken animate-pulse" />
       ) : charts.error ? (
