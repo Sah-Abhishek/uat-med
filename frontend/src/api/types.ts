@@ -83,6 +83,12 @@ export interface Worklist {
   locationId: number;
   primarySpecialityId: number;
   processId: number;
+  // Resolved display names from the joined config hierarchy (list endpoint).
+  // Null when the related row is missing; fall back to the id for display.
+  clientName: string | null;
+  locationName: string | null;
+  specialityName: string | null;
+  processName: string | null;
   status: WorklistStatus;
   receivedDate: string;
   dateOfService: string | null;

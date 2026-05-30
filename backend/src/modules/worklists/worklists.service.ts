@@ -21,7 +21,14 @@ export class WorklistsService {
   ) {}
 
   async list(q: QueryWorklistsDto) {
-    const qb = this.worklists.createQueryBuilder('w');
+    const qb = this.worklists
+      .createQueryBuilder('w')
+      // Join the config relations so the list can show names, not raw ids
+      // (mirrors how the charts list resolves the same hierarchy).
+      .leftJoinAndSelect('w.client', 'client')
+      .leftJoinAndSelect('w.location', 'location')
+      .leftJoinAndSelect('w.primarySpeciality', 'primarySpeciality')
+      .leftJoinAndSelect('w.process', 'process');
     if (q.status) qb.andWhere('w.status = :s', { s: q.status });
     if (q.clientId) qb.andWhere('w.client_id = :c', { c: q.clientId });
     if (q.locationId) qb.andWhere('w.location_id = :l', { l: q.locationId });
@@ -66,8 +73,15 @@ export class WorklistsService {
       const c = countMap.get(String(w.id)) ?? { rowCount: 0, allocated: 0, closed: 0 };
       const declared = Number(w.totalCharts ?? 0);
       const total = Math.max(declared, c.rowCount);
+      // Strip the joined relation objects and surface flat *Name fields
+      // alongside the existing ids (same shape convention as the charts list).
+      const { client, location, primarySpeciality, process, ...rest } = w;
       return {
-        ...w,
+        ...rest,
+        clientName: client?.name ?? null,
+        locationName: location?.name ?? null,
+        specialityName: primarySpeciality?.name ?? null,
+        processName: process?.name ?? null,
         totalCharts: total,
         allocatedCharts: c.allocated,
         closedCharts: c.closed,

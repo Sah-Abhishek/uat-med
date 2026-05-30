@@ -75,9 +75,13 @@ export function WorklistsPage() {
   // initial undefined keeps the server's default order (received date desc).
   const { sort, toggle: onSort } = useTableSort({ sortBy: undefined, sortDir: 'asc' });
 
-  // Global Client / Location scope from the header.
+  // Global Client / Location scope from the header. Exposed in the filter bar
+  // too (bound to the same store), so picking there updates the header and
+  // every other scoped page in lockstep.
   const clientId = useScope((s) => s.clientId);
   const locationId = useScope((s) => s.locationId);
+  const setClient = useScope((s) => s.setClient);
+  const setLocation = useScope((s) => s.setLocation);
   const scope = {
     ...(clientId != null ? { clientId } : {}),
     ...(locationId != null ? { locationId } : {}),
@@ -122,10 +126,11 @@ export function WorklistsPage() {
   // Sort the current page's rows in the browser by the clicked column.
   const sortedItems = sortRows(list.data?.items ?? [], sort, {
     worklistNumber: (w) => w.worklistNumber,
-    clientId: (w) => w.clientId,
-    locationId: (w) => w.locationId,
-    processId: (w) => w.processId,
-    primarySpecialityId: (w) => w.primarySpecialityId,
+    // Sort by the displayed name (what the user sees), not the raw id.
+    clientId: (w) => w.clientName ?? '',
+    locationId: (w) => w.locationName ?? '',
+    processId: (w) => w.processName ?? '',
+    primarySpecialityId: (w) => w.specialityName ?? '',
     dateOfService: (w) => w.dateOfService,
     receivedDate: (w) => w.receivedDate,
     status: (w) => w.status,
@@ -188,6 +193,8 @@ export function WorklistsPage() {
             onReset={resetFilters}
             clientId={clientId}
             locationId={locationId}
+            onClientChange={setClient}
+            onLocationChange={setLocation}
           />
         )}
 
@@ -253,10 +260,10 @@ export function WorklistsPage() {
                           {wl.worklistNumber}
                         </Link>
                       </td>
-                      <td className="table-cell text-ink">#{wl.clientId}</td>
-                      <td className="table-cell text-ink">#{wl.locationId}</td>
-                      <td className="table-cell text-ink-muted">#{wl.processId}</td>
-                      <td className="table-cell text-ink-muted">#{wl.primarySpecialityId}</td>
+                      <td className="table-cell text-ink">{wl.clientName ?? `#${wl.clientId}`}</td>
+                      <td className="table-cell text-ink">{wl.locationName ?? `#${wl.locationId}`}</td>
+                      <td className="table-cell text-ink-muted">{wl.processName ?? `#${wl.processId}`}</td>
+                      <td className="table-cell text-ink-muted">{wl.specialityName ?? `#${wl.primarySpecialityId}`}</td>
                       <td className="table-cell">
                         <DualProgressBar percent={allocPct} />
                       </td>
@@ -315,16 +322,30 @@ function WorklistFilterBar({
   onReset,
   clientId,
   locationId,
+  onClientChange,
+  onLocationChange,
 }: {
   filters: WorklistListParams;
   onChange: (patch: Partial<WorklistListParams>) => void;
   onReset: () => void;
   clientId: number | null;
   locationId: number | null;
+  onClientChange: (id: number | null) => void;
+  onLocationChange: (id: number | null) => void;
 }) {
-  // Specialties are scoped to the header client; processes to the header
-  // location (which requires a location to be picked at all). Mirrors how the
-  // Add-Volume modal and the QA filter bar load these lookups.
+  // Client / Location are the global header scope; locations are scoped to the
+  // selected client. Specialties are scoped to the client, processes to the
+  // location (which requires a location at all). Mirrors how the Add-Volume
+  // modal and the QA filter bar load these lookups.
+  const clientsQ = useQuery({
+    queryKey: ['configurations', 'clients'],
+    queryFn: () => listClients(),
+  });
+  const locationsQ = useQuery({
+    queryKey: ['configurations', 'locations', clientId],
+    queryFn: () => listLocations(clientId!),
+    enabled: clientId != null,
+  });
   const specialitiesQ = useQuery({
     queryKey: ['configurations', 'primary-specialities', clientId],
     queryFn: () => listPrimarySpecialities(clientId ?? undefined),
@@ -345,7 +366,34 @@ function WorklistFilterBar({
   return (
     <div className="px-6 py-4 border-b border-line bg-surface-sunken/30">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <div className="md:col-span-3">
+        <div className="md:col-span-2">
+          <Label>Client</Label>
+          <FancySelect
+            value={clientId ? String(clientId) : ''}
+            onChange={(v) => onClientChange(v ? Number(v) : null)}
+            options={[
+              { value: '', label: 'All clients' },
+              ...(clientsQ.data?.items ?? []).map((c) => ({ value: String(c.id), label: c.name })),
+            ]}
+            placeholder="All clients"
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <Label>Location</Label>
+          <FancySelect
+            value={locationId ? String(locationId) : ''}
+            onChange={(v) => onLocationChange(v ? Number(v) : null)}
+            options={[
+              { value: '', label: clientId != null ? 'All locations' : 'Pick a client first' },
+              ...(locationsQ.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name })),
+            ]}
+            placeholder="All locations"
+            disabled={clientId == null}
+          />
+        </div>
+
+        <div className="md:col-span-2">
           <Label>Received date</Label>
           <RangeDatePicker
             value={{ from: filters.receivedDateFrom ?? null, to: filters.receivedDateTo ?? null }}
@@ -356,7 +404,7 @@ function WorklistFilterBar({
           />
         </div>
 
-        <div className="md:col-span-3">
+        <div className="md:col-span-2">
           <Label>Status</Label>
           <FancySelect
             value={filters.status ?? ''}
@@ -366,7 +414,7 @@ function WorklistFilterBar({
           />
         </div>
 
-        <div className="md:col-span-3">
+        <div className="md:col-span-2">
           <Label>Specialty</Label>
           <FancySelect
             value={filters.primarySpecialityId ? String(filters.primarySpecialityId) : ''}
@@ -379,7 +427,7 @@ function WorklistFilterBar({
           />
         </div>
 
-        <div className="md:col-span-3">
+        <div className="md:col-span-2">
           <Label>Process</Label>
           <FancySelect
             value={filters.processId ? String(filters.processId) : ''}
