@@ -36,6 +36,15 @@ export class ChartCodeDecision {
   @Index({ unique: true, where: '"gateway_correction_id" IS NOT NULL' })
   gatewayCorrectionId?: string | null;
 
+  /** Timestamp of the last successful forward of this decision to the AI
+   * gateway. Set for every action the gateway accepts — including ACCEPT,
+   * which is audit-only and returns no correction_id, so this is the only
+   * proof an accepted code actually reached the AI. Null means it was never
+   * successfully forwarded (forward failed, gateway down, or predates this
+   * column). */
+  @Column({ name: 'gateway_synced_at', type: 'timestamptz', nullable: true })
+  gatewaySyncedAt?: Date | null;
+
   @Column({ name: 'original_description', type: 'varchar', length: 500, nullable: true })
   originalDescription?: string;
 

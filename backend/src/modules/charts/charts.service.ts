@@ -1158,24 +1158,29 @@ async update(id: number, dto: UpdateChartDto) {
       decisions: dto.decisions,
     });
 
-    // If the forward succeeded and the gateway wrote any correction rows,
-    // persist each correction_id back to its local chart_code_decisions row.
-    // That's what powers the admin verification page — the column lets us
-    // show "this local decision corresponds to gateway correction <uuid>"
-    // and feed it into GET /admin/corrections/{id} for round-trip checks.
+    // If the forward succeeded, persist the outcome back onto each local
+    // chart_code_decisions row. Two signals:
+    //   - gateway_synced_at: stamped for EVERY action the gateway accepted
+    //     (success === true), ACCEPT included. ACCEPT is audit-only and returns
+    //     no correction_id, so this is the only proof an accepted code reached
+    //     the AI — it's what lets the admin page show accepted rows as "Synced"
+    //     instead of the old misleading "Local only".
+    //   - gateway_correction_id: additionally stored for EDIT/DELETE/ADD, which
+    //     do return one. Powers the side-by-side round-trip check against
+    //     GET /admin/corrections/{id} on the gateway.
     if ('forwarded' in aiGateway && aiGateway.forwarded && aiGateway.results?.length) {
       const byKey = new Map<string, ChartCodeDecision>(
         saved.map((r) => [`${r.codeType}|${r.codeValue}`, r]),
       );
       for (const r of aiGateway.results) {
-        if (!r.correctionId || !r.decisionKey) continue;
+        if (!r.success || !r.decisionKey) continue;
         const row = byKey.get(r.decisionKey);
         if (!row) continue;
-        await this.codeDecisions.update(
-          { id: row.id },
-          { gatewayCorrectionId: r.correctionId },
-        );
-        row.gatewayCorrectionId = r.correctionId;
+        const patch: Partial<ChartCodeDecision> = { gatewaySyncedAt: now };
+        if (r.correctionId) patch.gatewayCorrectionId = r.correctionId;
+        await this.codeDecisions.update({ id: row.id }, patch);
+        row.gatewaySyncedAt = now;
+        if (r.correctionId) row.gatewayCorrectionId = r.correctionId;
       }
     }
 
@@ -1192,6 +1197,7 @@ async update(id: number, dto: UpdateChartDto) {
         reasonDropdown: r.reasonDropdown,
         reasonText: r.reasonText,
         gatewayCorrectionId: r.gatewayCorrectionId ?? null,
+        gatewaySyncedAt: r.gatewaySyncedAt ?? null,
         decidedByUserId: Number(r.decidedByUserId),
         decidedAt: r.decidedAt,
       })),

@@ -20,6 +20,10 @@ export interface AdminCodeDecision {
   reasonDropdown: string | null;
   reasonText: string | null;
   gatewayCorrectionId: string | null;
+  /** When this decision was successfully forwarded to the AI gateway. Set for
+   * every forwarded action including ACCEPT (which carries no correction_id),
+   * so it's the source of truth for "did this reach the AI". */
+  gatewaySyncedAt: string | null;
   decidedByUserId: number;
   decidedByEmail: string | null;
   decidedByName: string | null;

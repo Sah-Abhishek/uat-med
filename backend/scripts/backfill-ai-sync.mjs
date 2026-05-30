@@ -12,20 +12,24 @@
  *
  * It mirrors ChartsService.forwardToAiGateway exactly:
  *   ACCEPTED -> ACCEPT, REJECTED -> DELETE, EDITED -> EDIT, ADDED -> ADD
- * and persists the gateway's correction_id back onto each local row.
+ * and persists the outcome back onto each local row: gateway_synced_at for
+ * every successfully-forwarded row, plus gateway_correction_id for the
+ * EDIT/DELETE/ADD rows that return one.
  *
  * SAFETY
  * ------
- *  - Only touches rows where gateway_correction_id IS NULL.
+ *  - Only touches rows where gateway_synced_at IS NULL (never forwarded).
  *  - PREFLIGHT: probes the gateway corrections backend; ABORTS if it 502s
  *    (i.e. the same outage that caused this backlog) so we never hammer a
  *    broken endpoint.
  *  - DRY RUN by default. Pass --commit to actually POST to the gateway and
- *    write correction_ids back to Postgres.
- *  - Idempotent-ish: ACCEPT produces no correction_id on the gateway (audit
- *    only), so ACCEPTED rows stay NULL even after a successful forward — same
- *    as the live app. A re-run will therefore retry ACCEPT rows; that is
- *    harmless (audit-only) and matches app behaviour.
+ *    write the sync markers back to Postgres.
+ *  - Idempotent: ACCEPT produces no correction_id on the gateway (audit only),
+ *    but we now stamp gateway_synced_at on success, so once an ACCEPT row is
+ *    forwarded it won't be re-selected on a re-run. (Legacy ACCEPT rows that
+ *    the live app forwarded before gateway_synced_at existed have a NULL
+ *    timestamp, so the first backfill re-sends them once — harmless audit
+ *    duplicate — and stamps them so later runs skip them.)
  *
  * USAGE
  *   node scripts/backfill-ai-sync.mjs              # dry run (no writes)
@@ -186,12 +190,10 @@ async function main() {
     FROM chart_code_decisions d
     JOIN users  u ON u.id = d.decided_by_user_id
     JOIN charts c ON c.id = d.chart_id
-    WHERE d.gateway_correction_id IS NULL
-      -- ACCEPT is audit-only on the gateway and never returns a correction_id,
-      -- so it can never be marked synced locally and a re-run would re-send it
-      -- (duplicate audit rows). It carries no training signal, so skip it and
-      -- keep the backfill idempotent over the corrective actions that matter.
-      AND d.decision <> 'ACCEPTED'
+    WHERE d.gateway_synced_at IS NULL
+      -- gateway_synced_at (not correction_id) is the "was forwarded" guard, so
+      -- ACCEPT rows are included and stay idempotent: once forwarded we stamp
+      -- the timestamp and they drop out of this set on the next run.
       AND u.status = 'ACTIVE'
       AND u.public_id IS NOT NULL
       AND c.custom_fields->'aiPrediction'->>'encounterId' IS NOT NULL
@@ -251,12 +253,17 @@ async function main() {
       if (!res.ok) { failed++; console.log(`  ✖ ${label} → ${res.status} ${JSON.stringify(res.json)}`); continue; }
       const results = Array.isArray(res.json?.results) ? res.json.results : [];
       for (let i = 0; i < results.length; i++) {
-        const cid = results[i]?.correction_id;
         const rowId = rowIds[i];
-        if (cid && rowId != null) {
-          await client.query('UPDATE chart_code_decisions SET gateway_correction_id = $1 WHERE id = $2', [cid, rowId]);
-          idsWritten++;
-        }
+        if (rowId == null) continue;
+        if (results[i]?.success === false) continue; // gateway rejected this action
+        const cid = results[i]?.correction_id ?? null;
+        // Stamp synced for every accepted action (ACCEPT has no correction_id);
+        // additionally store the correction_id when the gateway returned one.
+        await client.query(
+          'UPDATE chart_code_decisions SET gateway_synced_at = now(), gateway_correction_id = COALESCE($1, gateway_correction_id) WHERE id = $2',
+          [cid, rowId],
+        );
+        idsWritten++;
       }
       ok++;
       console.log(`  ✓ ${label} → written=${res.json?.corrections_written ?? '?'} qdrantFail=${res.json?.qdrant_sync_failures ?? '?'}`);

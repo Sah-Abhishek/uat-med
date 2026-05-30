@@ -12,7 +12,7 @@ import {
   type CreateWorklistFromExcelResult,
   type WorklistListParams,
 } from '@/api/worklists';
-import type { ApiErrorShape } from '@/api/types';
+import type { ApiErrorShape, WorklistStatus } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { IllustrationStatCard } from '@/components/ui/StatCards';
 import { Card } from '@/components/ui/Card';
@@ -49,7 +49,28 @@ export function WorklistsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [modalOpen, setModalOpen] = useState(false);
-  const [filters] = useState<WorklistListParams>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState<WorklistListParams>({});
+
+  // Merge a partial filter change and jump back to page 1 (the old page may no
+  // longer exist once the result set shrinks).
+  const patchFilters = (patch: Partial<WorklistListParams>) => {
+    setFilters((f) => ({ ...f, ...patch }));
+    setPage(1);
+  };
+  const resetFilters = () => {
+    setFilters({});
+    setPage(1);
+  };
+
+  // Active page-level filters (client/location live in the global header scope,
+  // so they're intentionally excluded here). Drives the count badge on the
+  // Filter button. The date range counts as one regardless of from/to.
+  const activeFilterCount =
+    (filters.status ? 1 : 0) +
+    (filters.primarySpecialityId ? 1 : 0) +
+    (filters.processId ? 1 : 0) +
+    (filters.receivedDateFrom || filters.receivedDateTo ? 1 : 0);
   // Client-side sort: reorders the rows on the page currently in view. The
   // initial undefined keeps the server's default order (received date desc).
   const { sort, toggle: onSort } = useTableSort({ sortBy: undefined, sortDir: 'asc' });
@@ -63,8 +84,16 @@ export function WorklistsPage() {
   };
 
   // Reset to page 1 when the scope changes — old rows may fall out of view.
+  // Also drop the specialty/process filters: their option lists are scoped to
+  // the header client/location, so a value picked under the old scope would be
+  // stale (and silently return zero rows) under the new one.
   useEffect(() => {
     setPage(1);
+    setFilters((f) =>
+      f.primarySpecialityId || f.processId
+        ? { ...f, primarySpecialityId: undefined, processId: undefined }
+        : f,
+    );
   }, [clientId, locationId]);
 
   const summary = useQuery({
@@ -135,8 +164,13 @@ export function WorklistsPage() {
             Worklist ({formatNumber(list.data?.total ?? 0)})
           </h2>
           <div className="flex items-center gap-2">
-            <Button variant="soft" leftIcon={<FilterIcon className="w-3.5 h-3.5" />}>
-              Filter
+            <Button
+              variant="soft"
+              onClick={() => setFiltersOpen((o) => !o)}
+              aria-expanded={filtersOpen}
+              leftIcon={<FilterIcon className="w-3.5 h-3.5" />}
+            >
+              Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
             </Button>
             {canCreate && (
               <Button onClick={() => setModalOpen(true)} leftIcon={<Plus className="w-4 h-4" />}>
@@ -145,6 +179,17 @@ export function WorklistsPage() {
             )}
           </div>
         </div>
+
+        {/* Filter bar — toggled by the Filter button above */}
+        {filtersOpen && (
+          <WorklistFilterBar
+            filters={filters}
+            onChange={patchFilters}
+            onReset={resetFilters}
+            clientId={clientId}
+            locationId={locationId}
+          />
+        )}
 
         {/* Table */}
         <div className="overflow-x-auto">
@@ -252,6 +297,115 @@ export function WorklistsPage() {
       </Card>
 
       <AddVolumeModal open={modalOpen} onClose={() => setModalOpen(false)} />
+    </div>
+  );
+}
+
+/* ── Worklist filter bar ─────────────────────────────── */
+const STATUS_OPTIONS: Array<{ value: '' | WorklistStatus; label: string }> = [
+  { value: '', label: 'All statuses' },
+  { value: 'OPEN', label: 'Open' },
+  { value: 'IN_PROGRESS', label: 'In Progress' },
+  { value: 'CLOSED', label: 'Closed' },
+];
+
+function WorklistFilterBar({
+  filters,
+  onChange,
+  onReset,
+  clientId,
+  locationId,
+}: {
+  filters: WorklistListParams;
+  onChange: (patch: Partial<WorklistListParams>) => void;
+  onReset: () => void;
+  clientId: number | null;
+  locationId: number | null;
+}) {
+  // Specialties are scoped to the header client; processes to the header
+  // location (which requires a location to be picked at all). Mirrors how the
+  // Add-Volume modal and the QA filter bar load these lookups.
+  const specialitiesQ = useQuery({
+    queryKey: ['configurations', 'primary-specialities', clientId],
+    queryFn: () => listPrimarySpecialities(clientId ?? undefined),
+  });
+  const processesQ = useQuery({
+    queryKey: ['configurations', 'processes', locationId],
+    queryFn: () => listProcessesByLocation(locationId!),
+    enabled: locationId != null,
+  });
+
+  const hasAny =
+    !!filters.status ||
+    !!filters.primarySpecialityId ||
+    !!filters.processId ||
+    !!filters.receivedDateFrom ||
+    !!filters.receivedDateTo;
+
+  return (
+    <div className="px-6 py-4 border-b border-line bg-surface-sunken/30">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="md:col-span-3">
+          <Label>Received date</Label>
+          <RangeDatePicker
+            value={{ from: filters.receivedDateFrom ?? null, to: filters.receivedDateTo ?? null }}
+            onChange={(v) =>
+              onChange({ receivedDateFrom: v.from ?? undefined, receivedDateTo: v.to ?? undefined })
+            }
+            placeholder="Any received date"
+          />
+        </div>
+
+        <div className="md:col-span-3">
+          <Label>Status</Label>
+          <FancySelect
+            value={filters.status ?? ''}
+            onChange={(v) => onChange({ status: (v || undefined) as WorklistStatus | undefined })}
+            options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+            placeholder="All statuses"
+          />
+        </div>
+
+        <div className="md:col-span-3">
+          <Label>Specialty</Label>
+          <FancySelect
+            value={filters.primarySpecialityId ? String(filters.primarySpecialityId) : ''}
+            onChange={(v) => onChange({ primarySpecialityId: v ? Number(v) : undefined })}
+            options={[
+              { value: '', label: 'All specialties' },
+              ...(specialitiesQ.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name })),
+            ]}
+            placeholder="All specialties"
+          />
+        </div>
+
+        <div className="md:col-span-3">
+          <Label>Process</Label>
+          <FancySelect
+            value={filters.processId ? String(filters.processId) : ''}
+            onChange={(v) => onChange({ processId: v ? Number(v) : undefined })}
+            options={[
+              { value: '', label: locationId != null ? 'All processes' : 'Pick a location first' },
+              ...(processesQ.data?.items ?? []).map((p) => ({ value: String(p.id), label: p.name })),
+            ]}
+            placeholder="All processes"
+            disabled={locationId == null}
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end mt-3">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onReset}
+          disabled={!hasAny}
+          leftIcon={<XIcon className="w-3 h-3" />}
+          title="Clear all filters"
+        >
+          Reset
+        </Button>
+      </div>
     </div>
   );
 }

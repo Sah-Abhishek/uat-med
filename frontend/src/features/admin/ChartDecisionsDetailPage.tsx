@@ -304,8 +304,11 @@ function DecisionBadge({ d }: { d: DecisionVerdict }) {
 }
 
 function SyncBadge({ d }: { d: AdminChartDecisionDetail }) {
-  if (d.decision === 'ACCEPTED') return <PillBadge tone="sky">Local only</PillBadge>;
-  if (d.gatewayCorrectionId)     return <PillBadge tone="mint">Synced</PillBadge>;
+  // Forwarded to the AI gateway = has a correction_id (EDIT/DELETE/ADD) OR a
+  // synced timestamp. ACCEPT is audit-only and returns no correction_id, so
+  // gatewaySyncedAt is the only proof it reached the AI — without it, accepted
+  // codes used to show a misleading "Local only" even though they were sent.
+  if (d.gatewayCorrectionId || d.gatewaySyncedAt) return <PillBadge tone="mint">Synced</PillBadge>;
   return <PillBadge tone="coral">Not synced</PillBadge>;
 }
 

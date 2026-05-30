@@ -55,6 +55,7 @@ export class AdminCodeDecisionsService {
         'd.reason_dropdown AS "reasonDropdown"',
         'd.reason_text AS "reasonText"',
         'd.gateway_correction_id AS "gatewayCorrectionId"',
+        'd.gateway_synced_at AS "gatewaySyncedAt"',
         'd.decided_by_user_id AS "decidedByUserId"',
         'u.email AS "decidedByEmail"',
         'u.full_name AS "decidedByName"',
@@ -115,6 +116,7 @@ export class AdminCodeDecisionsService {
         'd.reason_dropdown AS "reasonDropdown"',
         'd.reason_text AS "reasonText"',
         'd.gateway_correction_id AS "gatewayCorrectionId"',
+        'd.gateway_synced_at AS "gatewaySyncedAt"',
         'd.decided_by_user_id AS "decidedByUserId"',
         'u.email AS "decidedByEmail"',
         'u.full_name AS "decidedByName"',
@@ -157,12 +159,13 @@ export class AdminCodeDecisionsService {
    * synced/not-synced summary so a manager can spot charts whose corrections
    * didn't reach the AI golden dataset at a glance.
    *
-   * "synced" / "not synced" definitions:
-   *   - synced:     decisions with gateway_correction_id IS NOT NULL
-   *   - not synced: non-ACCEPT decisions with gateway_correction_id IS NULL
-   *                 (ACCEPT actions never write a correction by design, see
-   *                 golden_dataset_api §Appendix A — they show up under
-   *                 `accepted` but not under `notSynced`)
+   * "synced" / "not synced" definitions (a decision counts as forwarded if it
+   * has EITHER a gateway_correction_id OR a gateway_synced_at):
+   *   - synced:     gateway_correction_id IS NOT NULL OR gateway_synced_at IS NOT NULL
+   *   - not synced: both NULL — never reached the gateway.
+   * ACCEPT actions write no correction_id (audit-only, golden_dataset_api
+   * §Appendix A), so before gateway_synced_at they always looked "local only";
+   * now a forwarded ACCEPT carries a timestamp and counts as synced.
    */
   async listCharts(q: ListChartsWithDecisionsDto) {
     // Sub-condition: a chart should appear when it has at least one decision
@@ -192,12 +195,14 @@ export class AdminCodeDecisionsService {
       .addSelect(`SUM(CASE WHEN d.decision = '${CodeReviewDecision.ADDED}'   THEN 1 ELSE 0 END)::int`, 'added')
       .addSelect('MAX(d.decided_at)', 'lastDecidedAt')
       .addSelect(
-        `SUM(CASE WHEN d.gateway_correction_id IS NOT NULL THEN 1 ELSE 0 END)::int`,
+        // Forwarded to the gateway = has a correction_id (EDIT/DELETE/ADD) OR a
+        // synced timestamp (covers ACCEPT, which returns no correction_id).
+        `SUM(CASE WHEN d.gateway_correction_id IS NOT NULL OR d.gateway_synced_at IS NOT NULL THEN 1 ELSE 0 END)::int`,
         'syncedCount',
       )
       .addSelect(
-        // "Should have synced but didn't" — non-ACCEPT decisions with null id.
-        `SUM(CASE WHEN d.decision <> '${CodeReviewDecision.ACCEPTED}' AND d.gateway_correction_id IS NULL THEN 1 ELSE 0 END)::int`,
+        // "Should have synced but didn't" — any decision with neither signal.
+        `SUM(CASE WHEN d.gateway_correction_id IS NULL AND d.gateway_synced_at IS NULL THEN 1 ELSE 0 END)::int`,
         'notSyncedCount',
       )
       .addSelect(
@@ -303,6 +308,7 @@ export class AdminCodeDecisionsService {
         'd.reason_dropdown AS "reasonDropdown"',
         'd.reason_text AS "reasonText"',
         'd.gateway_correction_id AS "gatewayCorrectionId"',
+        'd.gateway_synced_at AS "gatewaySyncedAt"',
         'd.decided_by_user_id AS "decidedByUserId"',
         'u.email AS "decidedByEmail"',
         'u.full_name AS "decidedByName"',
