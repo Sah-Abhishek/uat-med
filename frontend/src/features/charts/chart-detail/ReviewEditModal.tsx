@@ -29,6 +29,7 @@ import {
   submitCodeDecisions,
   type CodeDecisionInput,
   type CodeDecisionType,
+  type CodeDecisionVerdict,
   type PredictedCodeWithId,
 } from '@/api/charts';
 import {
@@ -80,6 +81,28 @@ function categoryToCodeType(c: Category): CodeDecisionType | null {
     case 'PROCEDURE': return 'PROCEDURE';
     case 'ADMIT CODE': return null; // mirror of PRIMARY
     default: return null;
+  }
+}
+
+/** Inverse of categoryToCodeType — maps a persisted decision's codeType back
+ * onto the on-screen Category. EM_LEVEL / MODIFIER aren't rendered as ICD
+ * code rows, so they map to null and are skipped. */
+function codeTypeToCategory(t: CodeDecisionType): Category | null {
+  switch (t) {
+    case 'PRIMARY': return 'PRIMARY';
+    case 'SECONDARY': return 'SECONDARY';
+    case 'PROCEDURE': return 'PROCEDURE';
+    default: return null;
+  }
+}
+
+/** Maps a persisted verdict onto the modal's local Decision state. */
+function verdictToDecision(v: CodeDecisionVerdict): Decision {
+  switch (v) {
+    case 'ACCEPTED': return 'accepted';
+    case 'REJECTED': return 'rejected';
+    case 'EDITED': return 'edited';
+    case 'ADDED': return 'added';
   }
 }
 
@@ -304,41 +327,80 @@ export function ReviewEditModal({
   });
   const reasonRows: CodeReviewReasonRow[] = reasonsQ.data?.items ?? [];
 
-  // In read-only QA mode, pull whatever decisions were previously submitted
-  // for this chart so we can show the coder/auditor's verdict + reason text
-  // alongside each code instead of a fresh "pending" board.
+  // Pull whatever decisions were previously submitted for this chart. Loaded
+  // in BOTH modes: QA read-only needs it to show the coder's verdicts, and
+  // editable mode needs it so the board reflects the same edited/rejected/
+  // added state the sidebar's AI ICD card shows (instead of silently
+  // diverging by displaying the raw orchestrator prediction).
   const decisionsQ = useQuery({
     queryKey: ['chart-code-decisions', chartId],
     queryFn: () => listCodeDecisions(chartId),
-    enabled: open && readOnly && !!chartId,
+    enabled: open && !!chartId,
   });
+  // Pre-seed the board from previously-submitted decisions so the modal shows
+  // the same codes the sidebar does. On reopen after a prior submit, the coder
+  // (or a QA viewer) sees their verdicts, edited values and added codes —
+  // keeping the modal and the "AI ICD Prediction" card consistent.
   useEffect(() => {
-    if (!open || !readOnly) return;
+    if (!open) return;
     const rows = decisionsQ.data?.items;
     if (!rows?.length) return;
+
+    // Codes the coder ADDED aren't part of the AI prediction, so inject them
+    // as synthetic items so they show up in their category section.
+    const seededAdds: CodeItem[] = rows
+      .filter((r) => r.decision === 'ADDED')
+      .map((r, i): CodeItem | null => {
+        const cat = codeTypeToCategory(r.codeType);
+        if (!cat) return null;
+        const code = r.editedCode ?? r.codeValue;
+        return {
+          key: `added-${cat}-${i}-${code}`,
+          category: cat,
+          code,
+          description: r.editedDescription ?? r.originalDescription ?? '',
+          predictedCodeId: r.predictedCodeId,
+        };
+      })
+      .filter((v): v is CodeItem => v !== null);
+
     setState((prev) => {
       const next = { ...prev };
-      for (const it of items) {
+      // AI-predicted items: match by (codeType, codeValue) and stamp the verdict.
+      for (const it of aiItems) {
         const codeType = categoryToCodeType(it.category);
         if (!codeType) continue;
-        const match = rows.find((r) => r.codeType === codeType && r.codeValue === it.code);
+        const match = rows.find(
+          (r) => r.decision !== 'ADDED' && r.codeType === codeType && r.codeValue === it.code,
+        );
         if (!match) continue;
-        const verdict =
-          match.decision === 'ACCEPTED' ? 'accepted' :
-          match.decision === 'REJECTED' ? 'rejected' :
-          'edited';
         next[it.key] = {
-          ...next[it.key],
-          decision: verdict as Decision,
-          editedCode: match.editedCode ?? next[it.key]?.editedCode ?? it.code,
-          editedDescription: match.editedDescription ?? next[it.key]?.editedDescription ?? it.description,
+          decision: verdictToDecision(match.decision),
+          editedCode: match.editedCode ?? it.code,
+          editedDescription: match.editedDescription ?? it.description,
           rejectReason: match.reasonText ?? '',
           reasonDropdown: match.reasonDropdown ?? '',
         };
       }
+      // Added items: seed their 'added' state. The items-merge effect keys off
+      // prev[item.key], so setting state here before appending preserves it.
+      for (const it of seededAdds) {
+        if (next[it.key]) continue;
+        const match = rows.find(
+          (r) => r.decision === 'ADDED' && codeTypeToCategory(r.codeType) === it.category && (r.editedCode ?? r.codeValue) === it.code,
+        );
+        next[it.key] = {
+          decision: 'added',
+          editedCode: it.code,
+          editedDescription: it.description,
+          rejectReason: match?.reasonText ?? '',
+          reasonDropdown: match?.reasonDropdown ?? '',
+        };
+      }
       return next;
     });
-  }, [open, readOnly, decisionsQ.data, items]);
+    setAddedItems((prev) => (prev.length > 0 ? prev : seededAdds));
+  }, [open, decisionsQ.data, aiItems]);
 
   // Live timer pill mirrors the chart's running session. Cached by react-query
   // with the same key the header uses, so no extra network round-trip.
