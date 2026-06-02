@@ -55,6 +55,7 @@ const AI_ROW_TINT: Record<AiStatus, string> = {
 };
 import { useAuth } from '@/auth/store';
 import { useScope } from '@/scope/store';
+import { useChartsView } from './chartsViewStore';
 import { can } from '@/permissions';
 import { SortableHeader } from '@/components/ui/SortableHeader';
 import { useTableSort, sortRows } from '@/hooks/useTableSort';
@@ -381,12 +382,25 @@ export function ChartsPage() {
   const scopeClientId = useScope((s) => s.clientId);
   const scopeLocationId = useScope((s) => s.locationId);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [tab, setTab] = useState<'ALL' | Priority>('ALL');
-  const [filters, setFilters] = useState<ChartListParams>({});
-  // Client-side sort: reorders the rows on the page currently in view.
-  const { sort, toggle: onSort } = useTableSort({ sortBy: undefined, sortDir: 'asc' });
+  // View-state (filters, search, tab, pagination, sort) is persisted in
+  // sessionStorage via useChartsView so it survives navigating into a chart's
+  // detail page and back — see chartsViewStore.ts.
+  const page = useChartsView((s) => s.page);
+  const setPage = useChartsView((s) => s.setPage);
+  const pageSize = useChartsView((s) => s.pageSize);
+  const setPageSize = useChartsView((s) => s.setPageSize);
+  const tab = useChartsView((s) => s.tab);
+  const setTab = useChartsView((s) => s.setTab);
+  const filters = useChartsView((s) => s.filters);
+  const setFilters = useChartsView((s) => s.setFilters);
+  const persistedSort = useChartsView((s) => s.sort);
+  const setSortPersist = useChartsView((s) => s.setSort);
+  // Client-side sort: reorders the rows on the page currently in view. Seeded
+  // from the persisted value; changes are mirrored back to the store below.
+  const { sort, toggle: onSort } = useTableSort(persistedSort);
+  useEffect(() => {
+    setSortPersist(sort);
+  }, [sort, setSortPersist]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -400,12 +414,19 @@ export function ChartsPage() {
     saveVisibleColumns(visibleColumns);
   }, [visibleColumns]);
 
-  // When the global Client / Location scope changes, jump back to page 1 and
-  // drop the current selection — the old rows may no longer be in view.
+  // When the global Client / Location scope *changes*, jump back to page 1 and
+  // drop the current selection — the old rows may no longer be in view. Guarded
+  // by a ref so this doesn't fire on mount: otherwise remounting after a detour
+  // to a chart's detail page would clobber the persisted page back to 1.
+  const prevScope = useRef({ c: scopeClientId, l: scopeLocationId });
   useEffect(() => {
+    if (prevScope.current.c === scopeClientId && prevScope.current.l === scopeLocationId) {
+      return;
+    }
+    prevScope.current = { c: scopeClientId, l: scopeLocationId };
     setPage(1);
     setSelected(new Set());
-  }, [scopeClientId, scopeLocationId]);
+  }, [scopeClientId, scopeLocationId, setPage]);
 
   // Coders aren't allowed into the worklist detail page, so the Worklist #
   // cell renders as plain text for them and as a link for everyone else.
@@ -610,8 +631,9 @@ export function ChartsPage() {
           <div className="flex-1 max-w-sm">
             <SearchInput
               placeholder="Search chart #..."
+              value={filters.chartNo ?? ''}
               onChange={(e) => {
-                setFilters((f) => ({ ...f, chartNo: e.target.value || undefined }));
+                setFilters({ ...filters, chartNo: e.target.value || undefined });
                 setPage(1);
               }}
             />
