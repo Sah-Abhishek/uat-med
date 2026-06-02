@@ -68,6 +68,7 @@ import {
   Clock,
   ChevronRight,
   RotateCcw,
+  X,
 } from 'lucide-react';
 
 const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
@@ -535,6 +536,28 @@ export function ChartsPage() {
     priority: (c) => c.priority,
   });
 
+  // How many filters are currently applied — drives the toolbar badge and the
+  // "Clear filters" button. Counts the same non-empty values the Filter modal
+  // sends to the API (blank selects / empty-or-NaN numbers don't count). The
+  // search box binds to filters.chartNo, so an active search is reflected here
+  // too. The priority tab is shown separately by its own active-tab styling.
+  const activeFilterCount = useMemo(
+    () =>
+      Object.values(filters).filter(
+        (v) =>
+          v !== '' &&
+          v !== undefined &&
+          v !== null &&
+          !(typeof v === 'number' && Number.isNaN(v)),
+      ).length,
+    [filters],
+  );
+
+  const clearFilters = () => {
+    setFilters({});
+    setPage(1);
+  };
+
   const allOnPageIds = list.data?.items.map((c) => c.id) ?? [];
   const allSelected = allOnPageIds.length > 0 && allOnPageIds.every((id) => selected.has(id));
   const someSelected = selected.size > 0;
@@ -642,9 +665,29 @@ export function ChartsPage() {
             <PillBadge tone="mint">{selected.size} Selected</PillBadge>
           )}
           <div className="flex items-center gap-2 ml-auto">
-            <Button variant="soft" leftIcon={<FilterIcon className="w-3.5 h-3.5" />} onClick={() => setFilterOpen(true)}>
+            <Button
+              variant="soft"
+              leftIcon={<FilterIcon className="w-3.5 h-3.5" />}
+              onClick={() => setFilterOpen(true)}
+              className={cn(activeFilterCount > 0 && 'ring-1 ring-primary/50 text-primary')}
+            >
               Filter
+              {activeFilterCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-white text-[11px] font-bold leading-none">
+                  {activeFilterCount}
+                </span>
+              )}
             </Button>
+            {activeFilterCount > 0 && (
+              <Button
+                variant="ghost"
+                leftIcon={<X className="w-3.5 h-3.5" />}
+                onClick={clearFilters}
+                title="Clear all applied filters"
+              >
+                Clear filters
+              </Button>
+            )}
             <Button
               ref={columnsBtnRef}
               variant="soft"
