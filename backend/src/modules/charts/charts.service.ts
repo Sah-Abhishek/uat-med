@@ -294,6 +294,10 @@ export class ChartsService {
         return qb
           .andWhere(`c.custom_fields ? 'pendingPrediction'`)
           .andWhere(`c.custom_fields->'pendingPrediction'->>'gatewayStatus' = 'STARTED'`);
+      case AiStatusFilter.IN_PROGRESS:
+        // Union of QUEUED + PROCESSING — any chart with a pending prediction,
+        // matching the donut's "In progress" slice.
+        return qb.andWhere(`c.custom_fields ? 'pendingPrediction'`);
       case AiStatusFilter.ERRORED:
         return qb
           .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)

@@ -105,6 +105,7 @@ const AI_STATUS_OPTIONS = [
   { value: '', label: 'Any' },
   { value: 'QUEUED', label: 'Queued' },
   { value: 'PROCESSING', label: 'Processing' },
+  { value: 'IN_PROGRESS', label: 'In progress' },
   { value: 'DONE', label: 'Done' },
   { value: 'ERRORED', label: 'Errored' },
 ];

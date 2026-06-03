@@ -10,10 +10,15 @@ import { ChartMilestone, ChartStatus, Priority } from '../../../common/enums';
  * pending takes precedence (QUEUED/PROCESSING), then a prior error (ERRORED),
  * then a stored prediction (DONE). 'NONE' isn't filterable — there's nothing
  * useful to narrow to — so it's intentionally omitted.
+ *
+ * IN_PROGRESS is the union of QUEUED + PROCESSING (any pending prediction). It
+ * exists so the Productivity donut's "In progress" slice — which counts both —
+ * can deep-link to the exact same set of charts in the list.
  */
 export enum AiStatusFilter {
   QUEUED = 'QUEUED',
   PROCESSING = 'PROCESSING',
+  IN_PROGRESS = 'IN_PROGRESS',
   DONE = 'DONE',
   ERRORED = 'ERRORED',
 }

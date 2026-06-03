@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Area,
   AreaChart,
@@ -31,6 +31,8 @@ import {
 } from '@/api/configurations';
 import { listQaFacilities } from '@/api/qa';
 import { listUsers } from '@/api/users';
+import type { ChartListParams } from '@/api/charts';
+import { useChartsView } from '@/features/charts/chartsViewStore';
 import {
   getAiProcessingStatus,
   getAiProcessingStatusSeries,
@@ -628,12 +630,26 @@ function ProcessingStatusCard({ filters }: { filters: ThroughputFilters }) {
   const loading = !data;
   const total = data ? data.processed + data.inProgress + data.error : 0;
 
-  const slices = [
-    { name: 'Processed', value: data?.processed ?? 0, color: COLOR_PROCESSED },
-    { name: 'In progress', value: data?.inProgress ?? 0, color: COLOR_INPROGRESS },
-    { name: 'Error', value: data?.error ?? 0, color: COLOR_ERROR },
+  // Each slice deep-links to the Charts list pre-filtered to the matching AI
+  // status. "In progress" uses the IN_PROGRESS union (QUEUED + PROCESSING) so
+  // the filtered list matches the slice's count exactly.
+  const slices: Array<{ name: string; value: number; color: string; aiStatus: ChartListParams['aiStatus'] }> = [
+    { name: 'Processed', value: data?.processed ?? 0, color: COLOR_PROCESSED, aiStatus: 'DONE' },
+    { name: 'In progress', value: data?.inProgress ?? 0, color: COLOR_INPROGRESS, aiStatus: 'IN_PROGRESS' },
+    { name: 'Error', value: data?.error ?? 0, color: COLOR_ERROR, aiStatus: 'ERRORED' },
   ];
   const nonZero = slices.filter((s) => s.value > 0);
+
+  const navigate = useNavigate();
+  // Replace the Charts view-state with a clean single-status filter and jump
+  // there, so the table shows exactly the charts behind the clicked slice.
+  const openCharts = (aiStatus: ChartListParams['aiStatus']) => {
+    const v = useChartsView.getState();
+    v.setFilters({ aiStatus });
+    v.setTab('ALL');
+    v.setPage(1);
+    navigate('/charts');
+  };
 
   return (
     <ChartCard
@@ -657,9 +673,10 @@ function ProcessingStatusCard({ filters }: { filters: ThroughputFilters }) {
                 stroke="none"
                 animationDuration={500}
                 animationEasing="ease-out"
+                onClick={(_, index) => openCharts(nonZero[index].aiStatus)}
               >
                 {nonZero.map((s) => (
-                  <Cell key={s.name} fill={s.color} />
+                  <Cell key={s.name} fill={s.color} style={{ cursor: 'pointer' }} />
                 ))}
               </Pie>
               <Tooltip
@@ -672,13 +689,19 @@ function ProcessingStatusCard({ filters }: { filters: ThroughputFilters }) {
             <span className="text-[11px] text-ink-muted">total charts</span>
           </div>
         </div>
-        <div className="space-y-3 pr-2 shrink-0">
+        <div className="space-y-1 pr-2 shrink-0">
           {slices.map((s) => (
-            <div key={s.name} className="flex items-center gap-2.5">
+            <button
+              key={s.name}
+              type="button"
+              onClick={() => openCharts(s.aiStatus)}
+              title={`View ${s.name.toLowerCase()} charts`}
+              className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 -mx-2 text-left transition hover:bg-surface-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color }} />
               <span className="text-sm text-ink-muted w-24">{s.name}</span>
               <span className="text-sm font-bold text-ink tabular-nums ml-auto">{s.value.toLocaleString()}</span>
-            </div>
+            </button>
           ))}
         </div>
       </div>
