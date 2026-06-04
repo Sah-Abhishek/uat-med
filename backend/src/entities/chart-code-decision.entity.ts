@@ -45,14 +45,17 @@ export class ChartCodeDecision {
   @Column({ name: 'gateway_synced_at', type: 'timestamptz', nullable: true })
   gatewaySyncedAt?: Date | null;
 
-  @Column({ name: 'original_description', type: 'varchar', length: 500, nullable: true })
+  // `text` (no length cap): AI orchestrator descriptions can exceed any varchar
+  // limit we'd pick, and this is an informational snapshot — see migration
+  // 1715000500000-WidenDecisionDescriptions.
+  @Column({ name: 'original_description', type: 'text', nullable: true })
   originalDescription?: string;
 
   @Column({ type: 'varchar', length: 16 })
   decision: CodeReviewDecision;
 
   @Column({ name: 'edited_code', type: 'varchar', length: 32, nullable: true }) editedCode?: string;
-  @Column({ name: 'edited_description', type: 'varchar', length: 500, nullable: true }) editedDescription?: string;
+  @Column({ name: 'edited_description', type: 'text', nullable: true }) editedDescription?: string;
 
   /** Stored as a string (not a FK) so disabling/deleting a reason in
    * Settings does not break historical decisions. */

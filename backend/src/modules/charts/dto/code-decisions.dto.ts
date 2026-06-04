@@ -20,10 +20,12 @@ export class CodeDecisionItemDto {
   @MaxLength(64)
   predictedCodeId?: string;
 
+  // 5000 is a sanity bound only — the column is `text`. The old 500 cap rejected
+  // legitimately long AI orchestrator descriptions and failed the whole batch.
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @MaxLength(500)
+  @MaxLength(5000)
   originalDescription?: string;
 
   @ApiProperty({ enum: CodeReviewDecision })
@@ -39,7 +41,7 @@ export class CodeDecisionItemDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @MaxLength(500)
+  @MaxLength(5000)
   editedDescription?: string;
 
   @ApiPropertyOptional({ description: 'Sequence position for ADD actions (orchestrator field).' })
