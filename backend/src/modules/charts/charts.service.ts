@@ -159,6 +159,8 @@ export class ChartsService {
       const alloc = allocByChart.get(Number(rest.id)) ?? {};
       return {
         ...rest,
+        // Map the `dos` column to the `dateOfService` key the frontend reads.
+        dateOfService: rest.dos ?? null,
         worklistNumber: worklist?.worklistNumber ?? null,
         clientName: worklist?.client?.name ?? null,
         locationName: worklist?.location?.name ?? null,
@@ -315,7 +317,11 @@ export class ChartsService {
   async detail(id: number) {
     const c = await this.charts.findOne({ where: { id } });
     if (!c) throw new NotFoundException();
-    return c;
+    // The DB column is `dos`, but the whole frontend (Chart type, list,
+    // header, detail seeding) reads `dateOfService`. Surface both so a saved
+    // Date of Service survives the refetch instead of reverting to the
+    // worklist range start (or blanking out).
+    return { ...c, dateOfService: c.dos ?? null };
   }
 
 async update(id: number, dto: UpdateChartDto) {
