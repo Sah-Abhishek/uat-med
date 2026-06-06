@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -24,14 +24,20 @@ import {
 import { IS_PRODUCTION_DEPLOYMENT, DEPLOYMENT } from '@/config/deployment';
 import {
   getActiveTimer,
+  getCodeDecisionDraft,
   getPredictedCodes,
   listCodeDecisions,
+  saveCodeDecisionDraft,
   submitCodeDecisions,
+  type CodeDecisionDraftEntry,
+  type CodeDecisionDraftPayload,
   type CodeDecisionInput,
   type CodeDecisionType,
   type CodeDecisionVerdict,
+  type CodeDraftCategory,
   type PredictedCodeWithId,
 } from '@/api/charts';
+import { useAuth } from '@/auth/store';
 import {
   getCodeReviewReasons,
   type CodeReviewReasonRow,
@@ -402,6 +408,252 @@ export function ReviewEditModal({
     setAddedItems((prev) => (prev.length > 0 ? prev : seededAdds));
   }, [open, decisionsQ.data, aiItems]);
 
+  /* ── Draft persistence ─────────────────────────────────────────────────
+   * The board's in-progress state autosaves to the server (per chart, per
+   * user) so a refresh / crash / device switch doesn't lose unsubmitted
+   * work. Entries are identified by (category, code) — the same identity
+   * the board dedupes on — NOT by the index-based React keys, so a draft
+   * re-attaches correctly even if the predictions come back reordered.
+   * Read-only (QA) mode never reads or writes drafts. */
+
+  const qc = useQueryClient();
+
+  const draftQ = useQuery({
+    queryKey: ['chart-code-decision-draft', chartId],
+    queryFn: () => getCodeDecisionDraft(chartId),
+    enabled: open && !!chartId && !readOnly,
+    // No background refetches while the modal is open: the server copy is
+    // ours alone (per-user) and mid-session refetches could stamp a stale
+    // blob over live edits. Fresh fetch per open is handled by the cache
+    // removal on close below.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: 1,
+  });
+
+  /** Restore pass has settled — autosave may engage. Gated so the freshly
+   * seeded (all-pending) board can never overwrite a real server draft. */
+  const draftHydratedRef = useRef(false);
+  /** Serialization of the last draft known to be on the server. */
+  const lastSavedDraftRef = useRef<string | null>(null);
+  /** Debounce-pending payload, flushed on close / page unload. */
+  const pendingDraftRef = useRef<CodeDecisionDraftPayload | null>(null);
+  /** Inputs the restore pass last ran against (draft, decisions, aiItems). */
+  const appliedDraftRef = useRef<unknown[] | null>(null);
+  /** True while the final submit is in flight/settled-successful — blocks a
+   * late debounce timer from re-creating the draft the submit just deleted. */
+  const submitInFlightRef = useRef(false);
+  /** Render-fresh mirror of addedItems for effects that must read it without
+   * re-running when it changes. */
+  const addedItemsRef = useRef(addedItems);
+  useEffect(() => {
+    addedItemsRef.current = addedItems;
+  }, [addedItems]);
+
+  useEffect(() => {
+    if (open) {
+      draftHydratedRef.current = false;
+      lastSavedDraftRef.current = null;
+      pendingDraftRef.current = null;
+      appliedDraftRef.current = null;
+      submitInFlightRef.current = false;
+    } else {
+      // Drop the cached draft on close: autosaves don't update the
+      // react-query cache, so the next open must re-fetch the server copy.
+      qc.removeQueries({ queryKey: ['chart-code-decision-draft', chartId] });
+    }
+  }, [open, qc, chartId]);
+
+  // All three sources settled (success or error) — the board is in its final
+  // shape, so restoring/saving against it is safe.
+  const boardReady =
+    open &&
+    (predictedCodesQ.isSuccess || predictedCodesQ.isError) &&
+    (decisionsQ.isSuccess || decisionsQ.isError) &&
+    (readOnly || draftQ.isSuccess || draftQ.isError);
+
+  /** Serializes the board's reviewable working state. ADMIT CODE rows (UI
+   * mirror of PRIMARY) and untouched 'pending' rows are dropped — a restore
+   * only stamps what the user actually decided. */
+  const buildDraftPayload = useCallback((): CodeDecisionDraftPayload => {
+    const decisions: CodeDecisionDraftEntry[] = [];
+    for (const it of items) {
+      if (!categoryToCodeType(it.category)) continue;
+      const st = state[it.key];
+      if (!st || st.decision === 'pending') continue;
+      decisions.push({
+        category: it.category as CodeDraftCategory,
+        code: it.code,
+        decision: st.decision,
+        editedCode: st.editedCode,
+        editedDescription: st.editedDescription,
+        rejectReason: st.rejectReason,
+        reasonDropdown: st.reasonDropdown,
+      });
+    }
+    return {
+      version: 1,
+      decisions,
+      addedItems: addedItems
+        .filter((it) => categoryToCodeType(it.category))
+        .map((it) => ({
+          category: it.category as CodeDraftCategory,
+          code: it.code,
+          description: it.description,
+        })),
+    };
+  }, [items, state, addedItems]);
+
+  // Restore: stamp the draft over whatever the submitted-decisions hydration
+  // seeded (the draft is newer working state, so it wins — codes absent from
+  // the draft keep their hydrated/submitted verdicts). Runs once per change
+  // of its actual inputs; react-query's structural sharing keeps the data
+  // references stable across no-op refetches, and user edits never re-trigger
+  // it. Declared AFTER the decisions hydration effect on purpose: same-commit
+  // runs execute in order, so the draft lands on top.
+  useEffect(() => {
+    if (!open || readOnly || !boardReady || draftQ.isError) return;
+    const inputs = [draftQ.data, decisionsQ.data, aiItems];
+    const prev = appliedDraftRef.current;
+    if (prev && inputs.every((v, i) => v === prev[i])) return;
+    appliedDraftRef.current = inputs;
+    draftHydratedRef.current = true;
+
+    const payload = draftQ.data?.draft?.payload;
+    // Version gate + shape guard: an incompatible or corrupted blob is
+    // silently discarded (the next autosave overwrites it) — never crash the
+    // modal over a draft.
+    if (
+      !payload ||
+      payload.version !== 1 ||
+      !Array.isArray(payload.decisions) ||
+      !Array.isArray(payload.addedItems)
+    ) {
+      return;
+    }
+    lastSavedDraftRef.current = JSON.stringify(payload);
+
+    // Recreate codes added in the drafted session that exist nowhere on the
+    // current board (not AI-predicted, not previously submitted as ADDED).
+    const current = [...aiItems, ...addedItemsRef.current];
+    const have = new Set(current.map((it) => `${it.category}|${it.code}`));
+    const draftAdds: CodeItem[] = payload.addedItems
+      .filter((a) => !have.has(`${a.category}|${a.code}`))
+      .map((a, i) => ({
+        key: `draft-added-${a.category}-${i}-${a.code}`,
+        category: a.category,
+        code: a.code,
+        description: a.description,
+      }));
+
+    const byIdentity = new Map(payload.decisions.map((d) => [`${d.category}|${d.code}`, d]));
+    setState((prevState) => {
+      const next = { ...prevState };
+      for (const it of [...current, ...draftAdds]) {
+        const d = byIdentity.get(`${it.category}|${it.code}`);
+        if (!d) continue;
+        next[it.key] = {
+          decision: d.decision,
+          editedCode: d.editedCode || it.code,
+          editedDescription: d.editedDescription || it.description,
+          rejectReason: d.rejectReason,
+          reasonDropdown: d.reasonDropdown,
+        };
+      }
+      return next;
+    });
+    if (draftAdds.length > 0) {
+      // Functional dedupe (not just `have`): the submitted-ADDED seeding can
+      // land in this same commit, and addedItemsRef is one commit behind it.
+      setAddedItems((prevAdds) => {
+        const present = new Set(prevAdds.map((it) => `${it.category}|${it.code}`));
+        return [...prevAdds, ...draftAdds.filter((it) => !present.has(`${it.category}|${it.code}`))];
+      });
+    }
+  }, [open, readOnly, boardReady, draftQ.data, draftQ.isError, decisionsQ.data, aiItems]);
+
+  const draftSaveMut = useMutation({
+    mutationFn: (payload: CodeDecisionDraftPayload) => saveCodeDecisionDraft(chartId, payload),
+  });
+  const { mutate: saveDraftMutate } = draftSaveMut;
+
+  /** Fire a save for `payload`, tracking server-known content on success and
+   * re-queueing the payload for the close/unload flush on failure. */
+  const sendDraft = useCallback(
+    (payload: CodeDecisionDraftPayload) => {
+      // A submit supersedes the draft (and deletes it server-side) — never
+      // race a stale autosave against it.
+      if (submitInFlightRef.current) return;
+      const serialized = JSON.stringify(payload);
+      saveDraftMutate(payload, {
+        onSuccess: () => {
+          lastSavedDraftRef.current = serialized;
+        },
+        onError: () => {
+          // Keep it pending so the next change, the close flush, or the
+          // beforeunload flush retries it.
+          pendingDraftRef.current = payload;
+        },
+      });
+    },
+    [saveDraftMutate],
+  );
+
+  // Debounced autosave. Guards, in order: QA view never writes; the board
+  // must be fully loaded AND the restore pass done (else the freshly-seeded
+  // empty board would overwrite a real server draft); a failed draft GET
+  // disables writing for the session (we couldn't read the server copy, so
+  // writing could destroy it); no-op when content matches the last save;
+  // and don't create empty draft rows for charts the user only looked at.
+  useEffect(() => {
+    if (!open || readOnly || !boardReady || draftQ.isError || !draftHydratedRef.current) return;
+    const payload = buildDraftPayload();
+    const serialized = JSON.stringify(payload);
+    if (serialized === lastSavedDraftRef.current) return;
+    const isEmpty = payload.decisions.length === 0 && payload.addedItems.length === 0;
+    if (isEmpty && lastSavedDraftRef.current === null) return;
+    pendingDraftRef.current = payload;
+    const t = setTimeout(() => {
+      pendingDraftRef.current = null;
+      sendDraft(payload);
+    }, 800);
+    return () => clearTimeout(t);
+  }, [open, readOnly, boardReady, draftQ.isError, buildDraftPayload, sendDraft]);
+
+  // Closing the modal flushes a debounce-pending draft immediately (the
+  // autosave effect's cleanup has already cleared its timer by the time this
+  // runs, but pendingDraftRef survives it).
+  useEffect(() => {
+    if (open) return;
+    const pending = pendingDraftRef.current;
+    if (!pending) return;
+    pendingDraftRef.current = null;
+    sendDraft(pending);
+  }, [open, sendDraft]);
+
+  // Page refresh / tab close: axios calls get torn down with the page, so
+  // flush via fetch+keepalive (sendBeacon can't carry the bearer header).
+  useEffect(() => {
+    if (!open || readOnly) return;
+    const onBeforeUnload = () => {
+      const pending = pendingDraftRef.current;
+      if (!pending) return;
+      pendingDraftRef.current = null;
+      const token = useAuth.getState().accessToken;
+      void fetch(`${import.meta.env.VITE_API_BASE}/charts/${chartId}/code-decisions/draft`, {
+        method: 'PUT',
+        keepalive: true,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ payload: pending }),
+      });
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [open, readOnly, chartId]);
+
   // Live timer pill mirrors the chart's running session. Cached by react-query
   // with the same key the header uses, so no extra network round-trip.
   const activeTimer = useQuery({
@@ -434,7 +686,6 @@ export function ReviewEditModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose, confirmOpen]);
 
-  const qc = useQueryClient();
   const submitMut = useMutation({
     mutationFn: (decisions: CodeDecisionInput[]) => submitCodeDecisions(chartId, decisions),
   });
@@ -525,8 +776,13 @@ export function ReviewEditModal({
       setConfirmOpen(false);
       return;
     }
+    submitInFlightRef.current = true;
     try {
       await submitMut.mutateAsync(payload);
+      // The submit superseded (and server-side deleted) the autosaved draft —
+      // drop any debounce-pending save so the close flush can't resurrect it.
+      pendingDraftRef.current = null;
+      lastSavedDraftRef.current = null;
       // Refresh both the orchestrator codes and the local audit so the
       // chart detail page (AI ICD card) and the next modal-open both see
       // the post-submit state — edited code-values, removed deletes, the
@@ -534,11 +790,15 @@ export function ReviewEditModal({
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['chart-predicted-codes', chartId] }),
         qc.invalidateQueries({ queryKey: ['chart-code-decisions', chartId] }),
+        qc.invalidateQueries({ queryKey: ['chart-code-decision-draft', chartId] }),
       ]);
       onSubmitted?.();
       setConfirmOpen(false);
       onClose();
     } catch (err) {
+      // Failed submit: the draft is still the source of recovery — re-enable
+      // autosave so continued edits keep persisting.
+      submitInFlightRef.current = false;
       const msg =
         (err as any)?.response?.data?.error?.message ??
         (err as any)?.message ??
@@ -574,6 +834,22 @@ export function ReviewEditModal({
             )}
           </div>
           <div className="flex items-center gap-3">
+            {/* Autosave status — quiet reassurance that in-progress work
+                survives a refresh. Errors retry on the next change/close. */}
+            {!readOnly && (draftSaveMut.isPending || draftSaveMut.isSuccess || draftSaveMut.isError) && (
+              <span
+                className={cn(
+                  'hidden md:inline text-[11px]',
+                  draftSaveMut.isError ? 'text-warn' : 'text-white/50',
+                )}
+              >
+                {draftSaveMut.isPending
+                  ? 'Saving draft…'
+                  : draftSaveMut.isError
+                    ? 'Draft not saved — retrying on next change'
+                    : 'Draft saved'}
+              </span>
+            )}
             {!readOnly && submitError && (
               <span className="hidden md:inline text-xs text-danger bg-danger-soft/30 border border-danger/30 px-2 py-1 rounded">
                 {submitError}

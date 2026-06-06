@@ -23,7 +23,7 @@ import { UpdateChartDto } from './dto/update-chart.dto';
 import { BulkModifyDto, BulkIdsDto } from './dto/bulk-modify.dto';
 import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
 import { ProcessDocumentsDto } from './dto/process-documents.dto';
-import { SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
+import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
@@ -219,6 +219,41 @@ export class ChartsController {
   @ApiOperation({ summary: 'Predicted codes WITH the orchestrator UUIDs (predicted_code_id). Used by the Review modal so submissions can carry stable IDs.' })
   getPredictedCodes(@Param('id', ParseIntPipe) id: number) {
     return this.svc.getPredictedCodesForChart(id);
+  }
+
+  /* Draft endpoints — autosaved pre-submission Review & Edit state. Scoped to
+   * the calling user (per-user drafts); same roles as the submit endpoint
+   * because a draft only exists on the way to a submit. */
+
+  @Get(':id/code-decisions/draft')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @ApiOperation({ summary: "Current user's in-progress Review & Edit draft for this chart (draft: null when none)." })
+  getCodeDecisionDraft(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.getCodeDecisionDraft(id, user);
+  }
+
+  @Put(':id/code-decisions/draft')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Autosave (upsert) the in-progress Review & Edit draft for the current user.' })
+  saveCodeDecisionDraft(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SaveCodeDecisionDraftDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.saveCodeDecisionDraft(id, dto, user);
+  }
+
+  @Delete(':id/code-decisions/draft')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @ApiOperation({ summary: "Discard the current user's in-progress Review & Edit draft for this chart." })
+  deleteCodeDecisionDraft(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.deleteCodeDecisionDraft(id, user);
   }
 
   @Post(':id/code-decisions')

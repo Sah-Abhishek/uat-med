@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import { CodeReviewDecision, CodeReviewType } from '../../../common/enums';
 
 export class CodeDecisionItemDto {
@@ -72,4 +72,16 @@ export class SubmitCodeDecisionsDto {
   @ValidateNested({ each: true })
   @Type(() => CodeDecisionItemDto)
   decisions: CodeDecisionItemDto[];
+}
+
+/**
+ * Autosaved in-progress Review & Edit board state. The payload is an opaque,
+ * versioned blob owned by the frontend (drafts intentionally skip the
+ * reason/length rules submit enforces — half-typed reasons are exactly what
+ * a draft must preserve). The service enforces a serialized-size cap.
+ */
+export class SaveCodeDecisionDraftDto {
+  @ApiProperty({ description: 'Opaque versioned draft blob (see frontend CodeDecisionDraftPayload).' })
+  @IsObject()
+  payload: Record<string, any>;
 }

@@ -251,6 +251,53 @@ export const getPredictedCodes = (chartId: string) =>
 export const submitCodeDecisions = (chartId: string, decisions: CodeDecisionInput[]) =>
   post<SubmitDecisionsResponse>(`/charts/${chartId}/code-decisions`, { decisions });
 
+/* ── Code-decision drafts (autosaved pre-submission state) ── */
+
+/** Board category a draft entry belongs to (ADMIT CODE rows are a disabled
+ * UI mirror of PRIMARY and are never persisted). */
+export type CodeDraftCategory = 'PRIMARY' | 'SECONDARY' | 'PROCEDURE';
+
+/** One in-progress decision, identified by (category, code) — the same
+ * stable identity the board dedupes on, so a draft survives prediction
+ * reordering and re-fetches. Reasons are saved as-typed (no min-length):
+ * preserving half-finished input is the whole point of a draft. */
+export interface CodeDecisionDraftEntry {
+  category: CodeDraftCategory;
+  code: string;
+  decision: 'accepted' | 'rejected' | 'edited' | 'added';
+  editedCode: string;
+  editedDescription: string;
+  rejectReason: string;
+  reasonDropdown: string;
+}
+
+/** Codes the user added that the AI didn't suggest — they have no predicted
+ * item to attach to, so the draft carries enough to recreate the row. */
+export interface CodeDecisionDraftAddedItem {
+  category: CodeDraftCategory;
+  code: string;
+  description: string;
+}
+
+/** Versioned so a future shape change can discard incompatible drafts
+ * instead of breaking the restore. Bump `version` on breaking changes. */
+export interface CodeDecisionDraftPayload {
+  version: 1;
+  decisions: CodeDecisionDraftEntry[];
+  addedItems: CodeDecisionDraftAddedItem[];
+}
+
+export const getCodeDecisionDraft = (chartId: string) =>
+  get<{ draft: { payload: CodeDecisionDraftPayload; updatedAt: string } | null }>(
+    `/charts/${chartId}/code-decisions/draft`,
+  );
+
+export const saveCodeDecisionDraft = (chartId: string, payload: CodeDecisionDraftPayload) =>
+  put<{ savedAt: string }>(`/charts/${chartId}/code-decisions/draft`, { payload });
+
+export const deleteCodeDecisionDraft = (chartId: string) =>
+  del<{ deleted: boolean }>(`/charts/${chartId}/code-decisions/draft`);
+
 /* ── AI: ICD Predictor (encounter flow) ──────────────────── */
 
 export interface ProcessDocumentsInput {

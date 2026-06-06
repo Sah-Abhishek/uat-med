@@ -6,11 +6,12 @@ import { Chart } from '../../entities/chart.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
 import { ChartFeedback } from '../../entities/chart-feedback.entity';
 import { ChartCodeDecision } from '../../entities/chart-code-decision.entity';
+import { ChartCodeDecisionDraft } from '../../entities/chart-code-decision-draft.entity';
 import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
-import { SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
+import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { AiGatewayClient, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
@@ -107,6 +108,7 @@ export class ChartsService {
     @InjectRepository(ChartAllocation) private readonly allocations: Repository<ChartAllocation>,
     @InjectRepository(ChartFeedback) private readonly feedbacks: Repository<ChartFeedback>,
     @InjectRepository(ChartCodeDecision) private readonly codeDecisions: Repository<ChartCodeDecision>,
+    @InjectRepository(ChartCodeDecisionDraft) private readonly decisionDrafts: Repository<ChartCodeDecisionDraft>,
     @InjectRepository(CodeReviewReason) private readonly codeReviewReasons: Repository<CodeReviewReason>,
     @InjectRepository(Worklist) private readonly worklists: Repository<Worklist>,
     @InjectRepository(User) private readonly users: Repository<User>,
@@ -1006,6 +1008,51 @@ async update(id: number, dto: UpdateChartDto) {
     };
   }
 
+  /* ── Code-decision drafts ─────────────────────────────────────────────
+   * Autosaved working state for the Review & Edit modal, one row per
+   * (chart, user). The payload is an opaque versioned blob owned by the
+   * frontend; a refresh/crash restores it so in-progress accept/reject/
+   * edit/add work isn't lost. Cleared atomically on successful submit. */
+
+  /** Serialized-size cap for a draft blob. A full 500-code board with reasons
+   * is well under 100 KB — anything bigger is a bug or abuse, not a chart. */
+  private static readonly DRAFT_MAX_BYTES = 256 * 1024;
+
+  async getCodeDecisionDraft(chartId: number, user: AuthenticatedUser) {
+    await this.requireChart(chartId);
+    const row = await this.decisionDrafts.findOne({ where: { chartId, userId: user.id } });
+    return { draft: row ? { payload: row.payload, updatedAt: row.updatedAt } : null };
+  }
+
+  async saveCodeDecisionDraft(
+    chartId: number,
+    dto: SaveCodeDecisionDraftDto,
+    user: AuthenticatedUser,
+  ) {
+    await this.requireChart(chartId);
+    if (Buffer.byteLength(JSON.stringify(dto.payload), 'utf8') > ChartsService.DRAFT_MAX_BYTES) {
+      throw new BadRequestException({
+        error: { code: 'invalid_argument', message: 'Draft payload exceeds the 256 KB limit.' },
+      });
+    }
+    // Atomic upsert on (chart_id, user_id): autosave is debounced but two
+    // saves can still race (flush-on-close vs in-flight debounce) — ON
+    // CONFLICT keeps that from ever failing or duplicating rows. updatedAt
+    // is set explicitly because upsert bypasses the @UpdateDateColumn hook.
+    const now = new Date();
+    await this.decisionDrafts.upsert(
+      { chartId, userId: user.id, payload: dto.payload, updatedAt: now },
+      ['chartId', 'userId'],
+    );
+    return { savedAt: now.toISOString() };
+  }
+
+  async deleteCodeDecisionDraft(chartId: number, user: AuthenticatedUser) {
+    await this.requireChart(chartId);
+    const res = await this.decisionDrafts.delete({ chartId, userId: user.id });
+    return { deleted: (res.affected ?? 0) > 0 };
+  }
+
   async submitCodeDecisions(
     chartId: number,
     dto: SubmitCodeDecisionsDto,
@@ -1204,6 +1251,10 @@ async update(id: number, dto: UpdateChartDto) {
           rows.push(created);
         }
       }
+      // The submit supersedes any autosaved working state — clear the
+      // submitter's draft in the same transaction so a refresh right after
+      // submit can't resurrect stale pre-submit decisions.
+      await manager.getRepository(ChartCodeDecisionDraft).delete({ chartId, userId: user.id });
       return rows;
     });
 
