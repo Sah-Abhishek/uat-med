@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useForm, Controller } from 'react-hook-form';
@@ -58,7 +58,7 @@ import { useScope } from '@/scope/store';
 import { useChartsView } from './chartsViewStore';
 import { can } from '@/permissions';
 import { SortableHeader } from '@/components/ui/SortableHeader';
-import { useTableSort, sortRows, compareValues } from '@/hooks/useTableSort';
+import { useTableSort } from '@/hooks/useTableSort';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
   Filter as FilterIcon,
@@ -397,12 +397,21 @@ export function ChartsPage() {
   const setFilters = useChartsView((s) => s.setFilters);
   const persistedSort = useChartsView((s) => s.sort);
   const setSortPersist = useChartsView((s) => s.setSort);
-  // Client-side sort: reorders the rows on the page currently in view. Seeded
-  // from the persisted value; changes are mirrored back to the store below.
+  // Server-side sort: the clicked column drives the list query (params below).
+  // Seeded from the persisted value; changes are mirrored back to the store.
   const { sort, toggle: onSort } = useTableSort(persistedSort);
   useEffect(() => {
     setSortPersist(sort);
   }, [sort, setSortPersist]);
+  // Re-sorting reorders the whole result set, so snap back to page 1 — otherwise
+  // a deep page could land out of range for the newly-ordered list.
+  const handleSort = useCallback(
+    (column: string) => {
+      onSort(column);
+      setPage(1);
+    },
+    [onSort, setPage],
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -477,13 +486,16 @@ export function ChartsPage() {
       ...filters,
       page,
       pageSize,
-      sortBy: 'createdAt',
-      sortDir: 'desc',
+      // Server-side sort: the clicked column drives the whole result set (not
+      // just the visible page). An undefined sortBy lets the backend fall back
+      // to its newest-first default.
+      sortBy: sort.sortBy,
+      sortDir: sort.sortDir,
       ...(tab !== 'ALL' ? { priority: tab } : {}),
       ...(scopeClientId != null ? { clientId: scopeClientId } : {}),
       ...(scopeLocationId != null ? { locationId: scopeLocationId } : {}),
     }),
-    [filters, page, pageSize, tab, scopeClientId, scopeLocationId],
+    [filters, page, pageSize, tab, scopeClientId, scopeLocationId, sort.sortBy, sort.sortDir],
   );
 
   const list = useQuery({
@@ -520,35 +532,9 @@ export function ChartsPage() {
 
   const totalPages = list.data ? Math.max(1, Math.ceil(list.data.total / pageSize)) : 1;
 
-  // Sort the current page's rows in the browser by the clicked column. Keyed by
-  // each column's `sortKey`; columns without one have no sortable header.
-  //
-  // S. No. is a per-worklist serial, so sorting it as a flat column would be
-  // meaningless across worklists. Instead we keep worklists grouped together
-  // (always alphabetical) and order the serials *within* each group, flipping
-  // only the inner serial when the user toggles asc ⇄ desc.
-  const rawItems = list.data?.items ?? [];
-  const sortedItems =
-    sort.sortBy === 'serialNo'
-      ? [...rawItems].sort(
-          (a, b) =>
-            compareValues(a.worklistNumber, b.worklistNumber, 1) ||
-            compareValues(a.serialNo, b.serialNo, sort.sortDir === 'asc' ? 1 : -1),
-        )
-      : sortRows(rawItems, sort, {
-          worklistNumber: (c) => c.worklistNumber,
-          serialNo: (c) => c.serialNo,
-          client: (c) => c.clientName,
-          location: (c) => c.locationName,
-          specialty: (c) => c.specialityName,
-          chartNo: (c) => c.chartNo,
-          dateOfService: (c) => c.dateOfService,
-          chartStatus: (c) => c.chartStatus,
-          milestone: (c) => c.milestone,
-          process: (c) => c.processName,
-          receivedDate: (c) => c.receivedDate ?? c.createdAt,
-          priority: (c) => c.priority,
-        });
+  // Rows arrive already sorted by the server (see params.sortBy/sortDir and the
+  // backend's applySort), so the page renders them as-is — no client reordering.
+  const sortedItems = list.data?.items ?? [];
 
   // How many filters are currently applied — drives the toolbar badge and the
   // "Clear filters" button. Counts the same non-empty values the Filter modal
@@ -749,7 +735,7 @@ export function ChartsPage() {
                     key={col.key}
                     column={col.sortKey}
                     sort={sort}
-                    onSort={col.sortKey ? onSort : undefined}
+                    onSort={col.sortKey ? handleSort : undefined}
                   >
                     {col.label}
                   </SortableHeader>

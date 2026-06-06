@@ -49,6 +49,59 @@ const activeTimers = new Map<string, number>();
 
 @Injectable()
 export class ChartsService {
+  /**
+   * Whitelist of client-facing sort keys → TypeORM property paths (alias.prop,
+   * resolved to real columns at SQL build time). Keys mirror the `sortKey`s the
+   * Charts table header sends. Anything not here falls back to newest-first, so
+   * the raw `sortBy` string never reaches SQL — closing the injection hole the
+   * old `c.${sortBy}` interpolation left open, and letting us sort by joined
+   * columns (client/location/worklist) which `c.${sortBy}` could never reach.
+   */
+  private static readonly SORT_COLUMNS: Record<string, string> = {
+    worklistNumber: 'worklist.worklistNumber',
+    serialNo: 'c.serialNo',
+    client: 'client.name',
+    location: 'location.name',
+    specialty: 'primarySpeciality.name',
+    chartNo: 'c.chartNo',
+    dateOfService: 'c.dos',
+    chartStatus: 'c.chartStatus',
+    milestone: 'c.milestone',
+    process: 'process.name',
+    receivedDate: 'worklist.receivedDate',
+    priority: 'c.priority',
+  };
+
+  /**
+   * Apply the requested column sort to the charts query.
+   *
+   * S. No. is a *per-worklist* serial, so sorting it as a flat column is
+   * meaningless across worklists — we keep worklists grouped together (always
+   * alphabetical) and flip only the inner serial with the chosen direction.
+   * Every other column maps through {@link SORT_COLUMNS}; an unknown/absent key
+   * preserves the historical newest-first default. A unique `c.id` tiebreaker
+   * keeps pagination deterministic when the sort column has ties.
+   */
+  private applySort(
+    qb: SelectQueryBuilder<Chart>,
+    sortBy: string | undefined,
+    sortDir: 'asc' | 'desc',
+  ): void {
+    const dir = sortDir === 'asc' ? 'ASC' : 'DESC';
+    if (sortBy === 'serialNo') {
+      qb.orderBy('worklist.worklistNumber', 'ASC')
+        .addOrderBy('c.serialNo', dir)
+        .addOrderBy('c.id', 'ASC');
+      return;
+    }
+    const col = sortBy ? ChartsService.SORT_COLUMNS[sortBy] : undefined;
+    if (!col) {
+      qb.orderBy('c.createdAt', 'DESC').addOrderBy('c.id', 'DESC');
+      return;
+    }
+    qb.orderBy(col, dir).addOrderBy('c.id', 'ASC');
+  }
+
   constructor(
     @InjectRepository(Chart) private readonly charts: Repository<Chart>,
     @InjectRepository(ChartAllocation) private readonly allocations: Repository<ChartAllocation>,
@@ -107,7 +160,7 @@ export class ChartsService {
     if (q.receivedDateFrom) qb.andWhere('worklist.received_date >= :rdf', { rdf: q.receivedDateFrom });
     if (q.receivedDateTo) qb.andWhere('worklist.received_date <= :rdt', { rdt: q.receivedDateTo });
 
-    qb.orderBy(`c.${q.sortBy ?? 'createdAt'}`, q.sortDir === 'asc' ? 'ASC' : 'DESC');
+    this.applySort(qb, q.sortBy, q.sortDir);
     qb.skip((q.page - 1) * q.pageSize).take(q.pageSize);
 
     const [items, total] = await qb.getManyAndCount();
