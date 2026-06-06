@@ -45,17 +45,24 @@ export function sortRows<T>(
   const get = sort.sortBy ? accessors[sort.sortBy] : undefined;
   if (!get) return rows;
   const dir = sort.sortDir === 'asc' ? 1 : -1;
-  return [...rows].sort((a, b) => {
-    const av = get(a);
-    const bv = get(b);
-    const aEmpty = av === null || av === undefined || av === '';
-    const bEmpty = bv === null || bv === undefined || bv === '';
-    if (aEmpty && bEmpty) return 0;
-    if (aEmpty) return 1;
-    if (bEmpty) return -1;
-    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
-    return (
-      String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir
-    );
-  });
+  return [...rows].sort((a, b) => compareValues(get(a), get(b), dir));
+}
+
+/**
+ * Pairwise comparator shared by {@link sortRows} and any composite/grouped sort.
+ * Nulls/empties always sort last regardless of `dir`; numbers compare
+ * numerically, everything else as numeric-aware strings (so "WL-2" < "WL-10").
+ * Returns a negative/zero/positive number suitable for `Array.prototype.sort`,
+ * which also lets callers chain tie-breakers with `||`.
+ */
+export function compareValues(av: unknown, bv: unknown, dir: 1 | -1 = 1): number {
+  const aEmpty = av === null || av === undefined || av === '';
+  const bEmpty = bv === null || bv === undefined || bv === '';
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+  if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+  return (
+    String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir
+  );
 }

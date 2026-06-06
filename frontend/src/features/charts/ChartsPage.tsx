@@ -58,7 +58,7 @@ import { useScope } from '@/scope/store';
 import { useChartsView } from './chartsViewStore';
 import { can } from '@/permissions';
 import { SortableHeader } from '@/components/ui/SortableHeader';
-import { useTableSort, sortRows } from '@/hooks/useTableSort';
+import { useTableSort, sortRows, compareValues } from '@/hooks/useTableSort';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
   Filter as FilterIcon,
@@ -522,20 +522,33 @@ export function ChartsPage() {
 
   // Sort the current page's rows in the browser by the clicked column. Keyed by
   // each column's `sortKey`; columns without one have no sortable header.
-  const sortedItems = sortRows(list.data?.items ?? [], sort, {
-    worklistNumber: (c) => c.worklistNumber,
-    serialNo: (c) => c.serialNo,
-    client: (c) => c.clientName,
-    location: (c) => c.locationName,
-    specialty: (c) => c.specialityName,
-    chartNo: (c) => c.chartNo,
-    dateOfService: (c) => c.dateOfService,
-    chartStatus: (c) => c.chartStatus,
-    milestone: (c) => c.milestone,
-    process: (c) => c.processName,
-    receivedDate: (c) => c.receivedDate ?? c.createdAt,
-    priority: (c) => c.priority,
-  });
+  //
+  // S. No. is a per-worklist serial, so sorting it as a flat column would be
+  // meaningless across worklists. Instead we keep worklists grouped together
+  // (always alphabetical) and order the serials *within* each group, flipping
+  // only the inner serial when the user toggles asc ⇄ desc.
+  const rawItems = list.data?.items ?? [];
+  const sortedItems =
+    sort.sortBy === 'serialNo'
+      ? [...rawItems].sort(
+          (a, b) =>
+            compareValues(a.worklistNumber, b.worklistNumber, 1) ||
+            compareValues(a.serialNo, b.serialNo, sort.sortDir === 'asc' ? 1 : -1),
+        )
+      : sortRows(rawItems, sort, {
+          worklistNumber: (c) => c.worklistNumber,
+          serialNo: (c) => c.serialNo,
+          client: (c) => c.clientName,
+          location: (c) => c.locationName,
+          specialty: (c) => c.specialityName,
+          chartNo: (c) => c.chartNo,
+          dateOfService: (c) => c.dateOfService,
+          chartStatus: (c) => c.chartStatus,
+          milestone: (c) => c.milestone,
+          process: (c) => c.processName,
+          receivedDate: (c) => c.receivedDate ?? c.createdAt,
+          priority: (c) => c.priority,
+        });
 
   // How many filters are currently applied — drives the toolbar badge and the
   // "Clear filters" button. Counts the same non-empty values the Filter modal
