@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMinSize, IsArray, IsEnum, IsInt, IsOptional, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEnum, IsInt, IsOptional, ValidateIf, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Priority } from '../../../common/enums';
 
@@ -24,4 +24,10 @@ export class BulkModifyDto extends BulkIdsDto {
 
   @ApiPropertyOptional({ type: AllocationDto }) @IsOptional() @ValidateNested() @Type(() => AllocationDto)
   allocation?: AllocationDto;
+
+  // Apply one service line across the whole selection (bulk upload wizard).
+  // `null` clears it; ValidateIf lets null through (IsInt would reject it).
+  @ApiPropertyOptional({ nullable: true, description: 'Service line id to apply to every chart in the selection, or null to clear.' })
+  @IsOptional() @ValidateIf((_o, v) => v !== null) @Type(() => Number) @IsInt()
+  serviceLineId?: number | null;
 }

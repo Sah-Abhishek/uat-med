@@ -1,4 +1,5 @@
 import { useState, useRef, type DragEvent, type ChangeEvent } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   Upload,
   FileText,
@@ -17,14 +18,16 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Field';
+import { Input, Label, FancySelect } from '@/components/ui/Field';
 import { AiStatusChip } from '@/components/ui/Chip';
 import { cn } from '@/lib/utils';
 import {
   addChartDocuments,
   removeChartDocument,
   reprocessChartDocuments,
+  updateChart,
 } from '@/api/charts';
+import { listServiceLines } from '@/api/configurations';
 import { deriveAiStatus } from '@/api/types';
 import type { AiEncounterResult, AiReportType, UploadedDocument } from '@/api/types';
 
@@ -51,6 +54,10 @@ type Status = 'idle' | 'uploading' | 'success' | 'error';
 
 interface Props {
   chartId: string;
+  /** Current service line id on the chart (null when unset). Owned by the
+   *  parent so a refetch stays the source of truth; we keep a local mirror for
+   *  instant feedback on change. */
+  serviceLineId?: string | number | null;
   /** Persisted list owned by the parent — server is source of truth, hydrated from chart.customFields.uploadedDocs. */
   uploadedDocs: UploadedDocument[];
   /**
@@ -100,8 +107,31 @@ function fileTypeLabel(type: string) {
   return { label: 'FILE', tone: 'text-ink-muted bg-surface-sunken' };
 }
 
-export function UploadSection({ chartId, uploadedDocs, customFields, onView, onProcessed, onDocsChanged, onRefetch }: Props) {
+export function UploadSection({ chartId, serviceLineId, uploadedDocs, customFields, onView, onProcessed, onDocsChanged, onRefetch }: Props) {
   const [open, setOpen] = useState(true);
+
+  // ── Service line (per-chart, optional) ──────────────────
+  // Active lines only — the dropdown must never offer a deactivated line.
+  const serviceLines = useQuery({
+    queryKey: ['service-lines'],
+    queryFn: () => listServiceLines(),
+    staleTime: 5 * 60 * 1000,
+  });
+  // Local mirror so the trigger updates instantly; falls back to the prop
+  // (server truth) until the user changes it.
+  const [localServiceLine, setLocalServiceLine] = useState<string | null>(
+    serviceLineId != null ? String(serviceLineId) : null,
+  );
+  const serviceLineValue = localServiceLine ?? (serviceLineId != null ? String(serviceLineId) : '');
+  const saveServiceLine = useMutation({
+    // Empty selection clears it (null); otherwise persist the numeric id.
+    mutationFn: (next: string) =>
+      updateChart(chartId, { serviceLineId: next ? Number(next) : null }),
+  });
+  function onServiceLineChange(next: string) {
+    setLocalServiceLine(next || null);
+    saveServiceLine.mutate(next);
+  }
   const [docs, setDocs] = useState<StagedDoc[]>([]);
   const [imageGroups, setImageGroups] = useState<ImageGroup[]>([]);
   const [stagedImages, setStagedImages] = useState<StagedDoc[]>([]);
@@ -305,6 +335,23 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
 
       {open && (
         <div className="px-6 pb-6 pt-1 border-t border-line">
+          {/* ── Service line — classifies the chart; stored per-chart and (once
+              the gateway accepts it) forwarded to the AI alongside the docs. ── */}
+          <div className="pt-4 max-w-xs">
+            <Label>Service Line</Label>
+            <FancySelect
+              value={serviceLineValue}
+              onChange={onServiceLineChange}
+              options={(serviceLines.data?.items ?? []).map((s) => ({
+                value: String(s.id),
+                label: s.name,
+              }))}
+              placeholder={serviceLines.isPending ? 'Loading…' : 'Select service line…'}
+              searchable
+              disabled={busy || saveServiceLine.isPending}
+            />
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4">
             {/* ── Documents column ── */}
             <DropZone

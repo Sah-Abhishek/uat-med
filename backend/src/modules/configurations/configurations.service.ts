@@ -19,6 +19,7 @@ import { AuditArea } from '../../entities/audit-area.entity';
 import { AuditFeedbackReason } from '../../entities/audit-feedback-reason.entity';
 import { StandardFieldConfig } from '../../entities/standard-field-config.entity';
 import { CustomFieldConfig } from '../../entities/custom-field-config.entity';
+import { ServiceLine } from '../../entities/service-line.entity';
 
 const BUILTIN_AUDIT_AREAS = [
   'Primary Diagnosis',
@@ -85,6 +86,7 @@ export class ConfigurationsService {
     @InjectRepository(StandardFieldConfig) private readonly stdFieldsRepo: Repository<StandardFieldConfig>,
     @InjectRepository(CustomFieldConfig) private readonly customFieldsRepo: Repository<CustomFieldConfig>,
     @InjectRepository(CodeReviewReason) private readonly codeReviewReasonsRepo: Repository<CodeReviewReason>,
+    @InjectRepository(ServiceLine) private readonly serviceLinesRepo: Repository<ServiceLine>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -981,5 +983,90 @@ export class ConfigurationsService {
         isActive: true,
       },
     });
+  }
+
+  /* ── Service Lines (global lookup, TypeORM-backed) ────────
+   *
+   * Global catalogue picked at document-upload time and stored per chart
+   * (charts.service_line_id). NOT client/location-scoped. Ordered by sort_order
+   * so the business sequence (ED Facility, ED Profee, …) holds in every picker.
+   * Soft-delete via isActive=false (mirrors clients/locations) — never hard
+   * delete, so charts that reference a line stay valid. */
+
+  async listServiceLines(includeInactive = false) {
+    const where = includeInactive ? {} : { isActive: true };
+    const rows = await this.serviceLinesRepo.find({
+      where,
+      // sort_order first, name as a stable tiebreaker for equal/zero orders.
+      order: { sortOrder: 'ASC', name: 'ASC' },
+    });
+    const items = rows.map((s) => ({
+      id: Number(s.id),
+      name: s.name,
+      code: s.code ?? '',
+      sortOrder: s.sortOrder ?? 0,
+      isActive: s.isActive ?? true,
+    }));
+    return { items };
+  }
+
+  async createServiceLine(body: { name?: string; code?: string; sortOrder?: number; isActive?: boolean }) {
+    const name = (body.name ?? '').trim();
+    if (!name) {
+      throw new BadRequestException({ error: { code: 'invalid_argument', message: 'Service line name is required.' } });
+    }
+    const code = body.code?.trim();
+    // Default new lines to the end of the list when no explicit order is given.
+    let sortOrder = typeof body.sortOrder === 'number' ? body.sortOrder : undefined;
+    if (sortOrder === undefined) {
+      const max = await this.serviceLinesRepo
+        .createQueryBuilder('s')
+        .select('MAX(s.sort_order)', 'max')
+        .getRawOne<{ max: number | null }>();
+      sortOrder = (Number(max?.max ?? 0) || 0) + 10;
+    }
+    const entity = this.serviceLinesRepo.create({
+      name,
+      // Empty/absent code → NULL (unique index permits many NULLs but not many '').
+      code: code ? code : null,
+      sortOrder,
+      isActive: body.isActive ?? true,
+    });
+    const saved = await this.serviceLinesRepo.save(entity);
+    return { id: Number(saved.id) };
+  }
+
+  async updateServiceLine(
+    id: number,
+    body: { name?: string; code?: string; sortOrder?: number; isActive?: boolean },
+  ) {
+    const row = await this.serviceLinesRepo.findOne({ where: { id } });
+    if (!row) {
+      throw new NotFoundException({ error: { code: 'not_found', message: `Service line ${id} not found.` } });
+    }
+    if (body.name !== undefined) {
+      const name = body.name.trim();
+      if (!name) {
+        throw new BadRequestException({ error: { code: 'invalid_argument', message: 'Service line name cannot be empty.' } });
+      }
+      row.name = name;
+    }
+    if (body.code !== undefined) row.code = body.code.trim() || null;
+    if (body.sortOrder !== undefined) row.sortOrder = body.sortOrder;
+    if (body.isActive !== undefined) row.isActive = body.isActive;
+    await this.serviceLinesRepo.save(row);
+    return { id: Number(row.id) };
+  }
+
+  /** Soft delete: deactivate so it drops out of every picker but charts that
+   * already reference it keep their value. Restore by editing back to active. */
+  async deactivateServiceLine(id: number) {
+    const row = await this.serviceLinesRepo.findOne({ where: { id } });
+    if (!row) {
+      throw new NotFoundException({ error: { code: 'not_found', message: `Service line ${id} not found.` } });
+    }
+    row.isActive = false;
+    await this.serviceLinesRepo.save(row);
+    return { id: Number(row.id), isActive: false };
   }
 }

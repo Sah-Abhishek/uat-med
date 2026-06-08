@@ -11,11 +11,12 @@ import {
   type BulkDocumentsResult,
   type AssignStagedRequest,
 } from '@/api/worklists';
-import { listCharts } from '@/api/charts';
+import { listCharts, bulkModifyCharts } from '@/api/charts';
+import { listServiceLines } from '@/api/configurations';
 import type { ApiErrorShape } from '@/api/types';
 import { Modal, ModalFooter } from '@/components/ui/Primitives';
 import { Button } from '@/components/ui/Button';
-import { Select } from '@/components/ui/Field';
+import { Select, FancySelect } from '@/components/ui/Field';
 import { cn, formatNumber } from '@/lib/utils';
 import {
   AlertCircle,
@@ -102,6 +103,34 @@ export function BulkUploadWizard({ open, onClose, worklistId, worklistNumber, ex
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [matchResult, setMatchResult] = useState<BulkDocumentsResult | null>(null);
 
+  // ── Batch service line (applies to every chart in this upload) ──
+  // Active lines only — the picker must never offer a deactivated line.
+  const serviceLines = useQuery({
+    queryKey: ['service-lines'],
+    queryFn: () => listServiceLines(),
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  });
+  const [batchServiceLineId, setBatchServiceLineId] = useState<string>('');
+  // Guard against re-applying the same (line, chart-count) on every memo churn.
+  const appliedRef = useRef<string>('');
+  const applyServiceLine = useMutation({
+    mutationFn: (vars: { ids: number[]; serviceLineId: number }) =>
+      bulkModifyCharts({ chartIds: vars.ids, serviceLineId: vars.serviceLineId }),
+  });
+  // Apply whenever a line is chosen AND charts exist (after Excel import, or
+  // immediately in documents-only mode). If the user picks a line on step 1
+  // before importing, this re-runs once reviewCharts populates.
+  useEffect(() => {
+    if (!batchServiceLineId) return;
+    const ids = reviewCharts.map((c) => Number(c.id)).filter((n) => Number.isFinite(n) && n > 0);
+    if (!ids.length) return;
+    const key = `${batchServiceLineId}:${ids.length}`;
+    if (appliedRef.current === key) return;
+    appliedRef.current = key;
+    applyServiceLine.mutate({ ids, serviceLineId: Number(batchServiceLineId) });
+  }, [batchServiceLineId, reviewCharts]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Step 3 manages its own assignment state internally; nothing to lift.
 
   // Reset everything when the modal closes.
@@ -114,6 +143,8 @@ export function BulkUploadWizard({ open, onClose, worklistId, worklistNumber, ex
       setDocFiles([]);
       setMatchResult(null);
       setConfirmDiscard(false);
+      setBatchServiceLineId('');
+      appliedRef.current = '';
     }
   }, [open, documentsOnly]);
 
@@ -172,6 +203,27 @@ export function BulkUploadWizard({ open, onClose, worklistId, worklistNumber, ex
 
         {/* Body */}
         <div className="px-6 py-6 overflow-y-auto flex-1">
+          {/* Service line — one value applied to every chart in this upload.
+              Stored per-chart; (deferred) forwarded to the AI with the docs. */}
+          {step !== 4 && (
+            <div className="mb-5 flex items-center gap-3 rounded-xl border border-line bg-surface-sunken/40 px-4 py-3">
+              <Tag className="w-4 h-4 text-ink-muted shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-ink">Service Line</p>
+                <p className="text-[11px] text-ink-muted">Applied to all charts in this upload (optional).</p>
+              </div>
+              <div className="ml-auto w-60 shrink-0">
+                <FancySelect
+                  value={batchServiceLineId}
+                  onChange={setBatchServiceLineId}
+                  options={(serviceLines.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name }))}
+                  placeholder={serviceLines.isPending ? 'Loading…' : 'Select service line…'}
+                  searchable
+                  disabled={applyServiceLine.isPending}
+                />
+              </div>
+            </div>
+          )}
           {step === 1 && !documentsOnly && (
             <Step1ExcelUpload
               file={excelFile}

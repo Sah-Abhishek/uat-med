@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsDateString, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsArray, IsDateString, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, MaxLength, Min, ValidateIf } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ChartStatus, Priority } from '../../../common/enums';
 
@@ -27,6 +27,11 @@ export class UpdateChartDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() holdReasonId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() responsiblePartyId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() primaryHealthPlanId?: number;
+
+  // Service line chosen at document upload. `null` explicitly clears it; a
+  // number sets it. ValidateIf lets null through (IsInt would otherwise reject).
+  @ApiPropertyOptional({ nullable: true, description: 'Service line (global lookup) id, or null to clear.' })
+  @IsOptional() @ValidateIf((_o, v) => v !== null) @Type(() => Number) @IsInt() serviceLineId?: number | null;
 
   // ── Dates ──────────────────────────────────────────────
   @ApiPropertyOptional({ example: '2024-02-21', description: 'Date of Service' })

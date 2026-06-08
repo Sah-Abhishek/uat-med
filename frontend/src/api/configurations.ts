@@ -67,6 +67,34 @@ export const deleteLocation = (id: number) =>
 export const cascadeDeleteLocation = (id: number) =>
   del<{ id: number; deleted: boolean }>(`/configurations/locations/${id}/cascade`);
 
+/* ── Service Lines (global lookup, picked at document upload) ── */
+
+export interface ServiceLine {
+  id: number;
+  name: string;
+  code?: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+/** List service lines. Pass `includeInactive` from the management view to also
+ * show soft-deleted (deactivated) rows; omit it everywhere else (the upload
+ * dropdown) so deactivated lines stay hidden. Ordered by sortOrder server-side. */
+export const listServiceLines = (opts?: { includeInactive?: boolean }) =>
+  get<{ items: ServiceLine[] }>(
+    '/configurations/service-lines',
+    opts?.includeInactive ? { includeInactive: true } : undefined,
+  );
+export const createServiceLine = (dto: { name: string; code?: string; sortOrder?: number; isActive?: boolean }) =>
+  post<{ id: number }>('/configurations/service-lines', dto);
+export const updateServiceLine = (
+  id: number,
+  dto: Partial<{ name: string; code?: string; sortOrder: number; isActive: boolean }>,
+) => patch<{ id: number }>(`/configurations/service-lines/${id}`, dto);
+/** Soft delete — deactivates the service line (isActive=false). */
+export const deleteServiceLine = (id: number) =>
+  del<{ id: number; isActive: boolean }>(`/configurations/service-lines/${id}`);
+
 /* ── Specialities → General sub-tab ───────────────────── */
 
 export interface PrimarySpecialityEntry {

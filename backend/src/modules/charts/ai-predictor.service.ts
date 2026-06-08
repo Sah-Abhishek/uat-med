@@ -24,6 +24,13 @@ export interface EncounterChartInfo {
   department?: string;
   /** YYYY-MM-DD or any parseable date string. */
   encounterDate?: string;
+  /**
+   * Service line name (global lookup picked at upload). DEFERRED: the gateway
+   * doesn't accept this field yet, so it's threaded through but NOT sent — see
+   * the marked hook in startEncounter(). The value is persisted on the chart
+   * regardless; forwarding is a one-line change once the gateway is ready.
+   */
+  serviceLine?: string;
 }
 
 export interface PredictedCode {
@@ -155,6 +162,11 @@ export class AiPredictorService {
     if (encDate) encounterBody.encounter_date = encDate;
     if (chart.facility?.trim()) encounterBody.facility = chart.facility.trim();
     if (chart.department?.trim()) encounterBody.department = chart.department.trim();
+    // ── DEFERRED: service line forwarding ──────────────────
+    // The ICD gateway does not accept a service_line field yet. The chart
+    // already stores it (charts.service_line_id); when the gateway adds support,
+    // uncomment the line below — no other change is needed.
+    // if (chart.serviceLine?.trim()) encounterBody.service_line = chart.serviceLine.trim();
 
     this.log.log(`[B1] create encounter (mrn=${encounterBody.mrn}, files=${files.length})`);
     const encounter = await this.postJson<{ id?: string; encounter_id?: string }>('/api/encounters', encounterBody);

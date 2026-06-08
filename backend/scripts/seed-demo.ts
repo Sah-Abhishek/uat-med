@@ -20,6 +20,15 @@ import { PrimarySpeciality } from '../src/entities/primary-speciality.entity';
 import { User } from '../src/entities/user.entity';
 import { Worklist } from '../src/entities/worklist.entity';
 import { Chart } from '../src/entities/chart.entity';
+import { ServiceLine } from '../src/entities/service-line.entity';
+
+// Global service-line catalogue, in display order (sort_order = index*10).
+const SERVICE_LINES = [
+  'ED Facility', 'I&I Administration', 'ED Profee', 'EM-OP', 'EM-IP',
+  'EM Procedure', 'Ob-gyn', 'New born', 'SDS', 'General Surgery',
+  'WHC Profee/ facility', 'ASC', 'Ancillary', 'IP-DRG', 'HCC', 'PT/OT',
+  'Surgical Pathology', 'Macular Pathology', 'Radiology', 'IVR', 'Denial/ Edits',
+];
 
 dotenv.config({ path: join(process.cwd(), 'env/.env.uat') });
 
@@ -32,7 +41,7 @@ dotenv.config({ path: join(process.cwd(), 'env/.env.uat') });
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     ssl: { rejectUnauthorized: false },
-    entities: [Client, Location, PrimarySpeciality, User, Worklist, Chart],
+    entities: [Client, Location, PrimarySpeciality, User, Worklist, Chart, ServiceLine],
     synchronize: false,
   });
   await ds.initialize();
@@ -43,6 +52,17 @@ dotenv.config({ path: join(process.cwd(), 'env/.env.uat') });
   const users = ds.getRepository(User);
   const worklists = ds.getRepository(Worklist);
   const charts = ds.getRepository(Chart);
+  const serviceLines = ds.getRepository(ServiceLine);
+
+  // ── Service lines (global lookup) ───────────────────────────
+  for (let i = 0; i < SERVICE_LINES.length; i++) {
+    const name = SERVICE_LINES[i];
+    const found = await serviceLines.findOne({ where: { name } });
+    if (!found) {
+      await serviceLines.save(serviceLines.create({ name, sortOrder: (i + 1) * 10, isActive: true }));
+      console.log(`✓ Service line: ${name}`);
+    }
+  }
 
   // ── Client ──────────────────────────────────────────────────
   let demoClient = await clients.findOne({ where: { code: 'DEMO' } });

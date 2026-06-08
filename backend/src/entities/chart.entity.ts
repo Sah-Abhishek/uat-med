@@ -1,6 +1,7 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique, UpdateDateColumn } from 'typeorm';
 import { ChartMilestone, ChartStatus, Priority } from '../common/enums';
 import { Worklist } from './worklist.entity';
+import { ServiceLine } from './service-line.entity';
 
 @Entity('charts')
 @Unique(['worklistId', 'serialNo'])
@@ -52,6 +53,15 @@ export class Chart {
   @Column({ type: 'jsonb', nullable: true }) procedures?: Array<{ code: string; modifier?: string }>;
   @Column({ name: 'em_level', type: 'varchar', length: 8, nullable: true }) emLevel?: string;
   @Column({ name: 'drg_value', type: 'numeric', precision: 12, scale: 2, nullable: true }) drgValue?: number;
+
+  // Service line chosen at document upload (global lookup). Nullable: it's an
+  // optional classification, so charts without one are fine. ON DELETE SET NULL
+  // (see migration) keeps a chart valid if its service line is ever hard-deleted.
+  @Column({ name: 'service_line_id', type: 'bigint', nullable: true }) @Index() serviceLineId?: number | null;
+
+  @ManyToOne(() => ServiceLine, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'service_line_id' })
+  serviceLine?: ServiceLine | null;
 
   @Column({ name: 'hold_reason_id', type: 'bigint', nullable: true }) holdReasonId?: number;
   @Column({ name: 'responsible_party_id', type: 'bigint', nullable: true }) responsiblePartyId?: number;

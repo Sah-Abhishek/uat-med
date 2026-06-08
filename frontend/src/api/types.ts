@@ -186,6 +186,10 @@ export interface Chart {
   coderCommentsToClient: string | null;
   rejectionDenialComments: string | null;
   deficiencyComments: string | null;
+  /** Service line (global lookup) chosen at upload. id is null when unset;
+   * serviceLineName is resolved server-side for display (list + detail). */
+  serviceLineId: string | number | null;
+  serviceLineName: string | null;
   customFields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

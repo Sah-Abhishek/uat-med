@@ -37,6 +37,11 @@ import {
   getCodeReviewReasons,
   updateCodeReviewReasons,
   copyCodeReviewReasons,
+  listServiceLines,
+  createServiceLine,
+  updateServiceLine,
+  deleteServiceLine,
+  type ServiceLine,
   CODE_REVIEW_TYPES,
   CODE_REVIEW_ACTIONS,
   CODE_REVIEW_TYPE_LABEL,
@@ -87,7 +92,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type MainTab = 'general' | 'specialities' | 'hcc' | 'review-reasons';
+type MainTab = 'general' | 'specialities' | 'service-lines' | 'hcc' | 'review-reasons';
 type SpecTab = 'general' | 'feedback' | 'auditing' | 'coding' | 'chart-fields';
 
 const STANDARD_CHART_FIELDS: Array<{ key: string; label: string }> = [
@@ -128,6 +133,7 @@ export function ConfigurationsPage() {
             tabs={[
               { key: 'general', label: 'General' },
               { key: 'specialities', label: 'Specialities' },
+              { key: 'service-lines', label: 'Service Lines' },
               { key: 'hcc', label: 'HCC' },
               { key: 'review-reasons', label: 'Review Reasons' },
             ]}
@@ -139,6 +145,7 @@ export function ConfigurationsPage() {
         <div className="p-6">
           {tab === 'general' && <GeneralTab canEdit={canEdit} />}
           {tab === 'specialities' && <SpecialitiesTab canEdit={canEdit} />}
+          {tab === 'service-lines' && <ServiceLinesTab canEdit={canEdit} />}
           {tab === 'hcc' && <HccFieldsEditor canEdit={canEdit} />}
           {tab === 'review-reasons' && <ReviewReasonsTab canEdit={canEdit} />}
         </div>
@@ -239,6 +246,230 @@ function GeneralTab({ canEdit }: { canEdit: boolean }) {
         </div>
       )}
     </form>
+  );
+}
+
+/* ═════════════════ Service Lines (global catalogue) ═════════════════ */
+/**
+ * Global service-line catalogue management. Not client/location-scoped — one
+ * shared list picked at document upload. Add / rename / reorder / deactivate.
+ * Deactivation is a soft delete (mirrors clients/locations): the line drops out
+ * of the upload dropdown but charts that already reference it keep their value.
+ */
+function ServiceLinesTab({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [newName, setNewName] = useState('');
+  const [editing, setEditing] = useState<{ id: number; name: string } | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<ServiceLine | null>(null);
+
+  // Management view pulls inactive rows too so they can be reactivated; the
+  // upload dropdown calls listServiceLines() without the flag, so deactivated
+  // lines stay hidden there.
+  const { data, isPending } = useQuery({
+    queryKey: ['configurations', 'service-lines', 'manage'],
+    queryFn: () => listServiceLines({ includeInactive: true }),
+  });
+  const rows = data?.items ?? [];
+  const active = rows.filter((r) => r.isActive);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['configurations', 'service-lines', 'manage'] });
+    qc.invalidateQueries({ queryKey: ['service-lines'] }); // the upload-dropdown query
+  };
+  const onErr = (e: unknown) => setError((e as ApiErrorShape).message ?? 'Something went wrong.');
+
+  const addM = useMutation({
+    mutationFn: (name: string) => createServiceLine({ name }),
+    onSuccess: () => { setNewName(''); setError(null); invalidate(); },
+    onError: onErr,
+  });
+  const updateM = useMutation({
+    mutationFn: (v: { id: number; dto: Partial<{ name: string; sortOrder: number; isActive: boolean }> }) =>
+      updateServiceLine(v.id, v.dto),
+    onSuccess: () => { setEditing(null); setError(null); invalidate(); },
+    onError: onErr,
+  });
+  const deleteM = useMutation({
+    mutationFn: (id: number) => deleteServiceLine(id),
+    onSuccess: () => { setDeactivateTarget(null); invalidate(); },
+    onError: onErr,
+  });
+
+  // Swap sort_order with the adjacent active row to nudge a line up/down.
+  function move(row: ServiceLine, dir: -1 | 1) {
+    const idx = active.findIndex((r) => r.id === row.id);
+    const neighbor = active[idx + dir];
+    if (!neighbor) return;
+    updateM.mutate({ id: row.id, dto: { sortOrder: neighbor.sortOrder } });
+    updateM.mutate({ id: neighbor.id, dto: { sortOrder: row.sortOrder } });
+  }
+
+  if (isPending) return <Loader2 className="w-5 h-5 animate-spin text-ink-muted" />;
+
+  const deactivated = rows.filter((r) => !r.isActive);
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      <div>
+        <h3 className="text-sm font-semibold text-ink">Service Lines</h3>
+        <p className="text-xs text-ink-muted mt-0.5">
+          Shown in the Service Line dropdown when uploading documents. Stored on each chart.
+        </p>
+      </div>
+
+      {error && <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger">{error}</div>}
+
+      {canEdit && (
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <Label>Add service line</Label>
+            <Input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="e.g. Cardiology Profee"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newName.trim()) addM.mutate(newName.trim());
+              }}
+            />
+          </div>
+          <Button
+            leftIcon={<Plus className="w-3.5 h-3.5" />}
+            disabled={!newName.trim()}
+            loading={addM.isPending}
+            onClick={() => addM.mutate(newName.trim())}
+          >
+            Add
+          </Button>
+        </div>
+      )}
+
+      <div className="rounded-xl border border-line divide-y divide-line overflow-hidden">
+        {active.length === 0 && (
+          <div className="px-4 py-6 text-center text-xs text-ink-muted">No service lines yet.</div>
+        )}
+        {active.map((row, i) => (
+          <div key={row.id} className="flex items-center gap-2 px-3 py-2 bg-surface">
+            {canEdit && (
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  disabled={i === 0 || updateM.isPending}
+                  onClick={() => move(row, -1)}
+                  className="text-ink-subtle hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Move up"
+                >
+                  <ChevronDown className="w-3.5 h-3.5 rotate-180" />
+                </button>
+                <button
+                  type="button"
+                  disabled={i === active.length - 1 || updateM.isPending}
+                  onClick={() => move(row, 1)}
+                  className="text-ink-subtle hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Move down"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {editing?.id === row.id ? (
+              <Input
+                autoFocus
+                value={editing.name}
+                onChange={(e) => setEditing({ id: row.id, name: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && editing.name.trim()) updateM.mutate({ id: row.id, dto: { name: editing.name.trim() } });
+                  if (e.key === 'Escape') setEditing(null);
+                }}
+                className="flex-1"
+              />
+            ) : (
+              <span className="flex-1 text-sm font-medium text-ink truncate">{row.name}</span>
+            )}
+
+            {canEdit && (
+              <div className="flex items-center gap-1 shrink-0">
+                {editing?.id === row.id ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => editing.name.trim() && updateM.mutate({ id: row.id, dto: { name: editing.name.trim() } })}
+                      className="p-1.5 rounded-lg text-success hover:bg-success-soft"
+                      title="Save"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditing(null)}
+                      className="p-1.5 rounded-lg text-ink-subtle hover:bg-surface-sunken"
+                      title="Cancel"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setEditing({ id: row.id, name: row.name })}
+                      className="p-1.5 rounded-lg text-ink-subtle hover:bg-surface-sunken hover:text-ink"
+                      title="Rename"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeactivateTarget(row)}
+                      className="p-1.5 rounded-lg text-ink-subtle hover:bg-danger-soft hover:text-danger"
+                      title="Deactivate"
+                    >
+                      <Ban className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {deactivated.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[11px] uppercase tracking-wide font-semibold text-ink-subtle">
+            Deactivated ({deactivated.length})
+          </p>
+          <div className="rounded-xl border border-line divide-y divide-line overflow-hidden">
+            {deactivated.map((row) => (
+              <div key={row.id} className="flex items-center gap-2 px-3 py-2 bg-surface-sunken/40">
+                <span className="flex-1 text-sm text-ink-muted line-through truncate">{row.name}</span>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => updateM.mutate({ id: row.id, dto: { isActive: true } })}
+                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                    title="Reactivate"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Reactivate
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        open={!!deactivateTarget}
+        message={`Deactivate "${deactivateTarget?.name}"? It will be hidden from the upload dropdown. Charts that already use it keep their value, and you can reactivate it anytime.`}
+        confirmLabel="Deactivate"
+        variant="danger"
+        loading={deleteM.isPending}
+        onConfirm={() => deactivateTarget && deleteM.mutate(deactivateTarget.id)}
+        onClose={() => setDeactivateTarget(null)}
+      />
+    </div>
   );
 }
 

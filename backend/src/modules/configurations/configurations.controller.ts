@@ -212,6 +212,27 @@ export class ConfigurationsController {
     });
   }
 
+  // 17.X Service Lines (global lookup, picked at document upload)
+  // Read is open to any working role (the upload dropdown needs it); mutations
+  // are TEAMLEAD-only, matching clients/locations.
+  @Get('service-lines')
+  @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER)
+  listServiceLines(@Query('includeInactive') includeInactive?: string) {
+    return this.svc.listServiceLines(includeInactive === 'true');
+  }
+  @Post('service-lines') @Roles(Role.TEAMLEAD)
+  createServiceLine(@Body() body: { name: string; code?: string; sortOrder?: number; isActive?: boolean }) {
+    return this.svc.createServiceLine(body);
+  }
+  @Patch('service-lines/:id') @Roles(Role.TEAMLEAD)
+  updateServiceLine(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string; code?: string; sortOrder?: number; isActive?: boolean }) {
+    return this.svc.updateServiceLine(id, body);
+  }
+  @Delete('service-lines/:id') @Roles(Role.TEAMLEAD)
+  deleteServiceLine(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.deactivateServiceLine(id);
+  }
+
   // 17.8 HCC tab
   @Get('hcc/fields') @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER) hccFields() { return this.svc.hccFields(); }
   @Post('hcc/fields') @Roles(Role.TEAMLEAD) createHccField(@Body() body: any) { return this.svc.createHccField(body); }

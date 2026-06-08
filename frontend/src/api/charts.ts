@@ -70,6 +70,8 @@ export interface UpdateChartDto {
   holdReasonId?: number;
   responsiblePartyId?: number;
   primaryHealthPlanId?: number;
+  /** Service line (global lookup) id; `null` clears it. */
+  serviceLineId?: number | null;
   dos?: string;
   admitDate?: string;
   dischargeDate?: string;
@@ -126,6 +128,8 @@ export interface BulkModifyDto {
     action: AllocationAction;
     assigneeId?: number;
   };
+  /** Apply one service line to every chart in the selection; `null` clears it. */
+  serviceLineId?: number | null;
 }
 
 export const bulkModifyCharts = (dto: BulkModifyDto) =>

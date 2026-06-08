@@ -135,7 +135,8 @@ export class ChartsService {
       .leftJoinAndSelect('worklist.client', 'client')
       .leftJoinAndSelect('worklist.location', 'location')
       .leftJoinAndSelect('worklist.primarySpeciality', 'primarySpeciality')
-      .leftJoinAndSelect('worklist.process', 'process');
+      .leftJoinAndSelect('worklist.process', 'process')
+      .leftJoinAndSelect('c.serviceLine', 'serviceLine');
 
     // Role-scoped visibility: coders / auditors see only their own queue.
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
@@ -209,13 +210,15 @@ export class ChartsService {
       allocByChart.set(cid, entry);
     }
 
-    const mapped = items.map(({ worklist, ...rest }) => {
+    const mapped = items.map(({ worklist, serviceLine, ...rest }) => {
       const cf = (rest.customFields ?? {}) as Record<string, any>;
       const alloc = allocByChart.get(Number(rest.id)) ?? {};
       return {
         ...rest,
         // Map the `dos` column to the `dateOfService` key the frontend reads.
         dateOfService: rest.dos ?? null,
+        // serviceLineId travels in `...rest`; surface the resolved name for display.
+        serviceLineName: serviceLine?.name ?? null,
         worklistNumber: worklist?.worklistNumber ?? null,
         clientName: worklist?.client?.name ?? null,
         locationName: worklist?.location?.name ?? null,
@@ -370,13 +373,14 @@ export class ChartsService {
   }
 
   async detail(id: number) {
-    const c = await this.charts.findOne({ where: { id } });
+    const c = await this.charts.findOne({ where: { id }, relations: { serviceLine: true } });
     if (!c) throw new NotFoundException();
     // The DB column is `dos`, but the whole frontend (Chart type, list,
     // header, detail seeding) reads `dateOfService`. Surface both so a saved
     // Date of Service survives the refetch instead of reverting to the
     // worklist range start (or blanking out).
-    return { ...c, dateOfService: c.dos ?? null };
+    const { serviceLine, ...rest } = c;
+    return { ...rest, dateOfService: c.dos ?? null, serviceLineName: serviceLine?.name ?? null };
   }
 
 async update(id: number, dto: UpdateChartDto) {
@@ -527,6 +531,9 @@ async update(id: number, dto: UpdateChartDto) {
     if (updatedCharts.length === 0) return { updated: 0 };
     for (const c of updatedCharts) {
       if (dto.priority) c.priority = dto.priority as Priority;
+      // serviceLineId is explicitly nullable: undefined = leave as-is, null =
+      // clear, number = set. So check `!== undefined`, not truthiness.
+      if (dto.serviceLineId !== undefined) c.serviceLineId = dto.serviceLineId;
       if (dto.allocation && dto.allocation.action !== 'NONE') {
         if (dto.allocation.action === 'ALLOCATE_CODING' && dto.allocation.assigneeId) c.allocatedCoderId = dto.allocation.assigneeId;
         if (dto.allocation.action === 'ALLOCATE_AUDITING' && dto.allocation.assigneeId) c.allocatedAuditorId = dto.allocation.assigneeId;
@@ -677,7 +684,8 @@ async update(id: number, dto: UpdateChartDto) {
     files: Express.Multer.File[],
     body: ProcessDocumentsDto,
   ) {
-    const c = await this.charts.findOne({ where: { id } });
+    // Load the service line so its name can be forwarded to the AI gateway.
+    const c = await this.charts.findOne({ where: { id }, relations: { serviceLine: true } });
     if (!c) throw new NotFoundException();
 
     // Build report_types parallel to files: prefer explicit comma-separated
@@ -728,6 +736,10 @@ async update(id: number, dto: UpdateChartDto) {
       // against the right cohort in the gateway.
       facility: this.optionalString(c.customFields?.facility),
       department: this.optionalString(c.customFields?.specialty),
+      // Deferred: the gateway doesn't accept this yet, so startEncounter ignores
+      // it for now. Passed through so it's a one-line flip when the gateway adds
+      // the field — the value is already persisted on the chart regardless.
+      serviceLine: this.optionalString(c.serviceLine?.name),
     });
 
     // Stitch the gateway's report_ids back onto each stored doc in the same
@@ -920,7 +932,7 @@ async update(id: number, dto: UpdateChartDto) {
    * chart resolves to DONE — not ERRORED — once the watcher finalizes.
    */
   async reprocess(id: number) {
-    const c = await this.charts.findOne({ where: { id } });
+    const c = await this.charts.findOne({ where: { id }, relations: { serviceLine: true } });
     if (!c) throw new NotFoundException();
     if (c.customFields?.pendingPrediction) {
       throw new ConflictException('A run is already in progress for this chart.');
@@ -947,6 +959,9 @@ async update(id: number, dto: UpdateChartDto) {
       encounterDate: c.dos ?? c.admitDate,
       facility: this.optionalString(c.customFields?.facility),
       department: this.optionalString(c.customFields?.specialty),
+      // Deferred — see process-documents call site. Forwarded once the gateway
+      // accepts it; persisted on the chart in the meantime.
+      serviceLine: this.optionalString(c.serviceLine?.name),
     });
 
     // New encounter → new report_ids, parallel to uploadedDocs order.
