@@ -25,6 +25,13 @@ export interface EncounterChartInfo {
   /** YYYY-MM-DD or any parseable date string. */
   encounterDate?: string;
   /**
+   * Primary speciality name (from the chart's worklist). Forwarded to the
+   * gateway as `primary_speciality` so it can layer speciality-tuned coding
+   * knowledge (RAG) onto the pipeline. Optional & additive: an empty/unknown
+   * value just runs the normal flow. See encounter_primary_speciality_change.md.
+   */
+  primarySpeciality?: string;
+  /**
    * Service line name (global lookup picked at upload). DEFERRED: the gateway
    * doesn't accept this field yet, so it's threaded through but NOT sent — see
    * the marked hook in startEncounter(). The value is persisted on the chart
@@ -162,6 +169,9 @@ export class AiPredictorService {
     if (encDate) encounterBody.encounter_date = encDate;
     if (chart.facility?.trim()) encounterBody.facility = chart.facility.trim();
     if (chart.department?.trim()) encounterBody.department = chart.department.trim();
+    // Primary speciality (exact key `primary_speciality` — British spelling,
+    // snake_case). Optional & additive; the gateway routes speciality RAG off it.
+    if (chart.primarySpeciality?.trim()) encounterBody.primary_speciality = chart.primarySpeciality.trim();
     // ── DEFERRED: service line forwarding ──────────────────
     // The ICD gateway does not accept a service_line field yet. The chart
     // already stores it (charts.service_line_id); when the gateway adds support,

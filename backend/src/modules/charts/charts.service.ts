@@ -684,8 +684,12 @@ async update(id: number, dto: UpdateChartDto) {
     files: Express.Multer.File[],
     body: ProcessDocumentsDto,
   ) {
-    // Load the service line so its name can be forwarded to the AI gateway.
-    const c = await this.charts.findOne({ where: { id }, relations: { serviceLine: true } });
+    // Load the service line and the worklist's primary speciality so both names
+    // can be forwarded to the AI gateway.
+    const c = await this.charts.findOne({
+      where: { id },
+      relations: { serviceLine: true, worklist: { primarySpeciality: true } },
+    });
     if (!c) throw new NotFoundException();
 
     // Build report_types parallel to files: prefer explicit comma-separated
@@ -736,6 +740,9 @@ async update(id: number, dto: UpdateChartDto) {
       // against the right cohort in the gateway.
       facility: this.optionalString(c.customFields?.facility),
       department: this.optionalString(c.customFields?.specialty),
+      // The chart's primary speciality (from its worklist) — forwarded as
+      // `primary_speciality` so the gateway can apply speciality-tuned RAG.
+      primarySpeciality: this.optionalString(c.worklist?.primarySpeciality?.name),
       // Deferred: the gateway doesn't accept this yet, so startEncounter ignores
       // it for now. Passed through so it's a one-line flip when the gateway adds
       // the field — the value is already persisted on the chart regardless.
@@ -932,7 +939,10 @@ async update(id: number, dto: UpdateChartDto) {
    * chart resolves to DONE — not ERRORED — once the watcher finalizes.
    */
   async reprocess(id: number) {
-    const c = await this.charts.findOne({ where: { id }, relations: { serviceLine: true } });
+    const c = await this.charts.findOne({
+      where: { id },
+      relations: { serviceLine: true, worklist: { primarySpeciality: true } },
+    });
     if (!c) throw new NotFoundException();
     if (c.customFields?.pendingPrediction) {
       throw new ConflictException('A run is already in progress for this chart.');
@@ -959,6 +969,9 @@ async update(id: number, dto: UpdateChartDto) {
       encounterDate: c.dos ?? c.admitDate,
       facility: this.optionalString(c.customFields?.facility),
       department: this.optionalString(c.customFields?.specialty),
+      // The chart's primary speciality (from its worklist) — forwarded as
+      // `primary_speciality` so the gateway can apply speciality-tuned RAG.
+      primarySpeciality: this.optionalString(c.worklist?.primarySpeciality?.name),
       // Deferred — see process-documents call site. Forwarded once the gateway
       // accepts it; persisted on the chart in the meantime.
       serviceLine: this.optionalString(c.serviceLine?.name),

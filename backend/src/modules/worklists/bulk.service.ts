@@ -854,7 +854,11 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async dispatchOneChartToGateway(chartId: number): Promise<boolean> {
-    const c = await this.charts.findOne({ where: { id: chartId } });
+    // Load the worklist's primary speciality so it can be forwarded to the gateway.
+    const c = await this.charts.findOne({
+      where: { id: chartId },
+      relations: { worklist: { primarySpeciality: true } },
+    });
     if (!c) return false;
     const cf = (c.customFields ?? {}) as Record<string, unknown>;
     const pending = cf.pendingPrediction as { awaitingDispatch?: boolean } | undefined;
@@ -902,6 +906,9 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
       encounterDate: c.dos ?? c.admitDate,
       facility: this.optionalString(c.customFields?.facility),
       department: this.optionalString(c.customFields?.specialty),
+      // The chart's primary speciality (from its worklist) — forwarded as
+      // `primary_speciality` so the gateway can apply speciality-tuned RAG.
+      primarySpeciality: this.optionalString(c.worklist?.primarySpeciality?.name),
     });
 
     // Re-read so we don't stomp concurrent edits (e.g. user clearing the queue
