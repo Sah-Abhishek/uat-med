@@ -37,11 +37,12 @@ import {
   getCodeReviewReasons,
   updateCodeReviewReasons,
   copyCodeReviewReasons,
-  listServiceLines,
-  createServiceLine,
-  updateServiceLine,
-  deleteServiceLine,
-  type ServiceLine,
+  // Service Line feature commented out
+  // listServiceLines,
+  // createServiceLine,
+  // updateServiceLine,
+  // deleteServiceLine,
+  // type ServiceLine,
   CODE_REVIEW_TYPES,
   CODE_REVIEW_ACTIONS,
   CODE_REVIEW_TYPE_LABEL,
@@ -92,7 +93,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type MainTab = 'general' | 'specialities' | 'service-lines' | 'hcc' | 'review-reasons';
+// Service Line feature commented out — removed 'service-lines' from MainTab
+type MainTab = 'general' | 'specialities' | 'hcc' | 'review-reasons';
 type SpecTab = 'general' | 'feedback' | 'auditing' | 'coding' | 'chart-fields';
 
 const STANDARD_CHART_FIELDS: Array<{ key: string; label: string }> = [
@@ -133,7 +135,8 @@ export function ConfigurationsPage() {
             tabs={[
               { key: 'general', label: 'General' },
               { key: 'specialities', label: 'Specialities' },
-              { key: 'service-lines', label: 'Service Lines' },
+              // Service Line feature commented out
+              // { key: 'service-lines', label: 'Service Lines' },
               { key: 'hcc', label: 'HCC' },
               { key: 'review-reasons', label: 'Review Reasons' },
             ]}
@@ -145,7 +148,8 @@ export function ConfigurationsPage() {
         <div className="p-6">
           {tab === 'general' && <GeneralTab canEdit={canEdit} />}
           {tab === 'specialities' && <SpecialitiesTab canEdit={canEdit} />}
-          {tab === 'service-lines' && <ServiceLinesTab canEdit={canEdit} />}
+          {/* Service Line feature commented out */}
+          {/* {tab === 'service-lines' && <ServiceLinesTab canEdit={canEdit} />} */}
           {tab === 'hcc' && <HccFieldsEditor canEdit={canEdit} />}
           {tab === 'review-reasons' && <ReviewReasonsTab canEdit={canEdit} />}
         </div>
@@ -249,13 +253,17 @@ function GeneralTab({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-/* ═════════════════ Service Lines (global catalogue) ═════════════════ */
-/**
+/* ═════════════════ Service Lines (global catalogue) — FEATURE COMMENTED OUT ═════════════════ */
+/*
  * Global service-line catalogue management. Not client/location-scoped — one
  * shared list picked at document upload. Add / rename / reorder / deactivate.
  * Deactivation is a soft delete (mirrors clients/locations): the line drops out
  * of the upload dropdown but charts that already reference it keep their value.
+ *
+ * Entire ServiceLinesTab component commented out below.
  */
+/* eslint-disable */
+/*
 function ServiceLinesTab({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -472,6 +480,9 @@ function ServiceLinesTab({ canEdit }: { canEdit: boolean }) {
     </div>
   );
 }
+*/
+/* eslint-enable */
+/* ═════════════════ end Service Lines (feature commented out) ═════════════════ */
 
 /* ═════════════════ Client + Location left rail ═════════════════ */
 function ConfigScopeRail({

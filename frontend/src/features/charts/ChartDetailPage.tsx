@@ -528,7 +528,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
 
         <UploadSection
           chartId={chart.id}
-          serviceLineId={chart.serviceLineId}
+          /* Service Line feature commented out */
+          /* serviceLineId={chart.serviceLineId} */
           uploadedDocs={uploadedDocs}
           customFields={chart.customFields}
           onView={(docId) => {

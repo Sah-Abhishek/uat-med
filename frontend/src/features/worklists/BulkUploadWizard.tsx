@@ -11,12 +11,15 @@ import {
   type BulkDocumentsResult,
   type AssignStagedRequest,
 } from '@/api/worklists';
-import { listCharts, bulkModifyCharts } from '@/api/charts';
-import { listServiceLines } from '@/api/configurations';
+import { listCharts } from '@/api/charts';
+// Service Line feature commented out
+// import { listCharts, bulkModifyCharts } from '@/api/charts';
+// import { listServiceLines } from '@/api/configurations';
 import type { ApiErrorShape } from '@/api/types';
 import { Modal, ModalFooter } from '@/components/ui/Primitives';
 import { Button } from '@/components/ui/Button';
-import { Select, FancySelect } from '@/components/ui/Field';
+// Service Line feature commented out — FancySelect no longer used here
+import { Select } from '@/components/ui/Field';
 import { cn, formatNumber } from '@/lib/utils';
 import {
   AlertCircle,
@@ -103,7 +106,7 @@ export function BulkUploadWizard({ open, onClose, worklistId, worklistNumber, ex
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [matchResult, setMatchResult] = useState<BulkDocumentsResult | null>(null);
 
-  // ── Batch service line (applies to every chart in this upload) ──
+  /* ── Batch service line (applies to every chart in this upload) — FEATURE COMMENTED OUT ──
   // Active lines only — the picker must never offer a deactivated line.
   const serviceLines = useQuery({
     queryKey: ['service-lines'],
@@ -130,6 +133,7 @@ export function BulkUploadWizard({ open, onClose, worklistId, worklistNumber, ex
     appliedRef.current = key;
     applyServiceLine.mutate({ ids, serviceLineId: Number(batchServiceLineId) });
   }, [batchServiceLineId, reviewCharts]); // eslint-disable-line react-hooks/exhaustive-deps
+  ── end batch service line ── */
 
   // Step 3 manages its own assignment state internally; nothing to lift.
 
@@ -143,8 +147,9 @@ export function BulkUploadWizard({ open, onClose, worklistId, worklistNumber, ex
       setDocFiles([]);
       setMatchResult(null);
       setConfirmDiscard(false);
-      setBatchServiceLineId('');
-      appliedRef.current = '';
+      // Service Line feature commented out
+      // setBatchServiceLineId('');
+      // appliedRef.current = '';
     }
   }, [open, documentsOnly]);
 
@@ -203,8 +208,8 @@ export function BulkUploadWizard({ open, onClose, worklistId, worklistNumber, ex
 
         {/* Body */}
         <div className="px-6 py-6 overflow-y-auto flex-1">
-          {/* Service line — one value applied to every chart in this upload.
-              Stored per-chart; (deferred) forwarded to the AI with the docs. */}
+          {/* Service line feature commented out — one value applied to every chart in this upload.
+              Stored per-chart; (deferred) forwarded to the AI with the docs.
           {step !== 4 && (
             <div className="mb-5 flex items-center gap-3 rounded-xl border border-line bg-surface-sunken/40 px-4 py-3">
               <Tag className="w-4 h-4 text-ink-muted shrink-0" />
@@ -224,6 +229,7 @@ export function BulkUploadWizard({ open, onClose, worklistId, worklistNumber, ex
               </div>
             </div>
           )}
+          end service line */}
           {step === 1 && !documentsOnly && (
             <Step1ExcelUpload
               file={excelFile}
