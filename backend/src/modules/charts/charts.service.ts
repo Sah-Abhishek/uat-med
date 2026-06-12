@@ -43,6 +43,16 @@ const TRANSITIONS: Record<ChartMilestone, ChartMilestone[]> = {
   [ChartMilestone.CLOSED]:              [],
 };
 
+/**
+ * customFields keys owned by the AI pipeline — written only by the
+ * process/finalize/upload/remove/watcher/bulk endpoints, never by the
+ * chart-edit form. update() strips them from incoming payloads: a Save from
+ * a tab opened before a pipeline state change would otherwise merge back a
+ * stale snapshot — resurrecting a cleared aiPredictionError or
+ * pendingPrediction, or clobbering uploadedDocs (see docs/handoff.md).
+ */
+const RESERVED_PIPELINE_KEYS = ['aiPrediction', 'aiPredictionError', 'pendingPrediction', 'uploadedDocs'] as const;
+
 // Simple in-memory column preferences keyed by userId. A real impl would persist in Redis or `user_preferences`.
 const columnPrefs = new Map<number, Array<{ key: string; visible: boolean }>>();
 // Active timers keyed by `${userId}:${chartId}`.
@@ -399,6 +409,9 @@ async update(id: number, dto: UpdateChartDto) {
   const { customFields, chartStatus: nextStatus, ...flat } = dto;
   Object.assign(c, flat);
   if (customFields) {
+    // Pipeline-owned keys never come from the edit form — drop them so a
+    // stale FE snapshot can't overwrite newer pipeline state.
+    for (const k of RESERVED_PIPELINE_KEYS) delete (customFields as Record<string, unknown>)[k];
     c.customFields = { ...(c.customFields ?? {}), ...customFields };
   }
   if (nextStatus !== undefined) {
@@ -822,7 +835,10 @@ async update(id: number, dto: UpdateChartDto) {
 
     // Persist the prediction so the page survives a refresh without re-running
     // the pipeline. Stored under customFields to avoid a schema migration.
-    const { pendingPrediction: _drop, ...keepCustom } = c.customFields ?? {};
+    // Drop any prior failure record along with the pending marker — mirrors
+    // the watcher's finalize — so a successful retry resolves to DONE even
+    // when the frontend polling path finalizes instead of the watcher.
+    const { pendingPrediction: _drop, aiPredictionError: _drop2, ...keepCustom } = c.customFields ?? {};
     c.customFields = {
       ...keepCustom,
       uploadedDocs,

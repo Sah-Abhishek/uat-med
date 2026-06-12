@@ -163,6 +163,18 @@ export class AiPipelineWatcher implements OnModuleInit, OnModuleDestroy {
     const fresh = await this.charts.findOne({ where: { id: chartId } });
     if (!fresh) return;
     const { pendingPrediction: _drop, ...keepCustom } = fresh.customFields ?? {};
+    // If a prediction for this same encounter is already stored, the run
+    // actually SUCCEEDED and this pending blob is stale (resurrected by a
+    // concurrent write). Just clear the marker — stamping a timeout error
+    // here would flip a successful chart to ERRORED.
+    if (this.alreadyFinalized(fresh, pending)) {
+      this.log.warn(
+        `chart=${chartId} encounter=${pending.encounterId} already finalized; clearing stale pendingPrediction instead of marking failed.`,
+      );
+      fresh.customFields = keepCustom;
+      await this.charts.save(fresh);
+      return;
+    }
     fresh.customFields = {
       ...keepCustom,
       aiPredictionError: {
@@ -179,16 +191,12 @@ export class AiPipelineWatcher implements OnModuleInit, OnModuleDestroy {
     const fresh = await this.charts.findOne({ where: { id: chartId } });
     if (!fresh) return;
     const cur = fresh.customFields?.pendingPrediction as PendingPrediction | undefined;
-    if (!cur) return;
-    fresh.customFields = {
-      ...(fresh.customFields ?? {}),
-      pendingPrediction: {
-        ...cur,
-        attempts: (cur.attempts ?? 0) + 1,
-        lastError: error,
-      },
-    };
-    await this.charts.save(fresh);
+    if (!cur || this.alreadyFinalized(fresh, cur)) return;
+    await this.patchPendingPrediction(chartId, {
+      ...cur,
+      attempts: (cur.attempts ?? 0) + 1,
+      lastError: error,
+    });
   }
 
   private async recordGatewayStatus(
@@ -198,11 +206,31 @@ export class AiPipelineWatcher implements OnModuleInit, OnModuleDestroy {
     const fresh = await this.charts.findOne({ where: { id: chartId } });
     if (!fresh) return;
     const cur = fresh.customFields?.pendingPrediction as PendingPrediction | undefined;
-    if (!cur) return;
-    fresh.customFields = {
-      ...(fresh.customFields ?? {}),
-      pendingPrediction: { ...cur, gatewayStatus },
-    };
-    await this.charts.save(fresh);
+    if (!cur || this.alreadyFinalized(fresh, cur)) return;
+    await this.patchPendingPrediction(chartId, { ...cur, gatewayStatus });
+  }
+
+  /** True when the chart already stores a successful prediction for this
+   * same encounter — i.e. the run finished and `pendingPrediction` is stale. */
+  private alreadyFinalized(fresh: Chart, pending: PendingPrediction): boolean {
+    const doneEncounterId = (
+      fresh.customFields?.aiPrediction as { encounterId?: string } | undefined
+    )?.encounterId;
+    return !!doneEncounterId && doneEncounterId === pending.encounterId;
+  }
+
+  /** Overwrite `pendingPrediction` via a single conditional UPDATE instead of
+   * a read-modify-write save(). The `custom_fields ? 'pendingPrediction'`
+   * guard makes this a no-op when a finalize (FE HTTP request or watcher)
+   * commits between our read and this write — so a finished run's marker can
+   * never be resurrected — and jsonb_set touches only this key, so concurrent
+   * edits to other custom_fields keys are never stomped. */
+  private async patchPendingPrediction(chartId: number, next: PendingPrediction): Promise<void> {
+    await this.charts.query(
+      `UPDATE charts
+          SET custom_fields = jsonb_set(custom_fields, '{pendingPrediction}', $1::jsonb)
+        WHERE id = $2 AND custom_fields ? 'pendingPrediction'`,
+      [JSON.stringify(next), chartId],
+    );
   }
 }

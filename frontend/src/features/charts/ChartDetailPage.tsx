@@ -44,6 +44,20 @@ import { DocumentationGaps } from './chart-detail/sidebar/DocumentationGaps';
 import { PhysicianQueries } from './chart-detail/sidebar/PhysicianQueries';
 import { CodingFeedback } from './chart-detail/sidebar/CodingFeedback';
 
+/**
+ * customFields keys the chart-edit form must never hold or write back. The AI
+ * pipeline owns the first four — echoing a stale snapshot of them on Save can
+ * resurrect a cleared error / pending run or clobber the document list (see
+ * docs/handoff.md) — and _formDraft is rebuilt fresh on every save.
+ */
+const NON_FORM_CUSTOM_FIELD_KEYS = new Set([
+  'aiPrediction',
+  'aiPredictionError',
+  'pendingPrediction',
+  'uploadedDocs',
+  '_formDraft',
+]);
+
 export function ChartDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -148,7 +162,11 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   });
   const { audit, updateAudit: rawUpdateAudit } = useAuditDraft();
   const { values: customValues, updateValue: rawUpdateCustomValue } = useCustomFieldValues(
-    (chart.customFields ?? {}) as Record<string, unknown>,
+    Object.fromEntries(
+      Object.entries((chart.customFields ?? {}) as Record<string, unknown>).filter(
+        ([k]) => !NON_FORM_CUSTOM_FIELD_KEYS.has(k),
+      ),
+    ),
   );
 
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -450,6 +468,16 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         auditOption: draft.auditOption,
         qcStatus: draft.qcStatus,
       };
+      // Send only the values of configured custom fields (keyed by field id)
+      // plus the _formDraft blob — never the chart's full customFields. The
+      // backend strips the pipeline-owned keys too; not sending them at all
+      // keeps a stale tab's snapshot from overwriting newer pipeline state
+      // even against an older backend.
+      const customFieldValues: Record<string, unknown> = {};
+      for (const cf of cfg.customFields) {
+        const key = String(cf.id);
+        if (key in customValues) customFieldValues[key] = customValues[key];
+      }
       const payload: UpdateChartDto = {
         chartNo: draft.chartNo || undefined,
         mrNumber: draft.mrNo || undefined,
@@ -469,7 +497,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         // advances to CODING_DONE / AUDIT_DONE.
         allocatedCoderId: draft.allocateCoder ? Number(draft.allocateCoder) : undefined,
         allocatedAuditorId: draft.allocateAuditor ? Number(draft.allocateAuditor) : undefined,
-        customFields: { ...customValues, _formDraft: formDraftBlob },
+        customFields: { ...customFieldValues, _formDraft: formDraftBlob },
       };
       return updateChart(chart.id, payload);
     },
