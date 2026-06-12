@@ -18,6 +18,7 @@ import { listWorklists } from '@/api/worklists';
 import { listPrimarySpecialities } from '@/api/configurations';
 import type { ApiErrorShape, Priority } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { IcdBotWidget } from '@/components/IcdBotWidget';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Label, SearchInput, Radio, FancySelect } from '@/components/ui/Field';
@@ -838,6 +839,8 @@ export function ChartsPage() {
         cancelLabel="Cancel"
         loading={retryMutation.isPending}
       />
+
+      <IcdBotWidget />
     </div>
   );
 }

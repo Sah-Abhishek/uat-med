@@ -26,6 +26,7 @@ import type { AiEncounterResult, Chart, ChartStatus, Priority, UploadedDocument 
 import { useAuth } from '@/auth/store';
 import { Button } from '@/components/ui/Button';
 import { Toast } from '@/components/ui/Primitives';
+import { IcdBotWidget } from '@/components/IcdBotWidget';
 import { HeaderCard } from './chart-detail/HeaderCard';
 import { UploadSection } from './chart-detail/UploadSection';
 import { ChartInfoSection } from './chart-detail/ChartInfoSection';
@@ -715,6 +716,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         variant="success"
         onClose={() => setSaveToastOpen(false)}
       />
+
+      <IcdBotWidget />
     </div>
   );
 }
