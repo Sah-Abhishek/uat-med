@@ -8,10 +8,11 @@ import { useEffect } from 'react';
 // The script is injected once and never removed — instead the root div is
 // hidden whenever no page renders <IcdBotWidget />. That keeps the coder's
 // chat history alive while navigating between charts pages.
-const BOT_API = (import.meta.env.VITE_ICD_BOT_API || 'http://216.48.183.162:6334').replace(
-  /\/$/,
-  '',
-);
+//
+// Defaults to the same-origin /icd-bot path: nginx-proxy-manager forwards it
+// to the bot machine in production, and the vite dev/preview proxy does the
+// same locally. Same-origin keeps https pages free of mixed-content blocks.
+const BOT_API = (import.meta.env.VITE_ICD_BOT_API || '/icd-bot').replace(/\/$/, '');
 const SCRIPT_ID = 'icd-bot-script';
 const ROOT_ID = 'icd-bot-root';
 

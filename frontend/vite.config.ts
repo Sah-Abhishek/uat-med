@@ -23,6 +23,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/icd-bot': {
+        target: 'http://216.48.183.162:6334',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/icd-bot/, ''),
+      },
     },
   },
   preview: {
@@ -41,6 +46,11 @@ export default defineConfig({
         target: 'http://localhost:2600',
         changeOrigin: true,
         secure: false,
+      },
+      '/icd-bot': {
+        target: 'http://216.48.183.162:6334',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/icd-bot/, ''),
       },
     },
   },
