@@ -8,6 +8,7 @@ import {
   Clock,
   Download,
   FileText,
+  Loader2,
   Menu,
   Minus,
   MoreVertical,
@@ -17,6 +18,7 @@ import {
   Redo2,
   RotateCw,
   Save,
+  Search,
   Sparkles,
   Undo2,
   X,
@@ -49,6 +51,7 @@ import type {
   UploadedDocument,
 } from '@/api/types';
 import { FancySelect, Input, Textarea } from '@/components/ui/Field';
+import { searchIcdCodes, type IcdCodeHit } from '@/api/icdCodes';
 import { cn } from '@/lib/utils';
 import { AiSummaryPanel } from './AiSummaryPanel';
 
@@ -1896,6 +1899,205 @@ const ADD_CODE_CATEGORY_LABEL: Record<AddCodeCategory, string> = {
   PROCEDURE: 'CPT / Procedure',
 };
 
+/** Chars typed before the ICD-10-CM autocomplete starts suggesting. */
+const ICD_SUGGEST_MIN_CHARS = 2;
+
+/**
+ * Code <Input> with an ICD-10-CM prefix-search dropdown. Once the user has
+ * typed {@link ICD_SUGGEST_MIN_CHARS}+ characters, it queries the reference DB
+ * (debounced) and shows matching codes; picking one fills the code AND its
+ * description. Keyboard: ↑/↓ to move, Enter to pick, Esc to dismiss.
+ *
+ * `enabled` is false for CPT/Procedure rows — those codes don't live in the
+ * ICD-10-CM reference DB, so suggesting from it would only ever be empty.
+ */
+function IcdCodeAutocomplete({
+  value,
+  onChange,
+  onPick,
+  enabled,
+  placeholder,
+  autoFocus,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onPick: (code: string, description: string) => void;
+  enabled: boolean;
+  placeholder?: string;
+  autoFocus?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [debounced, setDebounced] = useState('');
+  const [highlight, setHighlight] = useState(-1);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const trimmed = value.trim();
+  const canSuggest = enabled && trimmed.length >= ICD_SUGGEST_MIN_CHARS;
+
+  // Debounce the typed value so we hit the API ~once per pause, not per keypress.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(trimmed), 180);
+    return () => clearTimeout(t);
+  }, [trimmed]);
+
+  const q = useQuery({
+    queryKey: ['icd-code-search', debounced],
+    queryFn: () => searchIcdCodes(debounced, 10),
+    enabled: open && enabled && debounced.length >= ICD_SUGGEST_MIN_CHARS,
+    staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev, // keep prior hits visible while the next loads
+  });
+  const hits: IcdCodeHit[] = q.data?.codes ?? [];
+  const showDropdown = open && canSuggest;
+
+  // Close when focus/click leaves the widget.
+  useEffect(() => {
+    if (!showDropdown) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showDropdown]);
+
+  // Clamp the highlight whenever the result set changes.
+  useEffect(() => {
+    setHighlight((h) => (h >= hits.length ? hits.length - 1 : h));
+  }, [hits.length]);
+
+  useEffect(() => () => {
+    if (blurTimer.current) clearTimeout(blurTimer.current);
+  }, []);
+
+  const pick = (hit: IcdCodeHit) => {
+    onPick(hit.code, hit.description);
+    setOpen(false);
+    setHighlight(-1);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showDropdown || hits.length === 0) {
+      // Let Esc dismiss even if the list is mid-fetch.
+      if (e.key === 'Escape' && open) {
+        e.stopPropagation();
+        setOpen(false);
+      }
+      return;
+    }
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setHighlight((h) => (h + 1) % hits.length);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setHighlight((h) => (h <= 0 ? hits.length - 1 : h - 1));
+        break;
+      case 'Enter':
+        if (highlight >= 0 && highlight < hits.length) {
+          e.preventDefault();
+          pick(hits[highlight]);
+        }
+        break;
+      case 'Escape':
+        // Stop the modal's window-level Esc handler from closing the whole
+        // modal — first Esc just closes the suggestions.
+        e.stopPropagation();
+        setOpen(false);
+        break;
+    }
+  };
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <Input
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value.toUpperCase());
+          setOpen(true);
+          setHighlight(-1);
+        }}
+        onFocus={() => {
+          if (canSuggest) setOpen(true);
+        }}
+        onBlur={() => {
+          // Delay so a mousedown on an option still registers before close.
+          blurTimer.current = setTimeout(() => setOpen(false), 120);
+        }}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        className="font-mono"
+        autoFocus={autoFocus}
+        role="combobox"
+        aria-expanded={showDropdown}
+        aria-autocomplete="list"
+        autoComplete="off"
+      />
+
+      {showDropdown && (
+        <div className="absolute z-[70] left-0 right-0 mt-1 rounded-lg border border-line bg-surface shadow-2xl overflow-hidden">
+          <div className="max-h-64 overflow-y-auto py-1">
+            {q.isFetching && hits.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-ink-muted inline-flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Searching ICD-10-CM…
+              </div>
+            ) : hits.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-ink-muted inline-flex items-center gap-2">
+                <Search className="w-3.5 h-3.5" />
+                No ICD-10-CM codes start with “{trimmed}”.
+              </div>
+            ) : (
+              hits.map((hit, i) => (
+                <button
+                  type="button"
+                  key={hit.code}
+                  // onMouseDown (not onClick) so the pick lands before the
+                  // input's onBlur close-timer fires.
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pick(hit);
+                  }}
+                  onMouseEnter={() => setHighlight(i)}
+                  className={cn(
+                    'w-full text-left px-3 py-1.5 flex items-center gap-2.5 transition',
+                    i === highlight ? 'bg-info-soft/50' : 'hover:bg-surface-2',
+                  )}
+                >
+                  <span className="font-mono text-xs font-semibold text-ink shrink-0 w-16">
+                    {hit.code}
+                  </span>
+                  <span className="text-xs text-ink-muted truncate flex-1 min-w-0">
+                    {hit.description}
+                  </span>
+                  {hit.isBillable ? (
+                    <span
+                      className="shrink-0 text-[9px] uppercase tracking-wide font-semibold text-success bg-success-soft/50 border border-success/30 rounded px-1 py-0.5"
+                      title="Billable / specific code"
+                    >
+                      Billable
+                    </span>
+                  ) : (
+                    <span
+                      className="shrink-0 text-[9px] uppercase tracking-wide font-semibold text-ink-subtle border border-line rounded px-1 py-0.5"
+                      title="Header / non-billable — has more specific children"
+                    >
+                      Header
+                    </span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AddCodeModal({
   onClose,
   onAdd,
@@ -1985,13 +2187,25 @@ function AddCodeModal({
               <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
                 Code <span className="text-danger normal-case">*</span>
               </label>
-              <Input
+              <IcdCodeAutocomplete
                 value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                onChange={setCode}
+                onPick={(picked, desc) => {
+                  setCode(picked);
+                  // Auto-fill the description from the reference data; the
+                  // coder can still edit it before adding.
+                  setDescription(desc);
+                }}
+                // CPT/Procedure codes aren't in the ICD-10-CM reference DB.
+                enabled={category !== 'PROCEDURE'}
                 placeholder={category === 'PROCEDURE' ? 'e.g. 99213' : 'e.g. E11.9'}
-                className="font-mono"
                 autoFocus
               />
+              {category !== 'PROCEDURE' && (
+                <p className="mt-1 text-[10px] text-ink-subtle">
+                  Type {ICD_SUGGEST_MIN_CHARS}+ characters to search ICD-10-CM codes.
+                </p>
+              )}
             </div>
           </div>
 

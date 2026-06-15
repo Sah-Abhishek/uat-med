@@ -14,6 +14,20 @@ export default () => ({
   DB_SSL: process.env.DB_SSL,
   DB_POOL_SIZE: parseInt(process.env.DB_POOL_SIZE, 10) || 10,
 
+  // ICD-10-CM reference DB (read-only) — powers code autocomplete in the
+  // Review & Edit "Add a code" form. The reference data lives in its own
+  // database (icd10cm) on the SAME Postgres instance, so every connection
+  // param defaults to the main DB's value except the database name. Set only
+  // ICD_REF_DB_NAME to switch databases; override the rest only if the
+  // reference DB lives on a different host/user.
+  ICD_REF_DB_HOST: process.env.ICD_REF_DB_HOST || process.env.DB_HOST,
+  ICD_REF_DB_PORT: parseInt(process.env.ICD_REF_DB_PORT || process.env.DB_PORT, 10),
+  ICD_REF_DB_USERNAME: process.env.ICD_REF_DB_USERNAME || process.env.DB_USERNAME,
+  ICD_REF_DB_PASSWORD: process.env.ICD_REF_DB_PASSWORD ?? process.env.DB_PASSWORD,
+  ICD_REF_DB_NAME: process.env.ICD_REF_DB_NAME || 'icd10cm',
+  ICD_REF_DB_SSL: process.env.ICD_REF_DB_SSL || process.env.DB_SSL,
+  ICD_REF_DB_POOL_SIZE: parseInt(process.env.ICD_REF_DB_POOL_SIZE, 10) || 5,
+
   REDIS_URL: process.env.REDIS_URL,
   //REDIS_PASSWORD: process.env.REDIS_PASSWORD,
 

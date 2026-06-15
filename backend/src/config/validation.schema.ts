@@ -21,6 +21,17 @@ export const validationSchema = Joi.object({
   DB_SSL: Joi.string().valid('true', 'false').default('false'),
   DB_POOL_SIZE: Joi.number().default(10),
 
+  // ───── ICD-10-CM reference DB (read-only, code autocomplete) ─────
+  // Lives in its own database on the same Postgres instance; connection params
+  // fall back to the main DB values, so only ICD_REF_DB_NAME is normally set.
+  ICD_REF_DB_HOST: Joi.string().optional(),
+  ICD_REF_DB_PORT: Joi.number().optional(),
+  ICD_REF_DB_USERNAME: Joi.string().optional(),
+  ICD_REF_DB_PASSWORD: Joi.string().allow('').optional(),
+  ICD_REF_DB_NAME: Joi.string().default('icd10cm'),
+  ICD_REF_DB_SSL: Joi.string().valid('true', 'false').optional(),
+  ICD_REF_DB_POOL_SIZE: Joi.number().optional(),
+
   // ───── Redis ─────
   REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).required(),
   //REDIS_PASSWORD: Joi.string().allow('').optional(),

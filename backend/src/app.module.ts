@@ -25,6 +25,7 @@ import { AiGatewayModule } from './modules/ai-gateway/ai-gateway.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { CoderRulesModule } from './modules/coder-rules/coder-rules.module';
+import { IcdCodesModule } from './modules/icd-codes/icd-codes.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { CoderRulesModule } from './modules/coder-rules/coder-rules.module';
     CoderRulesModule,
     AdminModule,
     BillingModule,
+    IcdCodesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
