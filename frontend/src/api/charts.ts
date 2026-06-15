@@ -108,6 +108,22 @@ export interface ActiveTimer {
 
 export const getActiveTimer = () => get<ActiveTimer | null>('/charts/active-timer');
 
+/** One Time Tracker row: a user's total time on a chart in a given capacity.
+ * `totalMs` includes the live elapsed of any still-running session. */
+export interface ChartTimeEntry {
+  userId: number;
+  userName: string | null;
+  role: string | null;
+  kind: 'CODING' | 'AUDIT';
+  totalMs: number;
+  running: boolean;
+  sessions: number;
+  lastActiveAt: string | null;
+}
+
+export const getChartTimeByUser = (chartId: string | number) =>
+  get<{ entries: ChartTimeEntry[] }>(`/charts/${chartId}/time-logs`);
+
 export const transitionChart = (
   id: string,
   dto: { milestone: ChartMilestone; chartStatus: ChartStatus },

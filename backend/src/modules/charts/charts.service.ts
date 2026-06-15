@@ -605,6 +605,50 @@ async update(id: number, dto: UpdateChartDto) {
     };
   }
 
+  /**
+   * Per-user time logged on a chart (coding/audit) for the chart-detail Time
+   * Tracker. Each row's totalMs = sum of completed sessions PLUS the live
+   * elapsed of any still-running session, so a coder's time ticks up as they
+   * work. One row per (user, kind).
+   */
+  async chartTimeByUser(id: number) {
+    const c = await this.charts.findOne({ where: { id } });
+    if (!c) throw new NotFoundException();
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        t.user_id AS "userId",
+        u.full_name AS "userName",
+        u.role AS "role",
+        t.kind AS "kind",
+        COALESCE(SUM(t.elapsed_ms), 0)
+          + COALESCE(SUM(CASE WHEN t.stopped_at IS NULL
+              THEN EXTRACT(EPOCH FROM (now() - t.started_at)) * 1000 ELSE 0 END), 0) AS "totalMs",
+        bool_or(t.stopped_at IS NULL) AS "running",
+        COUNT(*)::int AS "sessions",
+        MAX(COALESCE(t.stopped_at, now())) AS "lastActiveAt"
+      FROM chart_time_logs t
+      LEFT JOIN users u ON u.id = t.user_id
+      WHERE t.chart_id = $1
+      GROUP BY t.user_id, u.full_name, u.role, t.kind
+      ORDER BY "totalMs" DESC
+      `,
+      [id],
+    );
+    return {
+      entries: rows.map((r: any) => ({
+        userId: Number(r.userId),
+        userName: r.userName ?? null,
+        role: r.role ?? null,
+        kind: r.kind,
+        totalMs: Math.round(Number(r.totalMs)),
+        running: r.running === true || r.running === 't',
+        sessions: Number(r.sessions),
+        lastActiveAt: r.lastActiveAt,
+      })),
+    };
+  }
+
   async bulkModify(dto: BulkModifyDto) {
     const updatedCharts = await this.charts.findBy({ id: In(dto.chartIds) });
     if (updatedCharts.length === 0) return { updated: 0 };

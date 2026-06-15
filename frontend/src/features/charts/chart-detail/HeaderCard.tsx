@@ -176,6 +176,8 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
     qc.invalidateQueries({ queryKey: ['chart', chart.id] });
     qc.invalidateQueries({ queryKey: ['charts'] });
     qc.invalidateQueries({ queryKey: ['active-timer'] });
+    // Time Tracker reflects the new/closed session immediately on start/stop.
+    qc.invalidateQueries({ queryKey: ['chart-time', chart.id] });
   }
 
   const startMut = useMutation({

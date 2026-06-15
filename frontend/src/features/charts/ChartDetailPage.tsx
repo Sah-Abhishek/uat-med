@@ -675,7 +675,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         <aside className="space-y-4 lg:sticky lg:top-4">
           <UsersPanel chart={chart} />
           <ConversationLog chart={chart} timerRunning={timerRunning} />
-          <TimeTracker />
+          <TimeTracker chartId={chart.id} />
           <AiIcdPrediction
             prediction={liveAiPrediction}
             hasUploadedDocs={uploadedDocs.length > 0 || !!aiPrediction}

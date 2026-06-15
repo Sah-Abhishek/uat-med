@@ -99,6 +99,12 @@ export class ChartsController {
     return this.svc.detail(id);
   }
 
+  @Get(':id/time-logs')
+  @ApiOperation({ summary: 'Per-user time logged on this chart (coding/audit) for the Time Tracker.' })
+  timeLogs(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.chartTimeByUser(id);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Persist coder / auditor edits (auto-save).' })
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateChartDto) {
