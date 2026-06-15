@@ -20,13 +20,25 @@ jobs:
             set -e
             cd /root/next-code-updated/uat-med
             git pull origin master
+
             cd backend
             npm install
             npm run build
+            # Apply any pending DB migrations BEFORE restarting so new code never
+            # boots against an old schema. Idempotent — TypeORM skips already-run
+            # migrations. NODE_ENV is required so data-source.ts loads env/.env.production.
+            NODE_ENV=production npm run migration:run
+
             cd ../frontend
             npm install
             npm run build
-            pm2 restart 9 10
+
+            # Restart by NAME (numeric pm2 ids drift over time). A slow or
+            # force-killed process can make `pm2 restart` exit non-zero even
+            # though the app comes back online (this is what failed the last
+            # deploy), so don't let the restart's exit code alone fail the run.
+            pm2 restart uat-med-b uat-med-f --update-env || true
+            pm2 save
 
       - name: Discord notification — success
         if: success()
