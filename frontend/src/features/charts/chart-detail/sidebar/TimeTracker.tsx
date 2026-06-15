@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Clock } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
@@ -27,7 +28,13 @@ const KIND_LABEL: Record<ChartTimeEntry['kind'], string> = {
   AUDIT: 'Audit',
 };
 
+const PAGE_SIZE = 5;
+
 export function TimeTracker({ chartId }: { chartId: string }) {
+  // How many of the (newest-first) sessions are shown. "Show more" reveals
+  // another PAGE_SIZE; the button hides once everything is visible.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
   const q = useQuery({
     queryKey: ['chart-time', chartId],
     queryFn: () => getChartTimeByUser(chartId),
@@ -39,6 +46,8 @@ export function TimeTracker({ chartId }: { chartId: string }) {
 
   const entries = q.data?.entries ?? [];
   const totalMs = entries.reduce((sum, e) => sum + e.elapsedMs, 0);
+  const visibleEntries = entries.slice(0, visibleCount);
+  const remaining = entries.length - visibleEntries.length;
 
   return (
     <Card padding="default">
@@ -69,7 +78,7 @@ export function TimeTracker({ chartId }: { chartId: string }) {
         </div>
       ) : (
         <ul className="space-y-2">
-          {entries.map((e) => (
+          {visibleEntries.map((e) => (
             <li key={e.id} className="flex items-center gap-2.5">
               <Avatar name={e.userName ?? 'Unknown'} size="sm" />
               <div className="min-w-0 flex-1">
@@ -99,6 +108,17 @@ export function TimeTracker({ chartId }: { chartId: string }) {
               </span>
             </li>
           ))}
+          {remaining > 0 && (
+            <li>
+              <button
+                type="button"
+                onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                className="w-full text-[11px] font-semibold text-info hover:underline py-1"
+              >
+                Show more ({remaining} more)
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </Card>
