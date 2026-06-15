@@ -100,9 +100,9 @@ export class ChartsController {
   }
 
   @Get(':id/time-logs')
-  @ApiOperation({ summary: 'Per-user time logged on this chart (coding/audit) for the Time Tracker.' })
+  @ApiOperation({ summary: 'Per-session time logged on this chart (one row per start→stop) for the Time Tracker.' })
   timeLogs(@Param('id', ParseIntPipe) id: number) {
-    return this.svc.chartTimeByUser(id);
+    return this.svc.chartTimeSessions(id);
   }
 
   @Patch(':id')
