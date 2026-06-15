@@ -366,8 +366,8 @@ export interface ChartFeedback {
   feedbackTypeName: string;
   feedbackStatus: FeedbackStatus;
   comments: string | null;
-  createdByUserId: string;
-  createdByUserName: string;
+  createdByUserId: string | null;
+  createdByUserName: string | null;
   createdAt: string;
   updatedAt: string;
 }

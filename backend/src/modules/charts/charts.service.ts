@@ -776,7 +776,19 @@ async update(id: number, dto: UpdateChartDto) {
   }
 
   async listFeedback(chartId: number) {
-    return this.feedbacks.find({ where: { chartId }, order: { createdAt: 'DESC' } });
+    // Resolve the author (auditor) relation so the Conversation Log can show
+    // who wrote each comment — the raw entity only carries auditor_id, which
+    // the frontend reads as createdByUserId/createdByUserName.
+    const rows = await this.feedbacks.find({
+      where: { chartId },
+      relations: { auditor: true },
+      order: { createdAt: 'DESC' },
+    });
+    return rows.map(({ auditor, ...rest }) => ({
+      ...rest,
+      createdByUserId: rest.auditorId != null ? String(rest.auditorId) : null,
+      createdByUserName: auditor?.fullName ?? null,
+    }));
   }
 
   async addFeedback(chartId: number, dto: ChartFeedbackDto, auditorId: number) {

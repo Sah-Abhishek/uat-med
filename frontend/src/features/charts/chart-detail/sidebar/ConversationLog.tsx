@@ -15,14 +15,22 @@ interface Props {
   timerRunning: boolean;
 }
 
+const PAGE_SIZE = 5;
+
 export function ConversationLog({ chart, timerRunning }: Props) {
   const qc = useQueryClient();
   const [text, setText] = useState('');
+  // How many of the (newest-first) comments are shown. "Show more" reveals
+  // another PAGE_SIZE; the button hides once everything is visible.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const { data: messages = [] } = useQuery({
     queryKey: ['chart', chart.id, 'feedback'],
     queryFn: () => listChartFeedback(chart.id),
   });
+
+  const visible = messages.slice(0, visibleCount);
+  const remaining = messages.length - visible.length;
 
   const post = useMutation({
     mutationFn: () =>
@@ -59,22 +67,33 @@ export function ConversationLog({ chart, timerRunning }: Props) {
         {messages.length === 0 ? (
           <p className="text-[11px] text-ink-subtle">No comments yet.</p>
         ) : (
-          messages.map((m) => (
-            <div key={m.id} className="flex items-start gap-2">
-              <Avatar name={m.createdByUserName} size="sm" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-[12px] font-semibold text-ink truncate">
-                    {m.createdByUserName}
-                  </span>
-                  <span className="text-[10px] text-ink-subtle">
-                    {formatDateTime(m.createdAt)}
-                  </span>
+          <>
+            {visible.map((m) => (
+              <div key={m.id} className="flex items-start gap-2">
+                <Avatar name={m.createdByUserName ?? 'Unknown'} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[12px] font-semibold text-ink truncate">
+                      {m.createdByUserName ?? 'Unknown'}
+                    </span>
+                    <span className="text-[10px] text-ink-subtle">
+                      {formatDateTime(m.createdAt)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-ink-muted mt-0.5 break-words">{m.comments}</p>
                 </div>
-                <p className="text-xs text-ink-muted mt-0.5 break-words">{m.comments}</p>
               </div>
-            </div>
-          ))
+            ))}
+            {remaining > 0 && (
+              <button
+                type="button"
+                onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                className="w-full text-[11px] font-semibold text-info hover:underline py-1"
+              >
+                Show more ({remaining} more)
+              </button>
+            )}
+          </>
         )}
       </div>
 
