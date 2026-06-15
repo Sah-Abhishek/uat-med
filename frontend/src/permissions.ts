@@ -23,6 +23,7 @@ export const PERMISSIONS = {
   'qa.view': ['TEAMLEAD', 'MANAGER'],
   'coderRules.manage': ['TEAMLEAD', 'MANAGER'],
   'admin.codeDecisions.view': ['TEAMLEAD', 'MANAGER'],
+  'admin.activeWork.view': ['TEAMLEAD', 'MANAGER'],
   'billing.view': ['TEAMLEAD', 'MANAGER'],
   'billing.configure': ['TEAMLEAD', 'MANAGER'],
 } as const satisfies Record<string, readonly Role[]>;

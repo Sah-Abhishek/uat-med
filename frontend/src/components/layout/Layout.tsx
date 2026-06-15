@@ -20,6 +20,7 @@ import {
   Sparkles,
   Gauge,
   Receipt,
+  Activity,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -43,6 +44,7 @@ const NAV: NavItem[] = [
   { to: '/qa', label: 'Quality Assurance', icon: ClipboardCheck, requires: 'qa.view' },
   { to: '/ai-analytics', label: 'AI Analytics', icon: Sparkles, requires: 'qa.view' },
   { to: '/productivity', label: 'Productivity', icon: Gauge, requires: 'dashboard.team' },
+  { to: '/admin/active-work', label: 'Live Activity', icon: Activity, requires: 'admin.activeWork.view' },
   { to: '/coder-rules', label: 'Coder Rules', icon: BookOpenCheck, requires: 'coderRules.manage' },
   { to: '/billing', label: 'Billing', icon: Receipt, requires: 'billing.view' },
   { to: '/admin/code-decisions', label: 'Code Decisions', icon: ShieldCheck, requires: 'admin.codeDecisions.view' },

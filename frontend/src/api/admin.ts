@@ -155,3 +155,34 @@ export interface AdminChartDetail {
 
 export const getChartDecisionsDetail = (chartId: number | string) =>
   get<AdminChartDetail>(`/admin/code-decisions/charts/${chartId}`);
+
+/* ── Active work (Live Activity) ─────────────────────────── */
+
+/** One chart being worked on right now = a running timer session. */
+export interface ActiveWorkItem {
+  sessionId: number;
+  userId: number;
+  userName: string | null;
+  userRole: Role | null;
+  chartId: number;
+  chartNo: string | null;
+  serialNo: number | null;
+  milestone: string | null;
+  worklistId: number | null;
+  worklistNumber: string | null;
+  clientName: string | null;
+  locationName: string | null;
+  kind: 'CODING' | 'AUDIT';
+  startedAt: string;
+  /** Live elapsed since the timer started (ms). */
+  elapsedMs: number;
+}
+
+export interface ActiveWorkResponse {
+  items: ActiveWorkItem[];
+  total: number;
+  distinctUsers: number;
+  distinctCharts: number;
+}
+
+export const getActiveWork = () => get<ActiveWorkResponse>('/admin/active-work');
