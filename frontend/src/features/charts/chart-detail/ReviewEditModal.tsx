@@ -1915,6 +1915,7 @@ function IcdCodeAutocomplete({
   value,
   onChange,
   onPick,
+  onExactMatch,
   enabled,
   placeholder,
   autoFocus,
@@ -1922,6 +1923,10 @@ function IcdCodeAutocomplete({
   value: string;
   onChange: (next: string) => void;
   onPick: (code: string, description: string) => void;
+  /** Fired whenever the fully-typed value exactly matches a reference code —
+   * even without opening the dropdown — so the form can auto-fill the
+   * description. */
+  onExactMatch?: (code: string, description: string) => void;
   enabled: boolean;
   placeholder?: string;
   autoFocus?: boolean;
@@ -1944,12 +1949,30 @@ function IcdCodeAutocomplete({
   const q = useQuery({
     queryKey: ['icd-code-search', debounced],
     queryFn: () => searchIcdCodes(debounced, 10),
-    enabled: open && enabled && debounced.length >= ICD_SUGGEST_MIN_CHARS,
+    // Not gated on `open`: the lookup must also run when the dropdown is
+    // closed so a fully-typed code can still auto-fill its description.
+    enabled: enabled && debounced.length >= ICD_SUGGEST_MIN_CHARS,
     staleTime: 5 * 60_000,
     placeholderData: (prev) => prev, // keep prior hits visible while the next loads
   });
   const hits: IcdCodeHit[] = q.data?.codes ?? [];
   const showDropdown = open && canSuggest;
+
+  // Auto-fill the description when the typed value is an exact code (matched
+  // with or without the decimal point). The exact code always sorts first in
+  // the prefix results, so it's reliably present here.
+  useEffect(() => {
+    if (!onExactMatch || !enabled) return;
+    const typed = trimmed.toUpperCase();
+    if (typed.length < ICD_SUGGEST_MIN_CHARS) return;
+    const typedDotless = typed.replace(/\./g, '');
+    const exact = hits.find(
+      (h) =>
+        h.code.toUpperCase() === typed ||
+        h.code.replace(/\./g, '').toUpperCase() === typedDotless,
+    );
+    if (exact) onExactMatch(exact.code, exact.description);
+  }, [hits, trimmed, enabled, onExactMatch]);
 
   // Close when focus/click leaves the widget.
   useEffect(() => {
@@ -2110,6 +2133,26 @@ function AddCodeModal({
   const [category, setCategory] = useState<AddCodeCategory>('PRIMARY');
   const [reason, setReason] = useState('');
 
+  // Tracks whether the description currently shown was machine-filled (from a
+  // picked suggestion or an exact-code match) rather than typed by the coder.
+  // Once the coder edits it by hand, auto-fill backs off so it never clobbers
+  // their wording. descRef mirrors the latest value for the stable callback.
+  const descAutoFilledRef = useRef(true);
+  const descRef = useRef(description);
+  useEffect(() => {
+    descRef.current = description;
+  }, [description]);
+
+  // Stable identity (empty deps) so the autocomplete's exact-match effect
+  // isn't re-subscribed every render. Signature matches onExactMatch.
+  const applyAutoDescription = useCallback((_code: string, desc: string) => {
+    if (!desc) return;
+    if (descRef.current.trim() === '' || descAutoFilledRef.current) {
+      setDescription(desc);
+      descAutoFilledRef.current = true;
+    }
+  }, []);
+
   // Esc to close.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2195,7 +2238,11 @@ function AddCodeModal({
                   // Auto-fill the description from the reference data; the
                   // coder can still edit it before adding.
                   setDescription(desc);
+                  descAutoFilledRef.current = true;
                 }}
+                // Auto-fill the description as soon as a full, valid code is
+                // typed — not only when picked from the dropdown.
+                onExactMatch={applyAutoDescription}
                 // CPT/Procedure codes aren't in the ICD-10-CM reference DB.
                 enabled={category !== 'PROCEDURE'}
                 placeholder={category === 'PROCEDURE' ? 'e.g. 99213' : 'e.g. E11.9'}
@@ -2203,7 +2250,8 @@ function AddCodeModal({
               />
               {category !== 'PROCEDURE' && (
                 <p className="mt-1 text-[10px] text-ink-subtle">
-                  Type {ICD_SUGGEST_MIN_CHARS}+ characters to search ICD-10-CM codes.
+                  Type {ICD_SUGGEST_MIN_CHARS}+ characters to search ICD-10-CM codes — the
+                  description fills in automatically.
                 </p>
               )}
             </div>
@@ -2215,7 +2263,11 @@ function AddCodeModal({
             </label>
             <Input
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                // The coder is writing their own wording — stop auto-filling.
+                descAutoFilledRef.current = false;
+              }}
               placeholder="Type 2 diabetes mellitus without complications"
             />
           </div>
