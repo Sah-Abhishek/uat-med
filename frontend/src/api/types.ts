@@ -82,12 +82,14 @@ export interface Worklist {
   clientId: number;
   locationId: number;
   primarySpecialityId: number;
+  subSpecialityId: number | null;
   processId: number;
   // Resolved display names from the joined config hierarchy (list endpoint).
   // Null when the related row is missing; fall back to the id for display.
   clientName: string | null;
   locationName: string | null;
   specialityName: string | null;
+  subSpecialityName: string | null;
   processName: string | null;
   status: WorklistStatus;
   receivedDate: string;
@@ -105,6 +107,7 @@ export interface WorklistDetail extends Worklist {
   client: { id: number; name: string } | null;
   location: { id: number; name: string } | null;
   primarySpeciality: { id: number; name: string } | null;
+  subSpeciality: { id: number; name: string } | null;
   process: { id: number; name: string } | null;
   netChange: number;
   /** Total documents uploaded across this worklist's charts. */

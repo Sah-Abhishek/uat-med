@@ -10,6 +10,8 @@ export class CreateWorklistDto {
   @ApiProperty() @Type(() => Number) @IsInt() clientId: number;
   @ApiProperty() @Type(() => Number) @IsInt() locationId: number;
   @ApiProperty() @Type(() => Number) @IsInt() primarySpecialityId: number;
+  @ApiProperty({ description: 'Location-scoped sub-speciality. Mandatory for new worklists.' })
+  @Type(() => Number) @IsInt() subSpecialityId: number;
   @ApiProperty() @Type(() => Number) @IsInt() processId: number;
 
   @ApiPropertyOptional({ example: '2023-09-25' })

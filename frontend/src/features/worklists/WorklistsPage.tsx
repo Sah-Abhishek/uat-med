@@ -22,6 +22,7 @@ import {
   listClients,
   listLocations,
   listPrimarySpecialities,
+  listSubSpecialities,
   listProcessesByLocation,
 } from '@/api/configurations';
 import { Modal, ModalFooter, Pagination, Avatar, DualProgressBar } from '@/components/ui/Primitives';
@@ -131,6 +132,7 @@ export function WorklistsPage() {
     locationId: (w) => w.locationName ?? '',
     processId: (w) => w.processName ?? '',
     primarySpecialityId: (w) => w.specialityName ?? '',
+    subSpecialityId: (w) => w.subSpecialityName ?? '',
     dateOfService: (w) => w.dateOfService,
     receivedDate: (w) => w.receivedDate,
     status: (w) => w.status,
@@ -208,6 +210,7 @@ export function WorklistsPage() {
                 <SortableHeader column="locationId" sort={sort} onSort={onSort}>Location</SortableHeader>
                 <SortableHeader column="processId" sort={sort} onSort={onSort}>Process</SortableHeader>
                 <SortableHeader column="primarySpecialityId" sort={sort} onSort={onSort}>Specialty</SortableHeader>
+                <SortableHeader column="subSpecialityId" sort={sort} onSort={onSort}>Sub-specialty</SortableHeader>
                 <SortableHeader>Allocation %</SortableHeader>
                 <SortableHeader>Progress %</SortableHeader>
                 <SortableHeader>Changed by</SortableHeader>
@@ -219,13 +222,13 @@ export function WorklistsPage() {
             <tbody>
               {list.isPending ? (
                 <tr>
-                  <td colSpan={11} className="py-16 text-center text-ink-muted">
+                  <td colSpan={12} className="py-16 text-center text-ink-muted">
                     <Loader2 className="w-5 h-5 animate-spin inline" />
                   </td>
                 </tr>
               ) : sortedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-20 text-center">
+                  <td colSpan={12} className="py-20 text-center">
                     <p className="text-sm text-ink-muted">No worklists yet.</p>
                   </td>
                 </tr>
@@ -264,6 +267,7 @@ export function WorklistsPage() {
                       <td className="table-cell text-ink">{wl.locationName ?? `#${wl.locationId}`}</td>
                       <td className="table-cell text-ink-muted">{wl.processName ?? `#${wl.processId}`}</td>
                       <td className="table-cell text-ink-muted">{wl.specialityName ?? `#${wl.primarySpecialityId}`}</td>
+                      <td className="table-cell text-ink-muted">{wl.subSpecialityName ?? '—'}</td>
                       <td className="table-cell">
                         <DualProgressBar percent={allocPct} />
                       </td>
@@ -484,6 +488,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
   const clientId = watch('clientId');
   const locationId = watch('locationId');
   const primarySpecialityId = watch('primarySpecialityId');
+  const subSpecialityId = watch('subSpecialityId');
   const processId = watch('processId');
 
   const clients = useQuery({
@@ -500,6 +505,11 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
     queryKey: ['configurations', 'primary-specialities', clientId],
     queryFn: () => listPrimarySpecialities(Number(clientId)),
     enabled: open && !!clientId,
+  });
+  const subSpecialities = useQuery({
+    queryKey: ['configurations', 'sub-specialities', locationId],
+    queryFn: () => listSubSpecialities(Number(locationId)),
+    enabled: open && !!locationId,
   });
   const processes = useQuery({
     queryKey: ['configurations', 'processes', locationId],
@@ -571,6 +581,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
                 clientId: Number(d.clientId),
                 locationId: Number(d.locationId),
                 primarySpecialityId: Number(d.primarySpecialityId),
+                subSpecialityId: Number(d.subSpecialityId),
                 processId: Number(d.processId),
                 receivedDate: d.receivedDate,
                 dateOfService: d.dateOfService || undefined,
@@ -585,6 +596,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
             clientId: Number(d.clientId),
             locationId: Number(d.locationId),
             primarySpecialityId: Number(d.primarySpecialityId),
+            subSpecialityId: Number(d.subSpecialityId),
             processId: Number(d.processId),
             numberOfCharts: Number(d.numberOfCharts),
           });
@@ -627,6 +639,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
         <input type="hidden" {...register('clientId', { required: 'Required', valueAsNumber: true })} />
         <input type="hidden" {...register('locationId', { required: 'Required', valueAsNumber: true })} />
         <input type="hidden" {...register('primarySpecialityId', { required: 'Required', valueAsNumber: true })} />
+        <input type="hidden" {...register('subSpecialityId', { required: 'Required', valueAsNumber: true })} />
         <input type="hidden" {...register('processId', { required: 'Required', valueAsNumber: true })} />
 
         <div className="grid grid-cols-2 gap-4">
@@ -640,6 +653,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
                 setValue('clientId', Number(v), { shouldValidate: true });
                 setValue('locationId', undefined as unknown as number);
                 setValue('primarySpecialityId', undefined as unknown as number);
+                setValue('subSpecialityId', undefined as unknown as number);
                 setValue('processId', undefined as unknown as number);
               }}
             />
@@ -662,6 +676,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
               options={(locations.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name }))}
               onChange={(v) => {
                 setValue('locationId', Number(v), { shouldValidate: true });
+                setValue('subSpecialityId', undefined as unknown as number);
                 setValue('processId', undefined as unknown as number);
               }}
             />
@@ -692,6 +707,30 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
             )}
           </div>
           <div>
+            <Label required>Sub Speciality</Label>
+            <FancySelect
+              value={subSpecialityId ? String(subSpecialityId) : ''}
+              disabled={!locationId || (!subSpecialities.isPending && (subSpecialities.data?.items.length ?? 0) === 0)}
+              placeholder={
+                !locationId
+                  ? 'Pick location first'
+                  : subSpecialities.isPending
+                  ? 'Loading…'
+                  : (subSpecialities.data?.items.length ?? 0) === 0
+                  ? 'No sub-specialities for this location'
+                  : 'Select sub-speciality'
+              }
+              options={(subSpecialities.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name }))}
+              onChange={(v) => setValue('subSpecialityId', Number(v), { shouldValidate: true })}
+            />
+            {errors.subSpecialityId && (
+              <p className="mt-1 text-xs text-danger">{errors.subSpecialityId.message}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
             <Label required>Process</Label>
             <FancySelect
               value={processId ? String(processId) : ''}
@@ -710,6 +749,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
             />
             {errors.processId && <p className="mt-1 text-xs text-danger">{errors.processId.message}</p>}
           </div>
+          <div aria-hidden="true" />
         </div>
 
         {mode === 'manual' ? (

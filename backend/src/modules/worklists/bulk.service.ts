@@ -730,6 +730,7 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
         clientId: dto.clientId,
         locationId: dto.locationId,
         primarySpecialityId: dto.primarySpecialityId,
+        subSpecialityId: dto.subSpecialityId,
         processId: dto.processId,
         dateOfService: dto.dateOfService,
         dateOfServiceTo: dto.dateOfServiceTo,

@@ -28,6 +28,7 @@ export class WorklistsService {
       .leftJoinAndSelect('w.client', 'client')
       .leftJoinAndSelect('w.location', 'location')
       .leftJoinAndSelect('w.primarySpeciality', 'primarySpeciality')
+      .leftJoinAndSelect('w.subSpeciality', 'subSpeciality')
       .leftJoinAndSelect('w.process', 'process');
     if (q.status) qb.andWhere('w.status = :s', { s: q.status });
     if (q.clientId) qb.andWhere('w.client_id = :c', { c: q.clientId });
@@ -75,12 +76,13 @@ export class WorklistsService {
       const total = Math.max(declared, c.rowCount);
       // Strip the joined relation objects and surface flat *Name fields
       // alongside the existing ids (same shape convention as the charts list).
-      const { client, location, primarySpeciality, process, ...rest } = w;
+      const { client, location, primarySpeciality, subSpeciality, process, ...rest } = w;
       return {
         ...rest,
         clientName: client?.name ?? null,
         locationName: location?.name ?? null,
         specialityName: primarySpeciality?.name ?? null,
+        subSpecialityName: subSpeciality?.name ?? null,
         processName: process?.name ?? null,
         totalCharts: total,
         allocatedCharts: c.allocated,
@@ -120,6 +122,7 @@ export class WorklistsService {
         clientId: dto.clientId,
         locationId: dto.locationId,
         primarySpecialityId: dto.primarySpecialityId,
+        subSpecialityId: dto.subSpecialityId,
         processId: dto.processId,
         dateOfService: dto.dateOfService,
         dateOfServiceTo: dto.dateOfServiceTo,
@@ -154,7 +157,7 @@ export class WorklistsService {
   async detail(id: number) {
     const w = await this.worklists.findOne({
       where: { id },
-      relations: ['client', 'location', 'primarySpeciality', 'process'],
+      relations: ['client', 'location', 'primarySpeciality', 'subSpeciality', 'process'],
     });
     if (!w) throw new NotFoundException();
     const counts = await this.charts.createQueryBuilder('c')
@@ -209,12 +212,16 @@ export class WorklistsService {
       clientId: Number(w.clientId),
       locationId: Number(w.locationId),
       primarySpecialityId: Number(w.primarySpecialityId),
+      subSpecialityId: w.subSpecialityId != null ? Number(w.subSpecialityId) : null,
       processId: Number(w.processId),
       // Nested name objects (used by detail card)
       client: w.client ? { id: Number(w.client.id), name: w.client.name } : null,
       location: w.location ? { id: Number(w.location.id), name: w.location.name } : null,
       primarySpeciality: w.primarySpeciality
         ? { id: Number(w.primarySpeciality.id), name: w.primarySpeciality.name }
+        : null,
+      subSpeciality: w.subSpeciality
+        ? { id: Number(w.subSpeciality.id), name: w.subSpeciality.name }
         : null,
       process: w.process ? { id: Number(w.process.id), name: w.process.name } : null,
       dateOfService: w.dateOfService,

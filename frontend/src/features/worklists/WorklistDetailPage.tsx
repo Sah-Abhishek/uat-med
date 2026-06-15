@@ -21,7 +21,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Label, FancySelect, DatePicker, RangeDatePicker } from '@/components/ui/Field';
-import { listPrimarySpecialities } from '@/api/configurations';
+import { listPrimarySpecialities, listSubSpecialities } from '@/api/configurations';
 import { Modal, ModalFooter, Tabs, PillBadge, Avatar, ConfirmModal, Toast } from '@/components/ui/Primitives';
 import { WorklistStatusChip, MilestoneChip } from '@/components/ui/Chip';
 import { cn, formatDate, formatNumber } from '@/lib/utils';
@@ -126,6 +126,11 @@ export function WorklistDetailPage() {
               icon={Stethoscope}
               label="Speciality"
               value={data.primarySpeciality?.name ?? `#${data.primarySpecialityId}`}
+            />
+            <MetaRow
+              icon={Stethoscope}
+              label="Sub-speciality"
+              value={data.subSpeciality?.name ?? (data.subSpecialityId != null ? `#${data.subSpecialityId}` : '—')}
             />
             <MetaRow
               icon={Cog}
@@ -1000,6 +1005,7 @@ function EditWorklistModal({
     defaultValues: {
       worklistNumber: current.worklistNumber,
       primarySpecialityId: current.primarySpecialityId,
+      subSpecialityId: current.subSpecialityId ?? undefined,
       receivedDate: current.receivedDate,
       dateOfService: current.dateOfService ?? undefined,
       dateOfServiceTo: current.dateOfServiceTo ?? undefined,
@@ -1012,6 +1018,13 @@ function EditWorklistModal({
   const specialitiesQ = useQuery({
     queryKey: ['configurations', 'primary-specialities', current.clientId],
     queryFn: () => listPrimarySpecialities(current.clientId),
+    enabled: open,
+  });
+  // Sub-specialities are scoped per-location; re-pick within the worklist's
+  // existing location (location, like client, is read-only here).
+  const subSpecialitiesQ = useQuery({
+    queryKey: ['configurations', 'sub-specialities', current.locationId],
+    queryFn: () => listSubSpecialities(current.locationId),
     enabled: open,
   });
 
@@ -1040,6 +1053,7 @@ function EditWorklistModal({
           mutation.mutate({
             worklistNumber: typeof d.worklistNumber === 'string' ? d.worklistNumber.trim() : d.worklistNumber,
             primarySpecialityId: d.primarySpecialityId ? Number(d.primarySpecialityId) : undefined,
+            subSpecialityId: d.subSpecialityId ? Number(d.subSpecialityId) : undefined,
             receivedDate: d.receivedDate,
             dateOfService: d.dateOfService || undefined,
             dateOfServiceTo: d.dateOfServiceTo || undefined,
@@ -1111,6 +1125,34 @@ function EditWorklistModal({
             )}
           </div>
           <div>
+            <Label required>Sub Speciality</Label>
+            <input
+              type="hidden"
+              {...register('subSpecialityId', { required: 'Required', valueAsNumber: true })}
+            />
+            <FancySelect
+              value={watch('subSpecialityId') ? String(watch('subSpecialityId')) : ''}
+              placeholder={
+                subSpecialitiesQ.isPending
+                  ? 'Loading…'
+                  : (subSpecialitiesQ.data?.items.length ?? 0) === 0
+                  ? 'No sub-specialities for this location'
+                  : 'Select sub-speciality'
+              }
+              options={(subSpecialitiesQ.data?.items ?? []).map((s) => ({
+                value: String(s.id),
+                label: s.name,
+              }))}
+              onChange={(v) => setValue('subSpecialityId', Number(v), { shouldValidate: true })}
+            />
+            {errors.subSpecialityId && (
+              <p className="mt-1 text-xs text-danger">{errors.subSpecialityId.message}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
             <Label>Date of Service</Label>
             <input type="hidden" {...register('dateOfService')} />
             <input type="hidden" {...register('dateOfServiceTo')} />
@@ -1126,6 +1168,7 @@ function EditWorklistModal({
               placeholder="Optional — pick a service-date range"
             />
           </div>
+          <div aria-hidden="true" />
         </div>
 
         <ModalFooter>

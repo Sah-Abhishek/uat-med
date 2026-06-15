@@ -39,6 +39,15 @@ export class ConfigurationsController {
     return this.svc.listPrimarySpecialities(q.clientId ? Number(q.clientId) : undefined);
   }
 
+  @Get('sub-specialities')
+  @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER)
+  listSubSpecialities(@Query() q: { locationId?: string }) {
+    if (!q.locationId) {
+      return { items: [] };
+    }
+    return this.svc.listSubSpecialitiesByLocation(Number(q.locationId));
+  }
+
   @Get('processes')
   @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER)
   listProcesses(@Query() q: { locationId?: string }) {

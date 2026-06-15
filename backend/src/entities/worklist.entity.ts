@@ -3,6 +3,7 @@ import { WorklistStatus } from '../common/enums';
 import { Client } from './client.entity';
 import { Location } from './location.entity';
 import { PrimarySpeciality } from './primary-speciality.entity';
+import { SubSpeciality } from './sub-speciality.entity';
 import { Process } from './process.entity';
 import { Chart } from './chart.entity';
 
@@ -24,6 +25,13 @@ export class Worklist {
   @Column({ name: 'primary_speciality_id', type: 'bigint' }) primarySpecialityId: number;
   @ManyToOne(() => PrimarySpeciality) @JoinColumn({ name: 'primary_speciality_id' })
   primarySpeciality: PrimarySpeciality;
+
+  // Nullable so worklists created before sub-speciality existed stay valid; the
+  // create DTO makes it mandatory for every new worklist. Sub-specialities are
+  // location-scoped (see SubSpeciality), so this pairs with location_id.
+  @Column({ name: 'sub_speciality_id', type: 'bigint', nullable: true }) subSpecialityId?: number;
+  @ManyToOne(() => SubSpeciality) @JoinColumn({ name: 'sub_speciality_id' })
+  subSpeciality?: SubSpeciality;
 
   @Column({ name: 'process_id', type: 'bigint' }) processId: number;
   @ManyToOne(() => Process) @JoinColumn({ name: 'process_id' }) process: Process;

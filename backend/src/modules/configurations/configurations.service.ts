@@ -31,6 +31,34 @@ const BUILTIN_AUDIT_AREAS = [
   'DRG Value',
 ];
 
+/**
+ * Standard sub-speciality catalogue seeded onto every location. Backfilled onto
+ * existing locations by migration 1715001000000; this list keeps newly-created
+ * locations in sync so every client + location pair carries the same set.
+ * Keep in step with that migration's SEED array.
+ */
+const DEFAULT_SUB_SPECIALITIES = [
+  'ED Facility',
+  'ED Profee',
+  'EM - OP',
+  'EM-IP',
+  'Ob-gyn',
+  'New born',
+  'SDS',
+  'General Surgery',
+  'WHC Profee / facility',
+  'ASC',
+  'Ancillary',
+  'IP-DRG',
+  'HCC',
+  'PT/OT',
+  'Surgical Pathology',
+  'Macular Pathology',
+  'Radiology',
+  'IVR',
+  'Denial/ Edits',
+];
+
 export interface NamedRow { id?: number; name: string; isActive?: boolean }
 export interface SpecialitiesGeneralBody {
   primarySpecialities?: NamedRow[];
@@ -236,6 +264,21 @@ export class ConfigurationsService {
       isActive: body.isActive ?? true,
     });
     const saved = await this.locationsRepo.save(loc);
+
+    // Seed the standard sub-speciality catalogue for the new location so every
+    // client + location pair carries the same set (matches the one-off backfill
+    // migration for existing locations). Best-effort: never block location
+    // creation if a row collides or the insert hiccups.
+    try {
+      await this.subSpecsRepo.save(
+        DEFAULT_SUB_SPECIALITIES.map((name) =>
+          this.subSpecsRepo.create({ locationId: Number(saved.id), name, isActive: true }),
+        ),
+      );
+    } catch {
+      /* sub-specialities are non-critical to location creation; ignore */
+    }
+
     return { id: saved.id };
   }
 
@@ -289,6 +332,17 @@ export class ConfigurationsService {
     const rows = await this.primarySpecsRepo.find({ where, order: { id: 'ASC' } });
     return {
       items: rows.map((r) => ({ id: Number(r.id), clientId: Number(r.clientId), name: r.name })),
+    };
+  }
+
+  /** Lightweight: active sub-specialities for one location (worklist dropdown). */
+  async listSubSpecialitiesByLocation(locationId: number) {
+    const rows = await this.subSpecsRepo.find({
+      where: { locationId, isActive: true },
+      order: { id: 'ASC' },
+    });
+    return {
+      items: rows.map((r) => ({ id: Number(r.id), locationId: Number(r.locationId), name: r.name })),
     };
   }
 

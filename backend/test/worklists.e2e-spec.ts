@@ -66,7 +66,7 @@ describe('Worklists (e2e)', () => {
   it('TC-WL-006: POST /worklists as MANAGER returns 201', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/worklists').set(bearer(asManager(moduleRef)))
-      .send({ worklistNumber: '19309A', clientId: 7, locationId: 12, primarySpecialityId: 3, processId: 1, receivedDate: '2023-09-27' });
+      .send({ worklistNumber: '19309A', clientId: 7, locationId: 12, primarySpecialityId: 3, subSpecialityId: 5, processId: 1, receivedDate: '2023-09-27' });
     expect(res.status).toBe(201);
     expect(res.body.id).toBe(101);
   });
@@ -74,7 +74,7 @@ describe('Worklists (e2e)', () => {
   it('TC-WL-007: POST /worklists as CODER returns 403', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/worklists').set(bearer(asCoder(moduleRef)))
-      .send({ worklistNumber: '19309B', clientId: 7, locationId: 12, primarySpecialityId: 3, processId: 1, receivedDate: '2023-09-27' });
+      .send({ worklistNumber: '19309B', clientId: 7, locationId: 12, primarySpecialityId: 3, subSpecialityId: 5, processId: 1, receivedDate: '2023-09-27' });
     expect(res.status).toBe(403);
   });
 
@@ -87,7 +87,7 @@ describe('Worklists (e2e)', () => {
   it('TC-WL-009: POST /worklists with invalid date format returns 422', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/worklists').set(bearer(asManager(moduleRef)))
-      .send({ worklistNumber: '19309A', clientId: 7, locationId: 12, primarySpecialityId: 3, processId: 1, receivedDate: 'not-a-date' });
+      .send({ worklistNumber: '19309A', clientId: 7, locationId: 12, primarySpecialityId: 3, subSpecialityId: 5, processId: 1, receivedDate: 'not-a-date' });
     expect([400, 422]).toContain(res.status);
   });
 

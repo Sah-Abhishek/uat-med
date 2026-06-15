@@ -38,6 +38,7 @@ export interface CreateWorklistDto {
   clientId: number;
   locationId: number;
   primarySpecialityId: number;
+  subSpecialityId: number;
   processId: number;
   receivedDate: string;
   dateOfService?: string;

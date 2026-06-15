@@ -88,6 +88,7 @@ export class WorklistsController {
         clientId: { type: 'integer' },
         locationId: { type: 'integer' },
         primarySpecialityId: { type: 'integer' },
+        subSpecialityId: { type: 'integer' },
         processId: { type: 'integer' },
         receivedDate: { type: 'string', format: 'date' },
         dateOfService: { type: 'string', format: 'date' },

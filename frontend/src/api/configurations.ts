@@ -136,6 +136,15 @@ export const listPrimarySpecialities = (clientId?: number) =>
     clientId ? { clientId } : {},
   );
 
+export interface SubSpecialityRecord {
+  id: number;
+  locationId: number;
+  name: string;
+}
+/** Active sub-specialities for a location (location-scoped, like processes). */
+export const listSubSpecialities = (locationId: number) =>
+  get<{ items: SubSpecialityRecord[] }>('/configurations/sub-specialities', { locationId });
+
 export interface ProcessRecord {
   id: number;
   locationId: number;
