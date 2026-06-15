@@ -1,6 +1,17 @@
+import { Clock } from 'lucide-react';
 import type { AiEncounterResult, AiPredictedCode } from '@/api/types';
 import { cn } from '@/lib/utils';
 import { PriorityBadge } from './shared';
+
+/** Human-readable duration for AI processing time. */
+function fmtProcessing(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  const m = Math.floor(s / 60);
+  const rs = Math.round(s % 60);
+  return rs ? `${m}m ${rs}s` : `${m}m`;
+}
 
 /**
  * Single source of truth for the "AI Summary" panel. Used inside ReviewEditModal
@@ -47,6 +58,22 @@ export function AiSummaryPanel({
 
   return (
     <div className="p-6 space-y-6 text-sm">
+      {(prediction.processingMs != null || prediction.generatedAt) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-muted -mt-1">
+          {prediction.processingMs != null && (
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="w-3 h-3" />
+              AI processed documents in{' '}
+              <span className="font-semibold text-ink">{fmtProcessing(prediction.processingMs)}</span>
+            </span>
+          )}
+          {prediction.generatedAt && (
+            <span title={new Date(prediction.generatedAt).toLocaleString()}>
+              Generated {new Date(prediction.generatedAt).toLocaleString()}
+            </span>
+          )}
+        </div>
+      )}
       <SummaryBlock title="Chief Complaint" body={text('chief_complaint')} />
       <SummaryBlock title="Clinical Context" body={text('clinical_context')} />
 

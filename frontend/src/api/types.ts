@@ -214,6 +214,10 @@ export interface Chart {
   allocatedAuditorName?: string | null;
   coderAllocatedAt?: string | null;
   auditorAllocatedAt?: string | null;
+  /** Total durable work-timer time logged on this chart (sum of completed
+   * sessions, ms). Present on the chart-detail response. The header timer adds
+   * the live running session on top. */
+  coderTimeMs?: number;
 }
 
 export type AiReportType =
@@ -292,6 +296,15 @@ export interface AiEncounterResult {
   complianceAlerts?: AiComplianceAlert[];
   documentationGaps?: AiDocumentationGap[];
   physicianQueries?: AiPhysicianQuery[];
+  // Document-processing timing, persisted on finalize (customFields.aiPrediction).
+  /** When the prediction was finalized (ISO). */
+  generatedAt?: string;
+  /** When the pipeline run started (ISO); null on legacy runs. */
+  startedAt?: string | null;
+  /** When the pipeline run completed (ISO). */
+  completedAt?: string;
+  /** Milliseconds the AI took to process the documents; null if unknown. */
+  processingMs?: number | null;
 }
 
 export interface ChartSummary {

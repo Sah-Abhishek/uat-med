@@ -297,7 +297,11 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
       <div className="grid grid-cols-3 gap-2 pt-3 border-t border-line">
         <MiniStat label="Start" value={startStr} />
         <MiniStat label="Stop" value={stopStr} />
-        <MiniStat label="Total" value={formatTime(elapsed)} />
+        {/* Total = all durable logged sessions on this chart + the live one. */}
+        <MiniStat
+          label="Total"
+          value={formatTime(Math.floor((chart.coderTimeMs ?? 0) / 1000) + (running ? elapsed : 0))}
+        />
       </div>
     </div>
   );

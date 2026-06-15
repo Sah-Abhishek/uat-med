@@ -110,7 +110,10 @@ export class QaService {
         loc.name AS location_name,
         ps.name AS speciality_name,
         coder.full_name AS coder_name,
-        auditor.full_name AS auditor_name
+        auditor.full_name AS auditor_name,
+        -- Real review time from the work-timer sessions (null when a chart has
+        -- no timer rows yet — e.g. historical charts — so we can fall back).
+        (SELECT SUM(tl.elapsed_ms) FROM chart_time_logs tl WHERE tl.chart_id = g.chart_id) AS timer_ms
       FROM grouped g
       JOIN charts    c   ON c.id = g.chart_id
       JOIN worklists w   ON w.id = c.worklist_id
@@ -159,11 +162,15 @@ export class QaService {
       accepted: Number(r.accepted),
       rejected: Number(r.rejected),
       edited: Number(r.edited),
-      // Wall-clock between first and last decision for this chart.
-      timeTakenMs: Math.max(
-        0,
-        new Date(r.last_decided_at).getTime() - new Date(r.first_decided_at).getTime(),
-      ),
+      // Prefer real timer time (sum of work-timer sessions); fall back to the
+      // wall-clock between first and last decision for charts with no timer
+      // data (e.g. submitted before the timer was persisted).
+      timeTakenMs: r.timer_ms != null
+        ? Number(r.timer_ms)
+        : Math.max(
+            0,
+            new Date(r.last_decided_at).getTime() - new Date(r.first_decided_at).getTime(),
+          ),
     }));
 
     return {
@@ -265,12 +272,16 @@ export class QaService {
       ORDER BY day ASC
     `;
 
-    // Median time-per-chart, computed on (max-min decided_at) per chart.
+    // Median time-per-chart. Prefer real work-timer time (sum of sessions);
+    // fall back to the (max-min decided_at) span for charts with no timer rows.
     const medianTimeSql = `
       WITH per_chart AS (
         SELECT
           d.chart_id,
-          EXTRACT(EPOCH FROM (MAX(d.decided_at) - MIN(d.decided_at))) * 1000 AS ms
+          COALESCE(
+            (SELECT SUM(tl.elapsed_ms) FROM chart_time_logs tl WHERE tl.chart_id = d.chart_id),
+            EXTRACT(EPOCH FROM (MAX(d.decided_at) - MIN(d.decided_at))) * 1000
+          ) AS ms
         FROM chart_code_decisions d
         JOIN charts    c ON c.id = d.chart_id
         JOIN worklists w ON w.id = c.worklist_id

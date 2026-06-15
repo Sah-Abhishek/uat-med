@@ -401,7 +401,16 @@ export class ChartsService {
     // Date of Service survives the refetch instead of reverting to the
     // worklist range start (or blanking out).
     const { serviceLine, ...rest } = c;
-    return { ...rest, dateOfService: c.dos ?? null, serviceLineName: serviceLine?.name ?? null };
+    // Total coder/auditor time logged on this chart = sum of completed timer
+    // sessions (chart_time_logs). The header adds the live running session on
+    // top; here we only have durable, stopped sessions.
+    const timeAgg = await this.timeLogs
+      .createQueryBuilder('t')
+      .select('COALESCE(SUM(t.elapsed_ms), 0)', 'sum')
+      .where('t.chart_id = :id', { id })
+      .getRawOne<{ sum: string }>();
+    const coderTimeMs = Number(timeAgg?.sum ?? 0);
+    return { ...rest, dateOfService: c.dos ?? null, serviceLineName: serviceLine?.name ?? null, coderTimeMs };
   }
 
 async update(id: number, dto: UpdateChartDto) {
