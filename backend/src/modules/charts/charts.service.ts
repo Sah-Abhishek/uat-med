@@ -1,12 +1,13 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, In, IsNull, QueryFailedError, Repository, SelectQueryBuilder } from 'typeorm';
 import { Chart } from '../../entities/chart.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
 import { ChartFeedback } from '../../entities/chart-feedback.entity';
 import { ChartCodeDecision } from '../../entities/chart-code-decision.entity';
 import { ChartCodeDecisionDraft } from '../../entities/chart-code-decision-draft.entity';
+import { ChartTimeLog, type ChartTimerKind } from '../../entities/chart-time-log.entity';
 import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
@@ -55,8 +56,17 @@ const RESERVED_PIPELINE_KEYS = ['aiPrediction', 'aiPredictionError', 'pendingPre
 
 // Simple in-memory column preferences keyed by userId. A real impl would persist in Redis or `user_preferences`.
 const columnPrefs = new Map<number, Array<{ key: string; visible: boolean }>>();
-// Active timers keyed by `${userId}:${chartId}`.
-const activeTimers = new Map<string, number>();
+
+/** Milliseconds the AI document pipeline spent — from the pending marker's
+ * `startedAt` to completion. Returns null when the start time is missing or
+ * unparseable (e.g. a run that was already in flight before timing was added). */
+export function aiProcessingMs(startedAtIso: string | undefined | null, completedAt: Date): number | null {
+  if (!startedAtIso) return null;
+  const start = Date.parse(startedAtIso);
+  if (!Number.isFinite(start)) return null;
+  const ms = completedAt.getTime() - start;
+  return ms >= 0 ? ms : null;
+}
 
 @Injectable()
 export class ChartsService {
@@ -119,6 +129,7 @@ export class ChartsService {
     @InjectRepository(ChartFeedback) private readonly feedbacks: Repository<ChartFeedback>,
     @InjectRepository(ChartCodeDecision) private readonly codeDecisions: Repository<ChartCodeDecision>,
     @InjectRepository(ChartCodeDecisionDraft) private readonly decisionDrafts: Repository<ChartCodeDecisionDraft>,
+    @InjectRepository(ChartTimeLog) private readonly timeLogs: Repository<ChartTimeLog>,
     @InjectRepository(CodeReviewReason) private readonly codeReviewReasons: Repository<CodeReviewReason>,
     @InjectRepository(Worklist) private readonly worklists: Repository<Worklist>,
     @InjectRepository(User) private readonly users: Repository<User>,
@@ -465,31 +476,64 @@ async update(id: number, dto: UpdateChartDto) {
     return { id: c.id, milestone: c.milestone, chartStatus: c.chartStatus };
   }
 
+  /** Throw the standard "another chart is in progress" 409 for an open session. */
+  private async timerConflict(open: ChartTimeLog): Promise<never> {
+    const other = await this.charts.findOne({ where: { id: Number(open.chartId) } });
+    throw new ConflictException({
+      error: {
+        code: 'timer_conflict',
+        message: 'Another chart is already in progress. Save it before working on this chart.',
+        activeChartId: String(open.chartId),
+        activeChartNo: other?.chartNo ?? null,
+        startedAt: open.startedAt.toISOString(),
+      },
+    });
+  }
+
   async startTimer(id: number, user: AuthenticatedUser) {
     const c = await this.charts.findOne({ where: { id } });
     if (!c) throw new NotFoundException();
 
-    // Single-active-chart guard: a user can only have one timer running at a time.
-    // If a timer is active for a different chart, return 409 with that chart's id + number
-    // so the frontend can route the user back to it.
-    for (const [key, started] of activeTimers) {
-      const [uid, otherChartId] = key.split(':');
-      if (Number(uid) === user.id && Number(otherChartId) !== id) {
-        const other = await this.charts.findOne({ where: { id: Number(otherChartId) } });
-        throw new ConflictException({
-          error: {
-            code: 'timer_conflict',
-            message: 'Another chart is already in progress. Save it before working on this chart.',
-            activeChartId: String(otherChartId),
-            activeChartNo: other?.chartNo ?? null,
-            startedAt: new Date(started).toISOString(),
-          },
-        });
+    // Single-active-chart guard, now DB-backed so it survives a restart. A user
+    // may have at most one OPEN (stopped_at IS NULL) session at a time.
+    const open = await this.timeLogs.findOne({
+      where: { userId: user.id, stoppedAt: IsNull() },
+    });
+    if (open) {
+      // Already timing THIS chart → idempotent resume (return the live session
+      // so a double-Start or a reload doesn't reset the clock).
+      if (Number(open.chartId) === id) {
+        return { chartId: id, startedAt: open.startedAt.toISOString() };
       }
+      // A different chart is in progress → route the user back to it.
+      await this.timerConflict(open);
     }
 
-    const now = Date.now();
-    activeTimers.set(`${user.id}:${id}`, now);
+    // Capacity is derived from the chart's milestone (TEAMLEADs can do either).
+    const kind: ChartTimerKind =
+      c.milestone === ChartMilestone.READY_TO_AUDIT ||
+      c.milestone === ChartMilestone.AUDIT_IN_PROGRESS
+        ? 'AUDIT'
+        : 'CODING';
+    const startedAt = new Date();
+    try {
+      await this.timeLogs.save(
+        this.timeLogs.create({ chartId: id, userId: user.id, kind, startedAt, stoppedAt: null, elapsedMs: null }),
+      );
+    } catch (err) {
+      // Lost a race against a concurrent Start: the partial unique index
+      // (one open session per user) rejected the second insert. Re-read the
+      // winner and resume-or-conflict against it instead of 500-ing.
+      if (err instanceof QueryFailedError && (err as any).code === '23505') {
+        const winner = await this.timeLogs.findOne({ where: { userId: user.id, stoppedAt: IsNull() } });
+        if (winner && Number(winner.chartId) === id) {
+          return { chartId: id, startedAt: winner.startedAt.toISOString() };
+        }
+        if (winner) await this.timerConflict(winner);
+      }
+      throw err;
+    }
+
     // Team leads can act in either capacity; the chart's current milestone
     // determines which transition fires.
     const canCode = user.role === Role.CODER || user.role === Role.TEAMLEAD;
@@ -501,42 +545,55 @@ async update(id: number, dto: UpdateChartDto) {
       c.setMilestone(ChartMilestone.AUDIT_IN_PROGRESS);
       await this.charts.save(c);
     }
-    return { chartId: id, startedAt: new Date(now).toISOString() };
+    return { chartId: id, startedAt: startedAt.toISOString() };
   }
 
   async stopTimer(id: number, user: AuthenticatedUser) {
-    const key = `${user.id}:${id}`;
-    const started = activeTimers.get(key);
-    if (!started) throw new BadRequestException({ error: { code: 'bad_request', message: 'No active timer for this user/chart.' } });
-    activeTimers.delete(key);
-    return { chartId: id, elapsedMs: Date.now() - started };
+    const open = await this.timeLogs.findOne({
+      where: { userId: user.id, chartId: id, stoppedAt: IsNull() },
+    });
+    if (!open) {
+      throw new BadRequestException({ error: { code: 'bad_request', message: 'No active timer for this user/chart.' } });
+    }
+    const stoppedAt = new Date();
+    const elapsedMs = stoppedAt.getTime() - open.startedAt.getTime();
+    open.stoppedAt = stoppedAt;
+    open.elapsedMs = elapsedMs;
+    await this.timeLogs.save(open);
+    return { chartId: id, elapsedMs };
   }
 
   /**
-   * Returns the user's currently running chart, if any.
+   * Returns the user's currently running chart, if any. Sourced from the open
+   * chart_time_logs session, so a backend restart no longer resets the timer.
    * Used by the charts page (to show a "currently running" card) and by the
    * chart-detail page (to restore the timer on reload).
    */
   async activeTimer(user: AuthenticatedUser) {
-    for (const [key, started] of activeTimers) {
-      const [uid, chartIdStr] = key.split(':');
-      if (Number(uid) !== user.id) continue;
-      const chartId = Number(chartIdStr);
-      const c = await this.charts.findOne({ where: { id: chartId } });
-      if (!c) {
-        activeTimers.delete(key);
-        continue;
-      }
-      return {
-        chartId: String(chartId),
-        chartNo: c.chartNo ?? null,
-        worklistId: String(c.worklistId),
-        milestone: c.milestone,
-        startedAt: new Date(started).toISOString(),
-        elapsedMs: Date.now() - started,
-      };
+    const open = await this.timeLogs.findOne({
+      where: { userId: user.id, stoppedAt: IsNull() },
+      order: { startedAt: 'DESC' },
+    });
+    if (!open) return null;
+
+    const chartId = Number(open.chartId);
+    const c = await this.charts.findOne({ where: { id: chartId } });
+    if (!c) {
+      // Orphan (chart gone but FK cascade missed it): close the session so it
+      // stops shadowing future Starts, and report no active timer.
+      open.stoppedAt = new Date();
+      open.elapsedMs = open.stoppedAt.getTime() - open.startedAt.getTime();
+      await this.timeLogs.save(open);
+      return null;
     }
-    return null;
+    return {
+      chartId: String(chartId),
+      chartNo: c.chartNo ?? null,
+      worklistId: String(c.worklistId),
+      milestone: c.milestone,
+      startedAt: open.startedAt.toISOString(),
+      elapsedMs: Date.now() - open.startedAt.getTime(),
+    };
   }
 
   async bulkModify(dto: BulkModifyDto) {
@@ -828,10 +885,12 @@ async update(id: number, dto: UpdateChartDto) {
     if (!c) throw new NotFoundException();
 
     const uploadedDocs = (c.customFields?.uploadedDocs as UploadedDocument[] | undefined) ?? [];
-    const pending = (c.customFields?.pendingPrediction as { reportIds?: string[] } | undefined) ?? {};
+    const pending = (c.customFields?.pendingPrediction as { reportIds?: string[]; startedAt?: string } | undefined) ?? {};
     const reportIds = pending.reportIds ?? uploadedDocs.map((d) => d.reportId).filter((r): r is string => !!r);
 
     const result = await this.aiPredictor.finalizeEncounter(encounterId, reportIds, reportIds.length);
+    const completedAt = new Date();
+    const processingMs = aiProcessingMs(pending.startedAt, completedAt);
 
     // Persist the prediction so the page survives a refresh without re-running
     // the pipeline. Stored under customFields to avoid a schema migration.
@@ -856,12 +915,19 @@ async update(id: number, dto: UpdateChartDto) {
         complianceAlerts: result.complianceAlerts,
         documentationGaps: result.documentationGaps,
         physicianQueries: result.physicianQueries,
-        generatedAt: new Date().toISOString(),
+        // Document-processing timing, persisted on the chart (customFields jsonb):
+        // startedAt is preserved from the pending marker before it's dropped so
+        // the duration stays reconstructable; processingMs is null if we never
+        // recorded a start (e.g. a legacy in-flight run).
+        startedAt: pending.startedAt ?? null,
+        completedAt: completedAt.toISOString(),
+        processingMs,
+        generatedAt: completedAt.toISOString(),
       },
     };
     await this.charts.save(c);
 
-    return { ...result, uploadedDocs };
+    return { ...result, uploadedDocs, processingMs };
   }
 
   /**

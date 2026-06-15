@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { Chart } from '../../entities/chart.entity';
 import { AiPredictorService, UploadedDocument } from './ai-predictor.service';
+import { aiProcessingMs } from './charts.service';
 
 const TICK_MS = 10_000;
 // Predictions older than this are considered dead and removed so the watcher
@@ -119,6 +120,8 @@ export class AiPipelineWatcher implements OnModuleInit, OnModuleDestroy {
       pending.reportIds ?? [],
       (pending.reportIds ?? []).length,
     );
+    const completedAt = new Date();
+    const processingMs = aiProcessingMs(pending.startedAt, completedAt);
 
     // Re-read so we don't stomp concurrent edits to other customFields keys.
     const fresh = await this.charts.findOne({ where: { id: chartId } });
@@ -146,12 +149,18 @@ export class AiPipelineWatcher implements OnModuleInit, OnModuleDestroy {
         complianceAlerts: result.complianceAlerts,
         documentationGaps: result.documentationGaps,
         physicianQueries: result.physicianQueries,
-        generatedAt: new Date().toISOString(),
+        // Document-processing timing — startedAt preserved from the pending
+        // marker (dropped just above) so the duration stays reconstructable.
+        startedAt: pending.startedAt ?? null,
+        completedAt: completedAt.toISOString(),
+        processingMs,
+        generatedAt: completedAt.toISOString(),
       },
     };
     await this.charts.save(fresh);
     this.log.log(
-      `chart=${chartId} encounter=${pending.encounterId} finalized (${result.codes.length} codes).`,
+      `chart=${chartId} encounter=${pending.encounterId} finalized ` +
+        `(${result.codes.length} codes${processingMs != null ? `, ${Math.round(processingMs / 1000)}s` : ''}).`,
     );
   }
 
