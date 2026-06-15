@@ -80,8 +80,8 @@ export class ChartsController {
   }
 
   @Post('bulk/self-allocate')
-  @Roles(Role.CODER, Role.AUDITOR)
-  @ApiOperation({ summary: 'Self Allocation — coder / auditor pulls charts to themselves.' })
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Self Allocation — coder / auditor / admin pulls charts to themselves (admin takes both slots; charts with a running timer are skipped).' })
   selfAllocate(@Body() dto: BulkIdsDto, @CurrentUser() user: AuthenticatedUser) {
     return this.svc.selfAllocate(dto.chartIds, user);
   }

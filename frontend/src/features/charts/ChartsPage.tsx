@@ -12,6 +12,7 @@ import {
   type AllocationAction,
   type BulkModifyDto,
   type ChartListParams,
+  type SelfAllocateResult,
 } from '@/api/charts';
 import { listUsers } from '@/api/users';
 import { listWorklists } from '@/api/worklists';
@@ -30,6 +31,7 @@ import {
   ConfirmModal,
   PillBadge,
   Avatar,
+  Toast,
 } from '@/components/ui/Primitives';
 import {
   AiStatusChip,
@@ -413,7 +415,8 @@ function saveVisibleColumns(visible: Set<string>) {
 export function ChartsPage() {
   const user = useAuth((s) => s.user)!;
   const isManager = can(user, 'chart.bulkModify');
-  const isCoderOrAuditor = user.role === 'CODER' || user.role === 'AUDITOR';
+  // Coder / auditor / admin can pull charts to themselves.
+  const canSelfAllocate = can(user, 'chart.selfAllocate');
   const qc = useQueryClient();
   // Global Client / Location scope from the header.
   const scopeClientId = useScope((s) => s.clientId);
@@ -628,7 +631,7 @@ export function ChartsPage() {
     <div className="p-8 max-w-[1600px] space-y-5">
       <PageHeader title="Charts" subtitle="Charts" />
 
-      {isCoderOrAuditor && <ActiveTimerCard />}
+      {canSelfAllocate && <ActiveTimerCard />}
 
       {/* Summary tiles */}
       {summary.data && (
@@ -740,7 +743,7 @@ export function ChartsPage() {
                 Modify Charts
               </Button>
             )}
-            {isCoderOrAuditor && (
+            {canSelfAllocate && (
               <Button
                 disabled={!someSelected}
                 leftIcon={<UserPlus className="w-3.5 h-3.5" />}
@@ -1398,24 +1401,48 @@ function SelfAllocateConfirm({
   onComplete: () => void;
 }) {
   const qc = useQueryClient();
+  const [result, setResult] = useState<SelfAllocateResult | null>(null);
   const mutation = useMutation({
     mutationFn: () => selfAllocateCharts(selectedIds.map(Number)),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['charts'] });
-      onComplete();
+      qc.invalidateQueries({ queryKey: ['active-timer'] });
+      // If some charts were skipped (someone's working on them), surface a
+      // toast before finishing. Otherwise close straight away.
+      if (res.skipped.length > 0) setResult(res);
+      else onComplete();
     },
   });
+
+  const skipped = result?.skipped.length ?? 0;
+  const allocated = result?.allocated ?? 0;
+  const toastMsg =
+    allocated > 0
+      ? `Allocated ${allocated} chart${allocated === 1 ? '' : 's'}. ${skipped} skipped — someone is already working on ${skipped === 1 ? 'it' : 'them'}.`
+      : `Couldn't allocate — someone is already working on the selected chart${skipped === 1 ? '' : 's'}.`;
+
   return (
-    <ConfirmModal
-      open={open}
-      onClose={onClose}
-      onConfirm={() => mutation.mutate()}
-      message={`Allocate ${selectedIds.length} chart${selectedIds.length === 1 ? '' : 's'} to yourself?`}
-      variant="primary"
-      confirmLabel="Allocate"
-      cancelLabel="Cancel"
-      loading={mutation.isPending}
-    />
+    <>
+      <ConfirmModal
+        open={open && !result}
+        onClose={onClose}
+        onConfirm={() => mutation.mutate()}
+        message={`Allocate ${selectedIds.length} chart${selectedIds.length === 1 ? '' : 's'} to yourself? Charts someone else is actively working on will be skipped.`}
+        variant="primary"
+        confirmLabel="Allocate"
+        cancelLabel="Cancel"
+        loading={mutation.isPending}
+      />
+      <Toast
+        open={!!result}
+        message={toastMsg}
+        variant={allocated > 0 ? 'success' : 'warn'}
+        onClose={() => {
+          setResult(null);
+          onComplete();
+        }}
+      />
+    </>
   );
 }
 

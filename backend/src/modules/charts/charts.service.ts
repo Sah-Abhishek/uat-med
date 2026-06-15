@@ -566,6 +566,19 @@ async update(id: number, dto: UpdateChartDto) {
     const c = await this.charts.findOne({ where: { id } });
     if (!c) throw new NotFoundException();
 
+    // You can only time a chart that's allocated to you (as coder or auditor).
+    // Admins/teamleads aren't exempt — they self-allocate the chart first.
+    const allocatedToMe =
+      Number(c.allocatedCoderId) === user.id || Number(c.allocatedAuditorId) === user.id;
+    if (!allocatedToMe) {
+      throw new ForbiddenException({
+        error: {
+          code: 'not_allocated',
+          message: 'Self-allocate this chart to yourself to work on it.',
+        },
+      });
+    }
+
     // Single-active-chart guard, now DB-backed so it survives a restart. A user
     // may have at most one OPEN (stopped_at IS NULL) session at a time.
     const open = await this.timeLogs.findOne({
@@ -579,6 +592,28 @@ async update(id: number, dto: UpdateChartDto) {
       }
       // A different chart is in progress → route the user back to it.
       await this.timerConflict(open);
+    }
+
+    // Per-chart lock: only one person may run a timer on a chart at a time.
+    // (At this point we know the caller has no open session, so any open
+    // session on this chart belongs to someone else.)
+    const busy = await this.timeLogs.findOne({
+      where: { chartId: id, stoppedAt: IsNull() },
+      order: { startedAt: 'ASC' },
+    });
+    if (busy) {
+      const other = await this.users.findOne({ where: { id: Number(busy.userId) } });
+      throw new ConflictException({
+        error: {
+          code: 'chart_busy',
+          message: other?.fullName
+            ? `${other.fullName} is already working on this chart.`
+            : 'Someone is already working on this chart.',
+          activeUserId: String(busy.userId),
+          activeUserName: other?.fullName ?? null,
+          startedAt: busy.startedAt.toISOString(),
+        },
+      });
     }
 
     // Capacity is derived from the chart's milestone (TEAMLEADs can do either).
@@ -734,12 +769,38 @@ async update(id: number, dto: UpdateChartDto) {
 
   async selfAllocate(chartIds: number[], user: AuthenticatedUser) {
     const cs = await this.charts.findBy({ id: In(chartIds) });
+
+    // A chart someone ELSE is actively timing can't be taken (they're working
+    // on it). The caller's own running timer doesn't block them.
+    const openRows = chartIds.length
+      ? await this.timeLogs.find({ where: { chartId: In(chartIds), stoppedAt: IsNull() } })
+      : [];
+    const busyIds = new Set(
+      openRows.filter((r) => Number(r.userId) !== user.id).map((r) => Number(r.chartId)),
+    );
+
+    const allocatedIds: number[] = [];
+    const skipped: Array<{ chartId: number; reason: string }> = [];
+    const toSave: Chart[] = [];
     for (const c of cs) {
-      if (user.role === Role.CODER) c.allocatedCoderId = user.id;
-      else if (user.role === Role.AUDITOR) c.allocatedAuditorId = user.id;
+      if (busyIds.has(Number(c.id))) {
+        skipped.push({ chartId: Number(c.id), reason: 'Someone is already working on this chart.' });
+        continue;
+      }
+      if (user.role === Role.CODER) {
+        c.allocatedCoderId = user.id;
+      } else if (user.role === Role.AUDITOR) {
+        c.allocatedAuditorId = user.id;
+      } else if (user.role === Role.TEAMLEAD) {
+        // Admin/team lead takes BOTH slots so they can code and audit the chart.
+        c.allocatedCoderId = user.id;
+        c.allocatedAuditorId = user.id;
+      }
+      toSave.push(c);
+      allocatedIds.push(Number(c.id));
     }
-    await this.charts.save(cs);
-    return { allocated: cs.length };
+    if (toSave.length) await this.charts.save(toSave);
+    return { allocated: allocatedIds.length, allocatedIds, skipped };
   }
 
   /**

@@ -153,8 +153,15 @@ export interface BulkModifyDto {
 export const bulkModifyCharts = (dto: BulkModifyDto) =>
   post<{ updated: number }>('/charts/bulk/modify', dto);
 
+export interface SelfAllocateResult {
+  allocated: number;
+  allocatedIds: number[];
+  /** Charts skipped because someone else has a running timer on them. */
+  skipped: Array<{ chartId: number; reason: string }>;
+}
+
 export const selfAllocateCharts = (chartIds: number[]) =>
-  post<{ allocated: number }>('/charts/bulk/self-allocate', { chartIds });
+  post<SelfAllocateResult>('/charts/bulk/self-allocate', { chartIds });
 
 export const bulkDeleteCharts = (chartIds: number[]) =>
   del<{ deleted: number }>('/charts/bulk', { chartIds });

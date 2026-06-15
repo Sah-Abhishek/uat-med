@@ -10,7 +10,7 @@ export const PERMISSIONS = {
   'worklist.bulkImport': ['TEAMLEAD', 'MANAGER'],
   'chart.bulkModify': ['TEAMLEAD', 'MANAGER'],
   'chart.bulkDelete': ['TEAMLEAD', 'MANAGER'],
-  'chart.selfAllocate': ['CODER', 'AUDITOR'],
+  'chart.selfAllocate': ['CODER', 'AUDITOR', 'TEAMLEAD'],
   'chart.feedback.add': ['AUDITOR'],
   'chart.feedback.respond': ['CODER'],
   'user.create': ['TEAMLEAD'],

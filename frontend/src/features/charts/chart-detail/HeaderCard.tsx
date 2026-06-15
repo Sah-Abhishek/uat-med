@@ -12,9 +12,11 @@ import {
   Play,
   Square,
   AlertCircle,
+  Lock,
+  UserPlus,
 } from 'lucide-react';
 import type { ApiErrorShape, Chart } from '@/api/types';
-import { startChart, stopChart, getActiveTimer } from '@/api/charts';
+import { startChart, stopChart, getActiveTimer, selfAllocateCharts } from '@/api/charts';
 import { getWorklist } from '@/api/worklists';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/auth/store';
@@ -123,7 +125,15 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
     chartNo: string | null;
   } | null>(null);
   const [stopBlocked, setStopBlocked] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const running = startedAt != null;
+
+  // You can only use the timer on a chart that's allocated to you (as coder or
+  // auditor). Admins/teamleads aren't exempt — they self-allocate it first.
+  const allocatedToMe =
+    !!user &&
+    (String(chart.allocatedCoderId ?? '') === user.id ||
+      String(chart.allocatedAuditorId ?? '') === user.id);
 
   // Clear the "save first" warning as soon as the user saves (canStop flips back to true).
   useEffect(() => {
@@ -191,6 +201,7 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
       setStoppedAt(null);
       setElapsed(0);
       setConflict(null);
+      setErrorMsg(null);
       invalidateAfterTimerChange();
     },
     onError: (err) => {
@@ -201,6 +212,9 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
           chartId: String(meta.activeChartId ?? ''),
           chartNo: (meta.activeChartNo as string | null) ?? null,
         });
+      } else if (e.code === 'chart_busy' || e.code === 'not_allocated') {
+        // Someone else is timing this chart, or it isn't allocated to us.
+        setErrorMsg(e.message);
       }
     },
   });
@@ -210,6 +224,21 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
       setStoppedAt(Date.now());
       setStartedAt(null);
       invalidateAfterTimerChange();
+    },
+  });
+
+  // Self-allocate this chart from the detail page, so the user can start the
+  // timer without going back to the Charts list. Blocked server-side when
+  // someone else is actively working on it.
+  const selfAllocateMut = useMutation({
+    mutationFn: () => selfAllocateCharts([Number(chart.id)]),
+    onSuccess: (res) => {
+      if (res.allocated > 0) {
+        setErrorMsg(null);
+        invalidateAfterTimerChange(); // refetch chart → allocatedToMe flips true
+      } else {
+        setErrorMsg(res.skipped?.[0]?.reason ?? 'Could not allocate this chart.');
+      }
     },
   });
 
@@ -228,6 +257,38 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
   const restoringTimer =
     !!active.data && active.data.chartId === chart.id && !running;
   const isResolving = canTime && (active.isPending || restoringTimer);
+
+  // Not allocated to this user → no timer. Show a self-allocate prompt instead
+  // (this is what an admin sees when opening a chart they haven't taken).
+  if (canTime && !allocatedToMe) {
+    return (
+      <div className="rounded-card border border-line bg-gradient-to-br from-primary-soft/40 to-warn-soft/40 p-5 min-w-[260px]">
+        <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-3">
+          Timer
+        </p>
+        <div className="flex items-start gap-2 mb-3">
+          <Lock className="w-4 h-4 text-ink-subtle mt-0.5 shrink-0" />
+          <p className="text-[12px] text-ink-muted leading-snug">
+            Self-allocate this chart to yourself to work on it.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          leftIcon={<UserPlus className="w-3.5 h-3.5" />}
+          loading={selfAllocateMut.isPending}
+          onClick={() => selfAllocateMut.mutate()}
+          className="w-full"
+        >
+          Self-allocate
+        </Button>
+        {errorMsg && (
+          <div className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2">
+            <p className="text-[11px] text-danger leading-snug">{errorMsg}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-card border border-line bg-gradient-to-br from-primary-soft/40 to-warn-soft/40 p-5 min-w-[260px]">
@@ -272,6 +333,14 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
                 </Link>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {errorMsg && !conflict && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-danger mt-0.5 shrink-0" />
+            <p className="text-[11px] text-danger leading-snug font-semibold">{errorMsg}</p>
           </div>
         </div>
       )}
