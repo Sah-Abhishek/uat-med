@@ -68,14 +68,18 @@ export function HeaderCard({ chart, canStop = true }: HeaderCardProps) {
             Location: {worklist?.location?.name ?? '—'}
           </MetaItem>
           <MetaItem icon={<User className="w-3.5 h-3.5" />}>
-            Allocated: {chart.allocatedCoderId ? `User ${chart.allocatedCoderId}` : '—'}
+            Allocated: {chart.allocatedCoderName ?? chart.allocatedAuditorName ?? '—'}
           </MetaItem>
-          <MetaItem icon={<Clipboard className="w-3.5 h-3.5" />}>Sub Specialty: —</MetaItem>
-          <MetaItem icon={<Search className="w-3.5 h-3.5" />}>QC Status: —</MetaItem>
+          <MetaItem icon={<Clipboard className="w-3.5 h-3.5" />}>
+            Sub Specialty: {worklist?.subSpeciality?.name ?? chart.subSpecialityName ?? '—'}
+          </MetaItem>
+          <MetaItem icon={<Search className="w-3.5 h-3.5" />}>
+            QC Status: {chart.qcStatus ?? '—'}
+          </MetaItem>
         </div>
 
         <div className="grid grid-cols-4 gap-0 border-t border-line pt-4 mb-3">
-          <Stat label="Worklist #" value={chart.worklistNumber} />
+          <Stat label="Worklist #" value={worklist?.worklistNumber ?? chart.worklistNumber} />
           <Stat label="Milestone" value={chart.milestone} />
           <Stat label="Status" value={chart.chartStatus} />
           <Stat label="Audited week" value="—" />
@@ -89,8 +93,8 @@ export function HeaderCard({ chart, canStop = true }: HeaderCardProps) {
         </div>
 
         <div className="grid grid-cols-4 gap-0">
-          <Stat label="Date of Coder Allocation" value="—" />
-          <Stat label="Date of Auditor Allocation" value="—" />
+          <Stat label="Date of Coder Allocation" value={formatDate(chart.coderAllocatedAt) || '—'} />
+          <Stat label="Date of Auditor Allocation" value={formatDate(chart.auditorAllocatedAt) || '—'} />
         </div>
       </div>
 

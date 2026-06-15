@@ -394,23 +394,86 @@ export class ChartsService {
   }
 
   async detail(id: number) {
-    const c = await this.charts.findOne({ where: { id }, relations: { serviceLine: true } });
+    // Load the parent worklist + its config relations so the detail header can
+    // show the same enriched fields the list does (worklist #, client,
+    // location, speciality, process, received date) without the frontend
+    // making a second round-trip.
+    const c = await this.charts.findOne({
+      where: { id },
+      relations: {
+        serviceLine: true,
+        worklist: {
+          client: true,
+          location: true,
+          primarySpeciality: true,
+          subSpeciality: true,
+          process: true,
+        },
+      },
+    });
     if (!c) throw new NotFoundException();
-    // The DB column is `dos`, but the whole frontend (Chart type, list,
-    // header, detail seeding) reads `dateOfService`. Surface both so a saved
-    // Date of Service survives the refetch instead of reverting to the
-    // worklist range start (or blanking out).
-    const { serviceLine, ...rest } = c;
+
+    // Resolve allocated / original coder & auditor display names (list parity).
+    const userIds = [
+      c.allocatedCoderId, c.allocatedAuditorId, c.originalCoderId, c.originalAuditorId,
+    ].filter((v): v is number => v != null).map(Number);
+    const userMap = new Map<number, string>();
+    if (userIds.length) {
+      const users = await this.users.find({ where: { id: In([...new Set(userIds)]) } });
+      for (const u of users) userMap.set(Number(u.id), u.fullName);
+    }
+
+    // Earliest CODER / AUDITOR allocation timestamps (the handoff dates).
+    const allocRows: Array<{ role: 'CODER' | 'AUDITOR'; first_at: Date | string | null }> =
+      await this.allocations
+        .createQueryBuilder('a')
+        .select('a.role', 'role')
+        .addSelect('MIN(a.allocated_at)', 'first_at')
+        .where('a.chart_id = :id', { id })
+        .groupBy('a.role')
+        .getRawMany();
+    let coderAllocatedAt: string | null = null;
+    let auditorAllocatedAt: string | null = null;
+    for (const r of allocRows) {
+      const iso = r.first_at instanceof Date ? r.first_at.toISOString() : (r.first_at ? String(r.first_at) : null);
+      if (r.role === 'CODER') coderAllocatedAt = iso;
+      if (r.role === 'AUDITOR') auditorAllocatedAt = iso;
+    }
+
     // Total coder/auditor time logged on this chart = sum of completed timer
-    // sessions (chart_time_logs). The header adds the live running session on
-    // top; here we only have durable, stopped sessions.
+    // sessions (chart_time_logs). The header adds the live running session on top.
     const timeAgg = await this.timeLogs
       .createQueryBuilder('t')
       .select('COALESCE(SUM(t.elapsed_ms), 0)', 'sum')
       .where('t.chart_id = :id', { id })
       .getRawOne<{ sum: string }>();
     const coderTimeMs = Number(timeAgg?.sum ?? 0);
-    return { ...rest, dateOfService: c.dos ?? null, serviceLineName: serviceLine?.name ?? null, coderTimeMs };
+
+    const { serviceLine, worklist, ...rest } = c;
+    const cf = (rest.customFields ?? {}) as Record<string, any>;
+    return {
+      ...rest,
+      // The DB column is `dos`, but the frontend reads `dateOfService`.
+      dateOfService: c.dos ?? null,
+      serviceLineName: serviceLine?.name ?? null,
+      coderTimeMs,
+      // ── List-parity enrichments so the detail header shows full info ──
+      worklistNumber: worklist?.worklistNumber ?? null,
+      clientName: worklist?.client?.name ?? null,
+      locationName: worklist?.location?.name ?? null,
+      specialityName: worklist?.primarySpeciality?.name ?? null,
+      subSpecialityName:
+        worklist?.subSpeciality?.name ?? (typeof cf.subSpeciality === 'string' ? cf.subSpeciality : null),
+      processName: worklist?.process?.name ?? null,
+      receivedDate: worklist?.receivedDate ?? null,
+      allocatedCoderName: rest.allocatedCoderId ? userMap.get(Number(rest.allocatedCoderId)) ?? null : null,
+      allocatedAuditorName: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId)) ?? null : null,
+      originalCoderName: rest.originalCoderId ? userMap.get(Number(rest.originalCoderId)) ?? null : null,
+      originalAuditorName: rest.originalAuditorId ? userMap.get(Number(rest.originalAuditorId)) ?? null : null,
+      coderAllocatedAt,
+      auditorAllocatedAt,
+      qcStatus: typeof cf.qcStatus === 'string' ? cf.qcStatus : null,
+    };
   }
 
 async update(id: number, dto: UpdateChartDto) {
