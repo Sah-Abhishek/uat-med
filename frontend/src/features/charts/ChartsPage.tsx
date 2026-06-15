@@ -139,6 +139,24 @@ function dash(node: React.ReactNode): React.ReactNode {
   );
 }
 
+/** Pull the AI document-processing duration (ms) the pipeline persisted on
+ * customFields.aiPrediction.processingMs. Null when missing (legacy runs,
+ * unprocessed charts). */
+function aiProcessingMsOf(customFields: Record<string, unknown> | undefined | null): number | null {
+  const ms = (customFields as any)?.aiPrediction?.processingMs;
+  return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+}
+
+/** Compact AI-processing duration for the table cell. */
+function fmtAiProcessing(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  const m = Math.floor(s / 60);
+  const rs = Math.round(s % 60);
+  return rs ? `${m}m ${rs}s` : `${m}m`;
+}
+
 /** Column catalog. Order here is the on-screen column order; the popover
  * also renders rows in this order. Render functions depend on `canOpenWorklist`
  * so coders see Worklist # as plain text (no link to the worklist detail page). */
@@ -330,6 +348,21 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
       defaultVisible: false,
       render: (c) => <AiStatusChip status={deriveAiStatus(c.customFields)} />,
     },
+    {
+      key: 'aiTime',
+      label: 'AI Time',
+      defaultVisible: true,
+      render: (c) => {
+        const ms = aiProcessingMsOf(c.customFields);
+        return ms == null ? (
+          <span className="text-ink-subtle text-xs">—</span>
+        ) : (
+          <span className="font-mono text-xs text-ink-muted" title="Time the AI took to process this chart's documents">
+            {fmtAiProcessing(ms)}
+          </span>
+        );
+      },
+    },
   ];
 }
 
@@ -347,10 +380,11 @@ const DEFAULT_VISIBLE_KEYS: ReadonlySet<string> = new Set(
     .map((c) => c.key),
 );
 
-// Bumped to v2 because the column set + order changed; v1 prefs would still
-// load valid keys but in the old order, which is exactly what the user asked
-// us to overwrite. Clean slate keeps the on-screen layout matching the spec.
-const COLUMN_PREFS_KEY = 'charts.columns.visible.v2';
+// Bumped to v3 when the "AI Time" column was added: stored v2 prefs don't
+// include the new key, and loadVisibleColumns() only re-adds locked keys (not
+// new defaults), so existing users would never see it without a version bump.
+// Resetting to defaults keeps the new column visible for everyone.
+const COLUMN_PREFS_KEY = 'charts.columns.visible.v3';
 
 function loadVisibleColumns(): Set<string> {
   const fallback = new Set<string>([...DEFAULT_VISIBLE_KEYS, ...LOCKED_KEYS]);
