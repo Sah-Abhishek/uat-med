@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -7,6 +9,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -92,6 +95,17 @@ export function AccuracyTab({ filters }: Props) {
           tone="warn"
         />
       </div>
+
+      {/* Daily AI accuracy — headline trend, full width */}
+      <ChartCard
+        title="Daily AI accuracy"
+        subtitle="Acceptance rate (accepted ÷ decisions) per day"
+        icon={<TrendingUp className="w-3.5 h-3.5" />}
+        loading={loading}
+        empty={!loading && (data?.daily.length ?? 0) === 0}
+      >
+        <DailyAccuracyChart rows={data?.daily ?? []} overall={data?.kpis.acceptanceRate ?? 0} />
+      </ChartCard>
 
       {/* Charts: 2x2 grid */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -339,6 +353,77 @@ function WeeklyTrendChart({ rows }: { rows: { week: string; accepted: number; ed
         <Line type="monotone" dataKey="Edited"   stroke={COLOR_EDIT}   strokeWidth={2} strokeDasharray="6 3" dot={{ r: 3 }} />
         <Line type="monotone" dataKey="Rejected" stroke={COLOR_REJECT} strokeWidth={2} strokeDasharray="2 3" dot={{ r: 3 }} />
       </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* ── Daily AI accuracy (acceptance rate trend) ───────────── */
+
+function DailyAccuracyChart({
+  rows,
+  overall,
+}: {
+  rows: { day: string; accepted: number; decisions: number }[];
+  overall: number;
+}) {
+  const data = rows.map((r) => ({
+    day: shortDate(r.day),
+    accuracy: r.decisions ? (r.accepted / r.decisions) * 100 : 0,
+    accepted: r.accepted,
+    decisions: r.decisions,
+  }));
+  const overallPct = overall * 100;
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={data} margin={{ top: 5, right: 16, bottom: 5, left: 0 }}>
+        <defs>
+          <linearGradient id="qaAccuracyFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={COLOR_ACCEPT} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={COLOR_ACCEPT} stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke={COLOR_GRID} strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="day" stroke={COLOR_AXIS} tick={{ fontSize: 11 }} />
+        <YAxis
+          domain={[0, 100]}
+          tickFormatter={(v) => `${v}%`}
+          stroke={COLOR_AXIS}
+          tick={{ fontSize: 11 }}
+          width={44}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          formatter={(v: number, _name: string, ctx: any) => [
+            `${(v as number).toFixed(1)}%  (${ctx.payload.accepted}/${ctx.payload.decisions} accepted)`,
+            'Accuracy',
+          ]}
+        />
+        {/* Dashed baseline at the period-wide acceptance rate for context. */}
+        {overallPct > 0 && (
+          <ReferenceLine
+            y={overallPct}
+            stroke={COLOR_AXIS}
+            strokeDasharray="5 4"
+            label={{
+              value: `avg ${overallPct.toFixed(1)}%`,
+              position: 'right',
+              fontSize: 10,
+              fill: COLOR_AXIS,
+            }}
+          />
+        )}
+        <Area
+          type="monotone"
+          dataKey="accuracy"
+          name="Accuracy"
+          stroke={COLOR_ACCEPT}
+          strokeWidth={2}
+          fill="url(#qaAccuracyFill)"
+          dot={{ r: 2.5 }}
+          activeDot={{ r: 4 }}
+        />
+      </AreaChart>
     </ResponsiveContainer>
   );
 }

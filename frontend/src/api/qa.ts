@@ -82,7 +82,15 @@ export interface QaAccuracyResponse {
     added: number;
     total: number;
   }>;
-  daily: Array<{ day: string; submissions: number; decisions: number }>;
+  daily: Array<{
+    day: string;
+    submissions: number;
+    decisions: number;
+    accepted: number;
+    rejected: number;
+    edited: number;
+    added: number;
+  }>;
 }
 
 export const getQaAccuracy = (params: QaFilters) =>

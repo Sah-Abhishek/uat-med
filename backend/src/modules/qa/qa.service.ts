@@ -244,12 +244,19 @@ export class QaService {
       ORDER BY week ASC
     `;
 
-    // Daily submission volume — counts unique charts (re-submissions count once per day).
+    // Daily volume + verdict mix. submissions counts unique charts
+    // (re-submissions count once per day); the verdict sums let the client
+    // derive a daily AI-accuracy (acceptance) rate = accepted / decisions,
+    // mirroring the weekly trend and the headline acceptanceRate KPI.
     const dailySql = `
       SELECT
         date_trunc('day', d.decided_at)::date AS day,
         COUNT(DISTINCT d.chart_id)::int AS submissions,
-        COUNT(*)::int AS decisions
+        COUNT(*)::int AS decisions,
+        SUM(CASE WHEN d.decision = 'ACCEPTED' THEN 1 ELSE 0 END)::int AS accepted,
+        SUM(CASE WHEN d.decision = 'REJECTED' THEN 1 ELSE 0 END)::int AS rejected,
+        SUM(CASE WHEN d.decision = 'EDITED'   THEN 1 ELSE 0 END)::int AS edited,
+        SUM(CASE WHEN d.decision = 'ADDED'    THEN 1 ELSE 0 END)::int AS added
       FROM chart_code_decisions d
       JOIN charts    c ON c.id = d.chart_id
       JOIN worklists w ON w.id = c.worklist_id
@@ -323,6 +330,10 @@ export class QaService {
         day: r.day,
         submissions: Number(r.submissions),
         decisions: Number(r.decisions),
+        accepted: Number(r.accepted),
+        rejected: Number(r.rejected),
+        edited: Number(r.edited),
+        added: Number(r.added),
       })),
     };
   }
