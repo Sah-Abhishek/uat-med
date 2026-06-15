@@ -7,12 +7,18 @@ export function UsersPanel({ chart }: { chart: Chart }) {
     {
       role: 'Coder',
       id: chart.allocatedCoderId,
-      label: chart.allocatedCoderId ? `User ${chart.allocatedCoderId}` : 'Unassigned',
+      // Prefer the resolved full name (from the detail endpoint); fall back to
+      // the id only if the name didn't come through.
+      label:
+        chart.allocatedCoderName ??
+        (chart.allocatedCoderId ? `User ${chart.allocatedCoderId}` : 'Unassigned'),
     },
     {
       role: 'Auditor',
       id: chart.allocatedAuditorId,
-      label: chart.allocatedAuditorId ? `User ${chart.allocatedAuditorId}` : 'Unassigned',
+      label:
+        chart.allocatedAuditorName ??
+        (chart.allocatedAuditorId ? `User ${chart.allocatedAuditorId}` : 'Unassigned'),
     },
   ];
 
