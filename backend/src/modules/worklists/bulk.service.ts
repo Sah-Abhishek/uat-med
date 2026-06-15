@@ -19,6 +19,7 @@ import { DocumentStorageService } from '../charts/document-storage.service';
 import { DocumentConversionService } from '../charts/document-conversion.service';
 import { AiPredictorService, type ReportType, type InboundFile } from '../charts/ai-predictor.service';
 import { CreateWorklistDto } from './dto/create-worklist.dto';
+import { AddChartsDto } from './dto/add-charts.dto';
 
 /** Canonical column headers the bulk-import Excel must contain (case-insensitive). */
 const REQUIRED_COLUMNS = ['A/C', 'MRN', 'DOS', 'ADM', 'DSC'] as const;
@@ -406,6 +407,126 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
         for (const m of r.errors) errors.push({ row: r.row, message: m });
         skipped += 1;
       }
+
+      return {
+        inserted: inserted.length,
+        skipped,
+        charts: inserted.map((c) => ({
+          id: String(c.id),
+          serialNo: c.serialNo,
+          chartNo: c.chartNo ?? '',
+          mrNumber: c.mrNumber ?? '',
+        })),
+        errors,
+      };
+    });
+  }
+
+  /**
+   * Manually add charts to an existing worklist (the "Add charts" panel in the
+   * Manage Charts modal). Supports two shapes in one call:
+   *   - `charts`: rows with optional chart-# / MR-# / dates entered by hand.
+   *   - `blankCount`: N empty placeholder charts (same as worklist creation).
+   *
+   * Serials continue from the current MAX(serial_no) so they never collide with
+   * survivors or soft-deleted rows (which the delete flow parks at negatives).
+   * Detailed rows whose chart-# already exists in the worklist are skipped with
+   * an error, mirroring the Excel bulk-import. `total_charts` is refreshed from
+   * the real row count afterward so the stored counter stays exact (the delete
+   * flow does the same on the way down).
+   */
+  async addCharts(worklistId: number, dto: AddChartsDto): Promise<BulkImportResult> {
+    await this.ensureWorklist(worklistId);
+
+    // Normalise the detailed rows: blank chart-#/MR-# become undefined so we
+    // store NULL (and skip duplicate detection for value-less rows).
+    const detailed = (dto.charts ?? []).map((c) => ({
+      chartNo: c.chartNo?.trim() || undefined,
+      mrNumber: c.mrNumber?.trim() || undefined,
+      dos: c.dos || undefined,
+      admitDate: c.admitDate || undefined,
+      dischargeDate: c.dischargeDate || undefined,
+    }));
+    const blankCount = Math.max(0, Number(dto.blankCount ?? 0));
+
+    if (detailed.length === 0 && blankCount === 0) {
+      throw new BadRequestException({
+        error: { code: 'bad_request', message: 'Provide at least one chart to add (details or a blank count).' },
+      });
+    }
+
+    return this.ds.transaction(async (manager) => {
+      const cRepo = manager.getRepository(Chart);
+      const wRepo = manager.getRepository(Worklist);
+
+      const maxRow = await cRepo
+        .createQueryBuilder('c')
+        .select('COALESCE(MAX(c.serial_no), 0)', 'max')
+        .where('c.worklist_id = :w', { w: worklistId })
+        .getRawOne<{ max: string | number }>();
+      let serial = Number(maxRow?.max ?? 0);
+
+      // Duplicate chart-#s are checked against existing rows in this worklist
+      // AND within this batch, so the same chart-# can't slip in twice.
+      const incomingChartNos = detailed.map((d) => d.chartNo).filter((n): n is string => !!n);
+      const existing = incomingChartNos.length
+        ? await cRepo
+            .createQueryBuilder('c')
+            .where('c.worklist_id = :w', { w: worklistId })
+            .andWhere('c.chart_no IN (:...nos)', { nos: incomingChartNos })
+            .getMany()
+        : [];
+      const seenChartNos = new Set(existing.map((c) => c.chartNo));
+
+      const toInsert: Chart[] = [];
+      const errors: BulkImportResult['errors'] = [];
+      let skipped = 0;
+
+      detailed.forEach((d, i) => {
+        if (d.chartNo && seenChartNos.has(d.chartNo)) {
+          skipped += 1;
+          errors.push({ row: i + 1, field: 'chartNo', message: `Chart ${d.chartNo} already exists in this worklist — skipped.` });
+          return;
+        }
+        if (d.chartNo) seenChartNos.add(d.chartNo);
+        serial += 1;
+        toInsert.push(
+          cRepo.create({
+            worklistId,
+            serialNo: serial,
+            chartNo: d.chartNo,
+            mrNumber: d.mrNumber,
+            dos: d.dos,
+            admitDate: d.admitDate,
+            dischargeDate: d.dischargeDate,
+            milestone: ChartMilestone.READY_TO_ALLOCATE,
+            chartStatus: ChartStatus.OPEN,
+            priority: Priority.MEDIUM,
+            customFields: {},
+          } as Partial<Chart>),
+        );
+      });
+
+      for (let i = 0; i < blankCount; i++) {
+        serial += 1;
+        toInsert.push(
+          cRepo.create({
+            worklistId,
+            serialNo: serial,
+            milestone: ChartMilestone.READY_TO_ALLOCATE,
+            chartStatus: ChartStatus.OPEN,
+            priority: Priority.MEDIUM,
+            customFields: {},
+          } as Partial<Chart>),
+        );
+      }
+
+      const inserted = toInsert.length > 0 ? await cRepo.save(toInsert) : [];
+
+      // Keep the stored counter exact (the list/detail endpoints take
+      // MAX(declared, rowCount), so this must rise as rows are added).
+      const rowCount = await cRepo.count({ where: { worklistId } });
+      await wRepo.update({ id: worklistId }, { totalCharts: rowCount });
 
       return {
         inserted: inserted.length,

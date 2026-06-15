@@ -145,6 +145,25 @@ export async function bulkPreviewCharts(worklistId: string, file: File): Promise
   return data;
 }
 
+export interface AddChartItem {
+  chartNo?: string;
+  mrNumber?: string;
+  dos?: string;
+  admitDate?: string;
+  dischargeDate?: string;
+}
+
+export interface AddChartsRequest {
+  /** Charts to add with details entered by hand. */
+  charts?: AddChartItem[];
+  /** Number of blank placeholder charts to add (no details). */
+  blankCount?: number;
+}
+
+/** Manually add charts to an existing worklist (Manage Charts → Add charts). */
+export const addCharts = (worklistId: string, body: AddChartsRequest) =>
+  post<BulkImportResult>(`/worklists/${worklistId}/charts`, body);
+
 export async function bulkImportCharts(worklistId: string, file: File): Promise<BulkImportResult> {
   const form = new FormData();
   form.append('file', file);

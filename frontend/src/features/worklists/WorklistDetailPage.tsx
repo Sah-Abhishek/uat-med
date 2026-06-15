@@ -7,9 +7,11 @@ import {
   updateWorklist,
   deleteWorklist,
   allocateWorklist,
+  addCharts,
   runAiOnWorklist,
   clearStuckAiOnWorklist,
   type AllocationRange,
+  type AddChartsRequest,
   type CreateWorklistDto,
   type RunAiResult,
 } from '@/api/worklists';
@@ -1215,15 +1217,35 @@ function ManageChartsModal({
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // "Add charts" panel state (toggled open from the toolbar).
+  const [addOpen, setAddOpen] = useState(false);
+  const [addChartNo, setAddChartNo] = useState('');
+  const [addMr, setAddMr] = useState('');
+  const [addDos, setAddDos] = useState('');
+  const [blankCount, setBlankCount] = useState('');
+  const today = new Date().toISOString().slice(0, 10);
+
   // Reset the modal's transient state every time it reopens so a previous
-  // session's selection / search doesn't carry over.
+  // session's selection / search / add-form doesn't carry over.
   useEffect(() => {
     if (open) {
       setSearch('');
       setSelected(new Set());
       setError(null);
+      setAddOpen(false);
+      setAddChartNo('');
+      setAddMr('');
+      setAddDos('');
+      setBlankCount('');
     }
   }, [open]);
+
+  function clearAddForm() {
+    setAddChartNo('');
+    setAddMr('');
+    setAddDos('');
+    setBlankCount('');
+  }
 
   const chartsQ = useQuery({
     queryKey: ['worklist', worklistId, 'manage-charts'],
@@ -1297,6 +1319,62 @@ function ManageChartsModal({
     },
   });
 
+  const addMutation = useMutation({
+    mutationFn: (body: AddChartsRequest) => addCharts(worklistId, body),
+    onSuccess: (res) => {
+      const n = res.inserted;
+      let msg = `Added ${n} chart${n === 1 ? '' : 's'}.`;
+      if (res.skipped > 0) msg += ` ${res.skipped} skipped.`;
+      setToast(msg);
+      // A partial add (e.g. duplicate chart #) still succeeds for the rest;
+      // surface the first issue so the user knows why a row didn't land.
+      setError(res.errors?.length ? res.errors[0].message : null);
+      clearAddForm();
+      // Mirror the delete flow: refresh every surface that reads chart counts.
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId] });
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId, 'manage-charts'] });
+      qc.invalidateQueries({ queryKey: ['worklist', worklistId, 'charts-allocations'] });
+      qc.invalidateQueries({ queryKey: ['worklists'] });
+      qc.invalidateQueries({ queryKey: ['charts'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (err) => {
+      const e = err as any;
+      setError(
+        e?.response?.data?.error?.message ??
+          (e as unknown as ApiErrorShape)?.message ??
+          'Failed to add charts.',
+      );
+    },
+  });
+
+  const canAddDetailed = !!(addChartNo.trim() || addMr.trim() || addDos);
+  const blankCountNum = Number.parseInt(blankCount, 10);
+  const canAddBlank = Number.isInteger(blankCountNum) && blankCountNum > 0;
+
+  function handleAddDetailed() {
+    if (!canAddDetailed || addMutation.isPending) return;
+    setError(null);
+    addMutation.mutate({
+      charts: [
+        {
+          chartNo: addChartNo.trim() || undefined,
+          mrNumber: addMr.trim() || undefined,
+          dos: addDos || undefined,
+        },
+      ],
+    });
+  }
+
+  function handleAddBlank() {
+    if (!canAddBlank || addMutation.isPending) {
+      if (!canAddBlank) setError('Enter how many blank charts to add (1 or more).');
+      return;
+    }
+    setError(null);
+    addMutation.mutate({ blankCount: blankCountNum });
+  }
+
   return (
     <>
       <Modal
@@ -1327,6 +1405,18 @@ function ManageChartsModal({
                 : `${filtered.length} shown`}
             </div>
             <Button
+              variant="soft"
+              size="sm"
+              aria-expanded={addOpen}
+              onClick={() => {
+                setError(null);
+                setAddOpen((o) => !o);
+              }}
+              leftIcon={<Plus className="w-3.5 h-3.5" />}
+            >
+              Add charts
+            </Button>
+            <Button
               variant="danger"
               size="sm"
               disabled={selected.size === 0 || mutation.isPending}
@@ -1339,6 +1429,103 @@ function ManageChartsModal({
               Delete selected
             </Button>
           </div>
+
+          {/* Add-charts panel — detailed single add OR N blank placeholders. */}
+          {addOpen && (
+            <div className="rounded-xl border border-line bg-surface-sunken/30 p-3 space-y-3">
+              <p className="text-[11px] uppercase tracking-wide font-semibold text-ink-muted">
+                Add charts
+              </p>
+
+              {/* Detailed single add */}
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-[140px]">
+                  <Label>Chart #</Label>
+                  <Input
+                    placeholder="e.g. 19309A"
+                    value={addChartNo}
+                    onChange={(e) => setAddChartNo(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddDetailed();
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex-1 min-w-[140px]">
+                  <Label>MR #</Label>
+                  <Input
+                    placeholder="e.g. MR-1001"
+                    value={addMr}
+                    onChange={(e) => setAddMr(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddDetailed();
+                      }
+                    }}
+                  />
+                </div>
+                <div className="min-w-[170px]">
+                  <Label>Date of service</Label>
+                  <DatePicker
+                    value={addDos}
+                    onChange={(v) => setAddDos(v)}
+                    placeholder="Optional"
+                    max={today}
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  type="button"
+                  onClick={handleAddDetailed}
+                  disabled={!canAddDetailed || addMutation.isPending}
+                  loading={addMutation.isPending}
+                  leftIcon={<Plus className="w-3.5 h-3.5" />}
+                >
+                  Add chart
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-subtle">
+                <span className="h-px flex-1 bg-line" />
+                or
+                <span className="h-px flex-1 bg-line" />
+              </div>
+
+              {/* N blank placeholder charts */}
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[170px]">
+                  <Label>Blank charts</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 5"
+                    value={blankCount}
+                    onChange={(e) => setBlankCount(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddBlank();
+                      }
+                    }}
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="soft"
+                  type="button"
+                  onClick={handleAddBlank}
+                  disabled={!canAddBlank || addMutation.isPending}
+                  loading={addMutation.isPending}
+                  leftIcon={<Plus className="w-3.5 h-3.5" />}
+                >
+                  Add blank charts
+                </Button>
+              </div>
+            </div>
+          )}
 
           <div className="border border-line rounded-xl overflow-hidden">
             <div className="max-h-[420px] overflow-y-auto">

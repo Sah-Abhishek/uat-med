@@ -22,6 +22,7 @@ import type { Response } from 'express';
 import { WorklistsService } from './worklists.service';
 import { WorklistBulkService } from './bulk.service';
 import { CreateWorklistDto } from './dto/create-worklist.dto';
+import { AddChartsDto } from './dto/add-charts.dto';
 import { UpdateWorklistDto } from './dto/update-worklist.dto';
 import { QueryWorklistsDto } from './dto/query-worklists.dto';
 import { AllocateWorklistDto } from './dto/allocate-worklist.dto';
@@ -150,6 +151,15 @@ export class WorklistsController {
   @ApiOperation({ summary: 'Reallocate a range to a different user (full or partial).' })
   reallocate(@Param('id', ParseIntPipe) id: number, @Body() body: { from: number; to: number; assigneeId: number; role: 'CODER' | 'AUDITOR' }, @CurrentUser() user: AuthenticatedUser) {
     return this.svc.reallocate(id, body, user.id);
+  }
+
+  /* ── Manually add charts (Manage Charts → Add charts) ── */
+  @Post(':id/charts')
+  @HttpCode(201)
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Add charts to an existing worklist — detailed rows and/or N blank placeholders.' })
+  addCharts(@Param('id', ParseIntPipe) id: number, @Body() dto: AddChartsDto) {
+    return this.bulk.addCharts(id, dto);
   }
 
   /* ── Bulk: Excel preview (no writes) ─────────────────── */
