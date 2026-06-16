@@ -10,6 +10,7 @@ import {
   Legend,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -80,6 +81,21 @@ export function AiAnalyticsPage() {
   const loading = !data;
 
   const acceptancePct = data ? data.kpis.acceptanceRate * 100 : 0;
+
+  // Acceptance trend granularity (weekly / daily).
+  const [trendMode, setTrendMode] = useState<'weekly' | 'daily'>('weekly');
+  const trendPoints =
+    trendMode === 'weekly'
+      ? (data?.weekly ?? []).map((r) => ({
+          label: shortDate(r.week),
+          accuracy: r.total ? (r.accepted / r.total) * 100 : 0,
+        }))
+      : (data?.daily ?? []).map((r) => ({
+          label: shortDate(r.day),
+          accuracy: r.decisions ? (r.accepted / r.decisions) * 100 : 0,
+        }));
+  const trendEmpty =
+    trendMode === 'weekly' ? (data?.weekly.length ?? 0) === 0 : (data?.daily.length ?? 0) === 0;
 
   return (
     <div className="p-8 max-w-[1600px] space-y-5">
@@ -161,12 +177,13 @@ export function AiAnalyticsPage() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <ChartCard
               title="Acceptance trend"
-              subtitle="Weekly AI acceptance rate"
+              subtitle={`${trendMode === 'weekly' ? 'Weekly' : 'Daily'} AI acceptance rate`}
               icon={<TrendingUp className="w-3.5 h-3.5" />}
               loading={loading}
-              empty={!loading && (data?.weekly.length ?? 0) === 0}
+              empty={!loading && trendEmpty}
+              action={<GranularityToggle value={trendMode} onChange={setTrendMode} />}
             >
-              <AccuracyTrendChart rows={data?.weekly ?? []} />
+              <AccuracyTrendChart points={trendPoints} />
             </ChartCard>
 
             <ChartCard
@@ -180,16 +197,28 @@ export function AiAnalyticsPage() {
             </ChartCard>
           </div>
 
-          {/* ── Row 3: daily volume ───────────────────────── */}
-          <ChartCard
-            title="Daily decision volume"
-            subtitle="Unique charts that received an AI decision each day"
-            icon={<BarChart3 className="w-3.5 h-3.5" />}
-            loading={loading}
-            empty={!loading && (data?.daily.length ?? 0) === 0}
-          >
-            <DailyVolumeChart rows={data?.daily ?? []} />
-          </ChartCard>
+          {/* ── Row 3: daily accuracy + daily volume ──────── */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <ChartCard
+              title="Daily AI accuracy"
+              subtitle="AI acceptance rate per day, vs the period average"
+              icon={<TrendingUp className="w-3.5 h-3.5" />}
+              loading={loading}
+              empty={!loading && (data?.daily.length ?? 0) === 0}
+            >
+              <DailyAccuracyChart rows={data?.daily ?? []} overall={data?.kpis.acceptanceRate ?? 0} />
+            </ChartCard>
+
+            <ChartCard
+              title="Daily decision volume"
+              subtitle="Unique charts that received an AI decision each day"
+              icon={<BarChart3 className="w-3.5 h-3.5" />}
+              loading={loading}
+              empty={!loading && (data?.daily.length ?? 0) === 0}
+            >
+              <DailyVolumeChart rows={data?.daily ?? []} />
+            </ChartCard>
+          </div>
         </>
       )}
     </div>
@@ -364,6 +393,7 @@ function ChartCard({
   loading,
   empty,
   className,
+  action,
   children,
 }: {
   title: string;
@@ -372,11 +402,13 @@ function ChartCard({
   loading?: boolean;
   empty?: boolean;
   className?: string;
+  /** Optional control rendered on the right of the header (e.g. a toggle). */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <Card padding="default" className={className}>
-      <div className="flex items-start justify-between mb-3">
+      <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h4 className="text-sm font-bold text-ink inline-flex items-center gap-1.5">
             {icon && <span className="text-ink-muted">{icon}</span>}
@@ -384,6 +416,7 @@ function ChartCard({
           </h4>
           {subtitle && <p className="text-[11px] text-ink-muted mt-0.5">{subtitle}</p>}
         </div>
+        {action && <div className="shrink-0">{action}</div>}
       </div>
       <div className="h-[280px] w-full">
         {loading ? (
@@ -544,20 +577,40 @@ function VerdictDonut({
   );
 }
 
-/* ── Acceptance trend (weekly %) ─────────────────────────── */
+/* ── Acceptance trend (weekly / daily %) ─────────────────── */
 
-function AccuracyTrendChart({
-  rows,
+/** Weekly ↔ Daily segmented toggle for the acceptance trend. */
+function GranularityToggle({
+  value,
+  onChange,
 }: {
-  rows: { week: string; accepted: number; edited: number; rejected: number; total: number }[];
+  value: 'weekly' | 'daily';
+  onChange: (v: 'weekly' | 'daily') => void;
 }) {
-  const data = rows.map((r) => ({
-    week: shortDate(r.week),
-    accuracy: r.total ? (r.accepted / r.total) * 100 : 0,
-  }));
+  return (
+    <div className="inline-flex rounded-lg border border-line bg-surface-sunken/40 p-0.5 text-[11px] font-semibold">
+      {(['weekly', 'daily'] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          aria-pressed={value === m}
+          className={cn(
+            'px-2.5 py-1 rounded-md capitalize transition',
+            value === m ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
+          )}
+        >
+          {m}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AccuracyTrendChart({ points }: { points: { label: string; accuracy: number }[] }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data} margin={{ top: 5, right: 16, bottom: 5, left: 0 }}>
+      <AreaChart data={points} margin={{ top: 5, right: 16, bottom: 5, left: 0 }}>
         <defs>
           <linearGradient id="accFill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={COLOR_ACCEPT} stopOpacity={0.35} />
@@ -565,7 +618,7 @@ function AccuracyTrendChart({
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} stroke={COLOR_GRID} strokeDasharray="4 4" strokeOpacity={0.6} />
-        <XAxis dataKey="week" stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <XAxis dataKey="label" stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
         <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
         <Tooltip
           content={
@@ -579,6 +632,69 @@ function AccuracyTrendChart({
           strokeWidth={2.5}
           fill="url(#accFill)"
           dot={{ r: 2.5, strokeWidth: 0, fill: COLOR_ACCEPT }}
+          activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
+          animationDuration={700}
+          animationEasing="ease-out"
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* ── Daily AI accuracy (% per day, vs period average) ────── */
+
+function DailyAccuracyChart({
+  rows,
+  overall,
+}: {
+  rows: { day: string; accepted: number; decisions: number }[];
+  overall: number;
+}) {
+  const data = rows.map((r) => ({
+    day: shortDate(r.day),
+    accuracy: r.decisions ? (r.accepted / r.decisions) * 100 : 0,
+    accepted: r.accepted,
+    decisions: r.decisions,
+  }));
+  const overallPct = overall * 100;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={data} margin={{ top: 5, right: 16, bottom: 5, left: 0 }}>
+        <defs>
+          <linearGradient id="dailyAccFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={COLOR_ACCEPT} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={COLOR_ACCEPT} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid vertical={false} stroke={COLOR_GRID} strokeDasharray="4 4" strokeOpacity={0.6} />
+        <XAxis dataKey="day" stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <Tooltip
+          content={
+            <ChartTooltip
+              formatItem={(e) => ({
+                label: 'Accuracy',
+                value: `${(e.value as number).toFixed(1)}%  (${e.payload.accepted}/${e.payload.decisions})`,
+                color: COLOR_ACCEPT,
+              })}
+            />
+          }
+        />
+        {overallPct > 0 && (
+          <ReferenceLine
+            y={overallPct}
+            stroke={COLOR_AXIS}
+            strokeDasharray="5 4"
+            label={{ value: `avg ${overallPct.toFixed(1)}%`, position: 'right', fontSize: 10, fill: COLOR_AXIS }}
+          />
+        )}
+        <Area
+          type="monotone"
+          dataKey="accuracy"
+          stroke={COLOR_ACCEPT}
+          strokeWidth={2.5}
+          fill="url(#dailyAccFill)"
+          dot={{ r: 2, strokeWidth: 0, fill: COLOR_ACCEPT }}
           activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
           animationDuration={700}
           animationEasing="ease-out"
