@@ -219,6 +219,14 @@ function safeJson(text: string): unknown {
 export interface RegisterUserRequest {
   name: string;
   email: string;
+  /** Required by the gateway since ~late May 2026 — CreateUserRequest.required
+   * is ['name','email','password']. Coders never authenticate against the
+   * gateway directly (we call it with a shared per-application JWT; per-user
+   * identity travels in `coder_id`), so this is a throwaway crypto-random value
+   * minted per registration purely to satisfy the schema — never persisted or
+   * reused, so there's no shared secret to leak. Omitting it 422s, which used
+   * to leave `public_id` null and silently drop every correction forward. */
+  password: string;
   /** Gateway accepts CODER | ADMIN | VIEWER. Their role enum doesn't have an
    * AUDITOR — we register auditors as CODER since the role field is purely
    * informational on the gateway side today (no behavior tied to it). */

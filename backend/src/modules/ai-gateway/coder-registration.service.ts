@@ -1,6 +1,7 @@
-import { ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { BadGatewayException, ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import * as crypto from 'crypto';
 
 import { User } from '../../entities/user.entity';
 import { Role } from '../../common/enums/roles.enum';
@@ -39,6 +40,16 @@ export class CoderRegistrationService {
     private readonly gateway: AiGatewayClient,
   ) {}
 
+  /** Mint a throwaway password for gateway registration. The gateway's
+   * /admin/users schema requires one, but our reviewers authenticate against
+   * THIS app, never the gateway directly — so the value only has to satisfy
+   * the schema. Random-per-user means there's no shared secret to leak or
+   * rotate, and we never store it (the coder couldn't log into the gateway
+   * with it anyway). 48 hex chars of CSPRNG output. */
+  private gatewayPassword(): string {
+    return crypto.randomBytes(24).toString('hex');
+  }
+
   /** Should this user be synced to the gateway? */
   needsSync(user: User): boolean {
     return (
@@ -68,6 +79,7 @@ export class CoderRegistrationService {
       const registered = await this.gateway.registerUser({
         name: user.fullName,
         email: user.email,
+        password: this.gatewayPassword(),
         role: 'CODER',
       });
       user.publicId = registered.id;
@@ -84,6 +96,22 @@ export class CoderRegistrationService {
           `Gateway 409 registering user ${user.id} (${user.email}): email already taken upstream`,
         );
         throw err;
+      }
+      // A 422 from /admin/users is a *contract* breach (a required field we're
+      // not sending), not a transient blip — it fails identically on every
+      // retry and backfill, silently leaving public_id null so the user's
+      // corrections never reach the gateway. Treat it distinctly from a
+      // genuine defer: error-level with the gateway's response body, so the
+      // next schema change is caught in hours instead of going unnoticed for
+      // weeks. Still swallowed (return the user) so user creation succeeds.
+      const gatewayErr = parseGatewayError(err);
+      if (gatewayErr?.status === 422) {
+        this.log.error(
+          `Gateway 422 registering user ${user.id} (${user.email}): ` +
+            `/admin/users payload no longer satisfies the gateway contract — ` +
+            `${JSON.stringify(gatewayErr.body)}`,
+        );
+        return user;
       }
       const msg = (err as Error)?.message ?? 'unknown error';
       this.log.warn(
@@ -110,6 +138,7 @@ export class CoderRegistrationService {
     const registered = await this.gateway.registerUser({
       name: user.fullName,
       email: user.email,
+      password: this.gatewayPassword(),
       role: 'CODER',
     });
     user.publicId = registered.id;
@@ -151,4 +180,20 @@ export class CoderRegistrationService {
     );
     return { attempted: candidates.length, registered, conflicts, failed };
   }
+}
+
+/** Pull the upstream HTTP status and response body out of the exception the
+ * gateway client throws. AiGatewayClient wraps every non-2xx/non-409 response
+ * in a BadGatewayException carrying `{ error: { status, body, ... } }`; this
+ * lets syncOne() distinguish a permanent contract breach (422) from a
+ * transient defer without re-parsing log strings. Returns null when the error
+ * isn't one of ours. */
+function parseGatewayError(err: unknown): { status?: number; body?: unknown } | null {
+  if (!(err instanceof BadGatewayException)) return null;
+  const resp = err.getResponse();
+  if (resp && typeof resp === 'object' && 'error' in resp) {
+    const e = (resp as { error?: { status?: number; body?: unknown } }).error;
+    return { status: e?.status, body: e?.body };
+  }
+  return null;
 }
