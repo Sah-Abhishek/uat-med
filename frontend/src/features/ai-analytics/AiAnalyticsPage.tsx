@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Area,
@@ -42,6 +42,7 @@ import {
   type CodeReviewType,
   type QaFilters,
 } from '@/api/qa';
+import { useScope } from '@/scope/store';
 import { cn } from '@/lib/utils';
 
 /* Verdict palette — kept in sync with the QA accuracy tab and decision chips. */
@@ -61,20 +62,41 @@ const CODE_TYPE_LABEL: Record<CodeReviewType, string> = {
   MODIFIER: 'Modifier',
 };
 
-/** Filters this page exposes — a focused subset of QaFilters. */
-type AnalyticsFilters = Pick<
-  QaFilters,
-  'clientId' | 'locationId' | 'specialityId' | 'facility' | 'from' | 'to'
->;
+/** Page-local filters. Client / Location are NOT here — they come from the
+ * global header scope (useScope), so the header filters AI Analytics in lockstep
+ * with Charts / Worklists / Dashboard. */
+type AnalyticsFilters = Pick<QaFilters, 'specialityId' | 'facility' | 'from' | 'to'>;
 
 export function AiAnalyticsPage() {
   const [filters, setFilters] = useState<AnalyticsFilters>({});
   const patch = (p: Partial<AnalyticsFilters>) => setFilters((f) => ({ ...f, ...p }));
   const reset = () => setFilters({});
 
+  // Client / Location come from the global header scope (same as Charts /
+  // Worklists), so the header dropdowns filter this page.
+  const scopeClientId = useScope((s) => s.clientId);
+  const scopeLocationId = useScope((s) => s.locationId);
+  const setClient = useScope((s) => s.setClient);
+  const setLocation = useScope((s) => s.setLocation);
+
+  // A facility chosen under one client/location is meaningless under another —
+  // clear it whenever the scope changes.
+  useEffect(() => {
+    setFilters((f) => (f.facility ? { ...f, facility: undefined } : f));
+  }, [scopeClientId, scopeLocationId]);
+
+  const scopedFilters: QaFilters = useMemo(
+    () => ({
+      ...filters,
+      ...(scopeClientId != null ? { clientId: scopeClientId } : {}),
+      ...(scopeLocationId != null ? { locationId: scopeLocationId } : {}),
+    }),
+    [filters, scopeClientId, scopeLocationId],
+  );
+
   const q = useQuery({
-    queryKey: ['qa', 'accuracy', filters],
-    queryFn: () => getQaAccuracy(filters),
+    queryKey: ['qa', 'accuracy', scopedFilters],
+    queryFn: () => getQaAccuracy(scopedFilters),
     placeholderData: (prev) => prev,
   });
   const data = q.data;
@@ -104,7 +126,15 @@ export function AiAnalyticsPage() {
         subtitle="How accurate the AI coding suggestions are — overall, by code type, and over time"
       />
 
-      <FilterBar filters={filters} onChange={patch} onReset={reset} />
+      <FilterBar
+        filters={filters}
+        onChange={patch}
+        onReset={reset}
+        clientId={scopeClientId}
+        locationId={scopeLocationId}
+        onClientChange={setClient}
+        onLocationChange={setLocation}
+      />
 
       {q.isError && !data ? (
         <div className="rounded-xl border border-danger/30 bg-danger-soft/30 px-4 py-3 text-sm text-danger">
@@ -231,29 +261,39 @@ function FilterBar({
   filters,
   onChange,
   onReset,
+  clientId,
+  locationId,
+  onClientChange,
+  onLocationChange,
 }: {
   filters: AnalyticsFilters;
   onChange: (p: Partial<AnalyticsFilters>) => void;
   onReset: () => void;
+  // Client / Location are the global header scope, bound here so picking in
+  // either place stays in sync (mirrors the Worklists filter bar).
+  clientId: number | null;
+  locationId: number | null;
+  onClientChange: (id: number | null) => void;
+  onLocationChange: (id: number | null) => void;
 }) {
   const clientsQ = useQuery({ queryKey: ['configurations', 'clients'], queryFn: () => listClients() });
   const locationsQ = useQuery({
-    queryKey: ['configurations', 'locations', filters.clientId],
-    queryFn: () => listLocations(filters.clientId!),
-    enabled: !!filters.clientId,
+    queryKey: ['configurations', 'locations', clientId],
+    queryFn: () => listLocations(clientId!),
+    enabled: clientId != null,
   });
   const specialitiesQ = useQuery({
-    queryKey: ['configurations', 'primary-specialities', filters.clientId],
-    queryFn: () => listPrimarySpecialities(filters.clientId),
+    queryKey: ['configurations', 'primary-specialities', clientId],
+    queryFn: () => listPrimarySpecialities(clientId ?? undefined),
   });
   const facilitiesQ = useQuery({
-    queryKey: ['qa', 'facilities', filters.clientId, filters.locationId],
-    queryFn: () => listQaFacilities({ clientId: filters.clientId, locationId: filters.locationId }),
+    queryKey: ['qa', 'facilities', clientId, locationId],
+    queryFn: () => listQaFacilities({ clientId: clientId ?? undefined, locationId: locationId ?? undefined }),
   });
 
+  // The Reset button only clears the page-local filters; the global Client /
+  // Location scope is left alone (it's shared with the rest of the app).
   const hasAny =
-    !!filters.clientId ||
-    !!filters.locationId ||
     !!filters.specialityId ||
     !!filters.facility ||
     !!filters.from ||
@@ -274,15 +314,13 @@ function FilterBar({
 
         <div className="md:col-span-2">
           <FancySelect
-            value={filters.clientId ? String(filters.clientId) : ''}
-            onChange={(v) =>
-              onChange({
-                clientId: v ? Number(v) : undefined,
-                // Reset dependents when the client changes.
-                locationId: undefined,
-                facility: undefined,
-              })
-            }
+            value={clientId ? String(clientId) : ''}
+            onChange={(v) => {
+              // Changing the client resets the location scope + the facility.
+              onClientChange(v ? Number(v) : null);
+              onLocationChange(null);
+              onChange({ facility: undefined });
+            }}
             options={[
               { value: '', label: 'All clients' },
               ...(clientsQ.data?.items ?? []).map((c) => ({ value: String(c.id), label: c.name })),
@@ -293,14 +331,17 @@ function FilterBar({
 
         <div className="md:col-span-2">
           <FancySelect
-            value={filters.locationId ? String(filters.locationId) : ''}
-            onChange={(v) => onChange({ locationId: v ? Number(v) : undefined, facility: undefined })}
+            value={locationId ? String(locationId) : ''}
+            onChange={(v) => {
+              onLocationChange(v ? Number(v) : null);
+              onChange({ facility: undefined });
+            }}
             options={[
               { value: '', label: 'All locations' },
               ...(locationsQ.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name })),
             ]}
             placeholder="All locations"
-            disabled={!filters.clientId}
+            disabled={clientId == null}
           />
         </div>
 
