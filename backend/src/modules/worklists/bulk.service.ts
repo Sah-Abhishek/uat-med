@@ -976,10 +976,10 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async dispatchOneChartToGateway(chartId: number): Promise<boolean> {
-    // Load the worklist's primary speciality so it can be forwarded to the gateway.
+    // Load the worklist's sub-speciality so it can be forwarded to the gateway.
     const c = await this.charts.findOne({
       where: { id: chartId },
-      relations: { worklist: { primarySpeciality: true } },
+      relations: { worklist: { subSpeciality: true } },
     });
     if (!c) return false;
     const cf = (c.customFields ?? {}) as Record<string, unknown>;
@@ -1028,9 +1028,14 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
       encounterDate: c.dos ?? c.admitDate,
       facility: this.optionalString(c.customFields?.facility),
       department: this.optionalString(c.customFields?.specialty),
-      // The chart's primary speciality (from its worklist) — forwarded as
-      // `primary_speciality` so the gateway can apply speciality-tuned RAG.
-      primarySpeciality: this.optionalString(c.worklist?.primarySpeciality?.name),
+      // The chart's sub-speciality (from its worklist; falls back to the
+      // per-chart customFields value) — forwarded as `sub_speciality` so the
+      // gateway can apply speciality-tuned RAG. Renamed from primary_speciality
+      // on 2026-06-16; see encounter_primary_speciality_change.md.
+      subSpeciality: this.optionalString(
+        c.worklist?.subSpeciality?.name ??
+          (typeof c.customFields?.subSpeciality === 'string' ? c.customFields.subSpeciality : undefined),
+      ),
     });
 
     // Re-read so we don't stomp concurrent edits (e.g. user clearing the queue

@@ -952,11 +952,11 @@ async update(id: number, dto: UpdateChartDto) {
     files: Express.Multer.File[],
     body: ProcessDocumentsDto,
   ) {
-    // Load the service line and the worklist's primary speciality so both names
+    // Load the service line and the worklist's sub-speciality so both names
     // can be forwarded to the AI gateway.
     const c = await this.charts.findOne({
       where: { id },
-      relations: { serviceLine: true, worklist: { primarySpeciality: true } },
+      relations: { serviceLine: true, worklist: { subSpeciality: true } },
     });
     if (!c) throw new NotFoundException();
 
@@ -1008,9 +1008,14 @@ async update(id: number, dto: UpdateChartDto) {
       // against the right cohort in the gateway.
       facility: this.optionalString(c.customFields?.facility),
       department: this.optionalString(c.customFields?.specialty),
-      // The chart's primary speciality (from its worklist) — forwarded as
-      // `primary_speciality` so the gateway can apply speciality-tuned RAG.
-      primarySpeciality: this.optionalString(c.worklist?.primarySpeciality?.name),
+      // The chart's sub-speciality (from its worklist; falls back to the
+      // per-chart customFields value) — forwarded as `sub_speciality` so the
+      // gateway can apply speciality-tuned RAG. Renamed from primary_speciality
+      // on 2026-06-16; see encounter_primary_speciality_change.md.
+      subSpeciality: this.optionalString(
+        c.worklist?.subSpeciality?.name ??
+          (typeof c.customFields?.subSpeciality === 'string' ? c.customFields.subSpeciality : undefined),
+      ),
       // Deferred: the gateway doesn't accept this yet, so startEncounter ignores
       // it for now. Passed through so it's a one-line flip when the gateway adds
       // the field — the value is already persisted on the chart regardless.
@@ -1221,7 +1226,7 @@ async update(id: number, dto: UpdateChartDto) {
   async reprocess(id: number) {
     const c = await this.charts.findOne({
       where: { id },
-      relations: { serviceLine: true, worklist: { primarySpeciality: true } },
+      relations: { serviceLine: true, worklist: { subSpeciality: true } },
     });
     if (!c) throw new NotFoundException();
     if (c.customFields?.pendingPrediction) {
@@ -1249,9 +1254,14 @@ async update(id: number, dto: UpdateChartDto) {
       encounterDate: c.dos ?? c.admitDate,
       facility: this.optionalString(c.customFields?.facility),
       department: this.optionalString(c.customFields?.specialty),
-      // The chart's primary speciality (from its worklist) — forwarded as
-      // `primary_speciality` so the gateway can apply speciality-tuned RAG.
-      primarySpeciality: this.optionalString(c.worklist?.primarySpeciality?.name),
+      // The chart's sub-speciality (from its worklist; falls back to the
+      // per-chart customFields value) — forwarded as `sub_speciality` so the
+      // gateway can apply speciality-tuned RAG. Renamed from primary_speciality
+      // on 2026-06-16; see encounter_primary_speciality_change.md.
+      subSpeciality: this.optionalString(
+        c.worklist?.subSpeciality?.name ??
+          (typeof c.customFields?.subSpeciality === 'string' ? c.customFields.subSpeciality : undefined),
+      ),
       // Deferred — see process-documents call site. Forwarded once the gateway
       // accepts it; persisted on the chart in the meantime.
       serviceLine: this.optionalString(c.serviceLine?.name),
