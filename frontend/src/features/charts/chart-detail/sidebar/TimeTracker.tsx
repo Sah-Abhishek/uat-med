@@ -80,7 +80,7 @@ export function TimeTracker({ chartId }: { chartId: string }) {
         <ul className="space-y-2">
           {visibleEntries.map((e) => (
             <li key={e.id} className="flex items-center gap-2.5">
-              <Avatar name={e.userName ?? 'Unknown'} size="sm" />
+              <Avatar name={e.userName ?? 'Unknown'} src={e.avatarUrl ?? undefined} size="sm" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-ink truncate">
                   {e.userName ?? `User #${e.userId}`}

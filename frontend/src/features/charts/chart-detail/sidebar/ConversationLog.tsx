@@ -70,7 +70,7 @@ export function ConversationLog({ chart, timerRunning }: Props) {
           <>
             {visible.map((m) => (
               <div key={m.id} className="flex items-start gap-2">
-                <Avatar name={m.createdByUserName ?? 'Unknown'} size="sm" />
+                <Avatar name={m.createdByUserName ?? 'Unknown'} src={m.createdByAvatarUrl ?? undefined} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
                     <span className="text-[12px] font-semibold text-ink truncate">

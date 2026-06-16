@@ -116,6 +116,7 @@ export interface ChartTimeEntry {
   userId: number;
   userName: string | null;
   role: string | null;
+  avatarUrl: string | null;
   kind: 'CODING' | 'AUDIT';
   startedAt: string;
   stoppedAt: string | null;

@@ -129,7 +129,13 @@ export function TopBar() {
           )}
           aria-label="User menu"
         >
-          {user ? initials(user.fullName) : '?'}
+          {user?.avatarUrl ? (
+            <img src={user.avatarUrl} alt={user.fullName} className="w-full h-full object-cover" />
+          ) : user ? (
+            initials(user.fullName)
+          ) : (
+            '?'
+          )}
         </button>
         {menuOpen && user && (
           <div className="absolute right-0 top-full mt-2 w-64 card shadow-pop dark:shadow-pop-dark p-1 z-50">

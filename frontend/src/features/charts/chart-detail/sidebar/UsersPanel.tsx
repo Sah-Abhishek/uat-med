@@ -12,6 +12,7 @@ export function UsersPanel({ chart }: { chart: Chart }) {
       label:
         chart.allocatedCoderName ??
         (chart.allocatedCoderId ? `User ${chart.allocatedCoderId}` : 'Unassigned'),
+      avatarUrl: chart.allocatedCoderAvatarUrl ?? undefined,
     },
     {
       role: 'Auditor',
@@ -19,6 +20,7 @@ export function UsersPanel({ chart }: { chart: Chart }) {
       label:
         chart.allocatedAuditorName ??
         (chart.allocatedAuditorId ? `User ${chart.allocatedAuditorId}` : 'Unassigned'),
+      avatarUrl: chart.allocatedAuditorAvatarUrl ?? undefined,
     },
   ];
 
@@ -31,7 +33,7 @@ export function UsersPanel({ chart }: { chart: Chart }) {
         {items.map((u) => (
           <div key={u.role} className="flex items-center gap-2.5">
             {u.id ? (
-              <Avatar name={u.label} size="md" />
+              <Avatar name={u.label} src={u.avatarUrl} size="md" />
             ) : (
               <div className="w-9 h-9 rounded-full bg-surface-sunken" />
             )}

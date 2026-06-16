@@ -164,6 +164,7 @@ export interface ActiveWorkItem {
   userId: number;
   userName: string | null;
   userRole: Role | null;
+  avatarUrl: string | null;
   chartId: number;
   chartNo: string | null;
   serialNo: number | null;

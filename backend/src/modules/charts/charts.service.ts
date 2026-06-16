@@ -197,13 +197,13 @@ export class ChartsService {
       if (c.originalCoderId) userIds.add(Number(c.originalCoderId));
       if (c.originalAuditorId) userIds.add(Number(c.originalAuditorId));
     }
-    const userMap = new Map<number, string>();
+    const userMap = new Map<number, { name: string; avatarUrl: string | null }>();
     if (userIds.size > 0) {
       const users = await this.users.find({
         where: { id: In([...userIds]) },
-        select: ['id', 'fullName'],
+        select: ['id', 'fullName', 'avatarUrl'],
       });
-      for (const u of users) userMap.set(Number(u.id), u.fullName);
+      for (const u of users) userMap.set(Number(u.id), { name: u.fullName, avatarUrl: u.avatarUrl ?? null });
     }
 
     // Batch-fetch earliest CODER/AUDITOR allocation timestamps per chart so the
@@ -246,12 +246,14 @@ export class ChartsService {
         specialityName: worklist?.primarySpeciality?.name ?? null,
         processName: worklist?.process?.name ?? null,
         receivedDate: worklist?.receivedDate ?? null,
-        allocatedCoderName: rest.allocatedCoderId ? userMap.get(Number(rest.allocatedCoderId)) ?? null : null,
-        allocatedAuditorName: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId)) ?? null : null,
+        allocatedCoderName: rest.allocatedCoderId ? userMap.get(Number(rest.allocatedCoderId))?.name ?? null : null,
+        allocatedAuditorName: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId))?.name ?? null : null,
+        allocatedCoderAvatarUrl: rest.allocatedCoderId ? userMap.get(Number(rest.allocatedCoderId))?.avatarUrl ?? null : null,
+        allocatedAuditorAvatarUrl: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId))?.avatarUrl ?? null : null,
         originalCoderId: rest.originalCoderId ?? null,
         originalAuditorId: rest.originalAuditorId ?? null,
-        originalCoderName: rest.originalCoderId ? userMap.get(Number(rest.originalCoderId)) ?? null : null,
-        originalAuditorName: rest.originalAuditorId ? userMap.get(Number(rest.originalAuditorId)) ?? null : null,
+        originalCoderName: rest.originalCoderId ? userMap.get(Number(rest.originalCoderId))?.name ?? null : null,
+        originalAuditorName: rest.originalAuditorId ? userMap.get(Number(rest.originalAuditorId))?.name ?? null : null,
         coderAllocatedAt: alloc.coderAt ?? null,
         auditorAllocatedAt: alloc.auditorAt ?? null,
         // Pulled from custom_fields where the seed/import populates them. Null
@@ -417,10 +419,10 @@ export class ChartsService {
     const userIds = [
       c.allocatedCoderId, c.allocatedAuditorId, c.originalCoderId, c.originalAuditorId,
     ].filter((v): v is number => v != null).map(Number);
-    const userMap = new Map<number, string>();
+    const userMap = new Map<number, { name: string; avatarUrl: string | null }>();
     if (userIds.length) {
       const users = await this.users.find({ where: { id: In([...new Set(userIds)]) } });
-      for (const u of users) userMap.set(Number(u.id), u.fullName);
+      for (const u of users) userMap.set(Number(u.id), { name: u.fullName, avatarUrl: u.avatarUrl ?? null });
     }
 
     // Earliest CODER / AUDITOR allocation timestamps (the handoff dates).
@@ -466,10 +468,12 @@ export class ChartsService {
         worklist?.subSpeciality?.name ?? (typeof cf.subSpeciality === 'string' ? cf.subSpeciality : null),
       processName: worklist?.process?.name ?? null,
       receivedDate: worklist?.receivedDate ?? null,
-      allocatedCoderName: rest.allocatedCoderId ? userMap.get(Number(rest.allocatedCoderId)) ?? null : null,
-      allocatedAuditorName: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId)) ?? null : null,
-      originalCoderName: rest.originalCoderId ? userMap.get(Number(rest.originalCoderId)) ?? null : null,
-      originalAuditorName: rest.originalAuditorId ? userMap.get(Number(rest.originalAuditorId)) ?? null : null,
+      allocatedCoderName: rest.allocatedCoderId ? userMap.get(Number(rest.allocatedCoderId))?.name ?? null : null,
+      allocatedAuditorName: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId))?.name ?? null : null,
+      originalCoderName: rest.originalCoderId ? userMap.get(Number(rest.originalCoderId))?.name ?? null : null,
+      originalAuditorName: rest.originalAuditorId ? userMap.get(Number(rest.originalAuditorId))?.name ?? null : null,
+      allocatedCoderAvatarUrl: rest.allocatedCoderId ? userMap.get(Number(rest.allocatedCoderId))?.avatarUrl ?? null : null,
+      allocatedAuditorAvatarUrl: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId))?.avatarUrl ?? null : null,
       coderAllocatedAt,
       auditorAllocatedAt,
       qcStatus: typeof cf.qcStatus === 'string' ? cf.qcStatus : null,
@@ -720,6 +724,7 @@ async update(id: number, dto: UpdateChartDto) {
         t.user_id AS "userId",
         u.full_name AS "userName",
         u.role AS "role",
+        u.avatar_url AS "avatarUrl",
         t.kind AS "kind",
         t.started_at AS "startedAt",
         t.stopped_at AS "stoppedAt",
@@ -740,6 +745,7 @@ async update(id: number, dto: UpdateChartDto) {
         userId: Number(r.userId),
         userName: r.userName ?? null,
         role: r.role ?? null,
+        avatarUrl: r.avatarUrl ?? null,
         kind: r.kind,
         startedAt: r.startedAt,
         stoppedAt: r.stoppedAt,
@@ -912,6 +918,7 @@ async update(id: number, dto: UpdateChartDto) {
       ...rest,
       createdByUserId: rest.auditorId != null ? String(rest.auditorId) : null,
       createdByUserName: auditor?.fullName ?? null,
+      createdByAvatarUrl: auditor?.avatarUrl ?? null,
     }));
   }
 

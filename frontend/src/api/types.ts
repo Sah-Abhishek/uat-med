@@ -42,7 +42,7 @@ export interface LoginResponse {
   refreshToken: string;
   user: Pick<
     User,
-    'id' | 'email' | 'role' | 'fullName' | 'clientId' | 'locationId'
+    'id' | 'email' | 'role' | 'fullName' | 'clientId' | 'locationId' | 'avatarUrl'
   >;
 }
 
@@ -212,6 +212,8 @@ export interface Chart {
   originalAuditorName?: string | null;
   allocatedCoderName?: string | null;
   allocatedAuditorName?: string | null;
+  allocatedCoderAvatarUrl?: string | null;
+  allocatedAuditorAvatarUrl?: string | null;
   coderAllocatedAt?: string | null;
   auditorAllocatedAt?: string | null;
   /** Total durable work-timer time logged on this chart (sum of completed
@@ -368,6 +370,7 @@ export interface ChartFeedback {
   comments: string | null;
   createdByUserId: string | null;
   createdByUserName: string | null;
+  createdByAvatarUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }

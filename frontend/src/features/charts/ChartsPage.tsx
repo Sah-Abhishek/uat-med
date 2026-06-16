@@ -260,9 +260,12 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
       render: (c) => {
         const name = c.allocatedCoderName ?? c.allocatedAuditorName;
         if (!name) return <span className="text-ink-subtle text-xs">—</span>;
+        const avatarUrl = c.allocatedCoderName
+          ? c.allocatedCoderAvatarUrl
+          : c.allocatedAuditorAvatarUrl;
         return (
           <span className="inline-flex items-center gap-2">
-            <Avatar name={name} size="sm" />
+            <Avatar name={name} src={avatarUrl ?? undefined} size="sm" />
             <span className="text-xs truncate">{name}</span>
           </span>
         );

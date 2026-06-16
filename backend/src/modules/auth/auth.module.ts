@@ -7,6 +7,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { SsoService } from './sso.service';                          // ← ADD
+import { AvatarService } from './avatar.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { User } from '../../entities/user.entity';
@@ -27,7 +28,7 @@ import { UserSignupRequest } from '../../entities/user-signup-request.entity';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LocalStrategy, SsoService],   // ← ADD SsoService HERE
+  providers: [AuthService, JwtStrategy, LocalStrategy, SsoService, AvatarService],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

@@ -9,6 +9,8 @@ interface StoredUser {
   role: Role;
   clientId: number | null;
   locationId: number | null;
+  /** Microsoft profile photo URL, captured at SSO login. */
+  avatarUrl?: string | null;
 }
 
 interface AuthState {
@@ -47,6 +49,7 @@ export const useAuth = create<AuthState>()(
             role: res.user.role,
             clientId: res.user.clientId,
             locationId: res.user.locationId,
+            avatarUrl: res.user.avatarUrl ?? null,
           },
         }),
 

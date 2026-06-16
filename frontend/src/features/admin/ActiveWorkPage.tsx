@@ -100,7 +100,7 @@ export function ActiveWorkPage() {
                     <tr key={it.sessionId} className="border-b border-line/60 last:border-b-0 hover:bg-surface-2/40">
                       <td className="px-4 py-2.5">
                         <span className="inline-flex items-center gap-2">
-                          <Avatar name={it.userName ?? 'Unknown'} size="sm" />
+                          <Avatar name={it.userName ?? 'Unknown'} src={it.avatarUrl ?? undefined} size="sm" />
                           <span className="min-w-0">
                             <span className="block text-xs font-medium text-ink truncate">
                               {it.userName ?? `User #${it.userId}`}

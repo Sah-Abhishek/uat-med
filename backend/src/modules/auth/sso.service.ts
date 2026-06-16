@@ -7,6 +7,7 @@ import jwksClient from 'jwks-rsa';
 import { User } from '../../entities/user.entity';
 import { UserStatus } from '../../common/enums';
 import { AuthService } from './auth.service';
+import { AvatarService } from './avatar.service';
 
 interface EntraTokenClaims {
   oid: string;          // Entra object ID
@@ -29,6 +30,7 @@ export class SsoService {
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly auth: AuthService,
     private readonly cfg: ConfigService,
+    private readonly avatars: AvatarService,
   ) {
     this.tenantId = this.cfg.get<string>('AZURE_TENANT_ID') ?? '';
     this.expectedAudience = this.cfg.get<string>('AZURE_CLIENT_ID') ?? '';
@@ -97,7 +99,13 @@ export class SsoService {
       throw new UnauthorizedException({ error: { code: 'unauthorized', message: 'Account is inactive.' } });
     }
 
-    // 6. Issue Valerion tokens via existing flow
+    // 6. Capture the user's real Microsoft profile photo (best-effort — uses
+    // the same delegated token, no extra permissions). Refreshes on each login
+    // so a changed photo eventually propagates.
+    const photoUrl = await this.avatars.captureFromGraph(user.id, microsoftAccessToken);
+    if (photoUrl) user.avatarUrl = photoUrl;
+
+    // 7. Issue Valerion tokens via existing flow
     user.lastLoginAt = new Date();
     await this.users.save(user);
 

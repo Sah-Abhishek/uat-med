@@ -70,7 +70,7 @@ export function UserProfilePage() {
 
       <Card padding="default">
         <div className="flex items-start gap-5">
-          <Avatar name={user.fullName} size="lg" />
+          <Avatar name={user.fullName} src={user.avatarUrl ?? undefined} size="lg" />
           <div className="flex-1">
             <h3 className="text-lg font-bold text-ink">{user.fullName}</h3>
             <p className="text-sm text-ink-muted">{user.email}</p>

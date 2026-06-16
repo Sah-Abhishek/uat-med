@@ -7,6 +7,7 @@ export interface ActiveWorkItem {
   userId: number;
   userName: string | null;
   userRole: string | null;
+  avatarUrl: string | null;
   chartId: number;
   chartNo: string | null;
   serialNo: number | null;
@@ -38,6 +39,7 @@ export class AdminActiveWorkService {
         t.user_id     AS "userId",
         u.full_name   AS "userName",
         u.role        AS "userRole",
+        u.avatar_url  AS "avatarUrl",
         t.chart_id    AS "chartId",
         c.chart_no    AS "chartNo",
         c.serial_no   AS "serialNo",
@@ -64,6 +66,7 @@ export class AdminActiveWorkService {
       userId: Number(r.userId),
       userName: r.userName ?? null,
       userRole: r.userRole ?? null,
+      avatarUrl: r.avatarUrl ?? null,
       chartId: Number(r.chartId),
       chartNo: r.chartNo ?? null,
       serialNo: r.serialNo != null ? Number(r.serialNo) : null,
