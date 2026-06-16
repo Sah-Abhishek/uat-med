@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
@@ -12,7 +12,7 @@ import {
   type CreateWorklistFromExcelResult,
   type WorklistListParams,
 } from '@/api/worklists';
-import type { ApiErrorShape, WorklistStatus } from '@/api/types';
+import type { ApiErrorShape, Worklist, WorklistStatus } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { IllustrationStatCard } from '@/components/ui/StatCards';
 import { Card } from '@/components/ui/Card';
@@ -42,7 +42,88 @@ import {
   Upload,
   X as XIcon,
   AlertCircle,
+  Columns3,
 } from 'lucide-react';
+
+/* ── Column model ──────────────────────────────────────────
+ * Configurable columns for the Worklists table, mirroring the Charts page.
+ * Visibility is per-user, persisted in localStorage. Worklist # is locked
+ * (always shown — it's the row identifier / link). `sortKey` ties a column to
+ * the existing useTableSort accessors; columns without one aren't sortable. */
+interface WlColumn {
+  key: string;
+  label: string;
+  sortKey?: string;
+  locked?: boolean;
+  defaultVisible: boolean;
+  /** Extra classes for the <td> (the wrapper already adds `table-cell`). */
+  className?: string;
+  render: (wl: Worklist) => React.ReactNode;
+}
+
+const WL_COLUMNS: WlColumn[] = [
+  {
+    key: 'worklistNumber', label: 'Worklist #', sortKey: 'worklistNumber', locked: true,
+    defaultVisible: true, className: 'font-bold',
+    render: (wl) => (
+      <Link
+        to={`/worklists/${wl.id}`}
+        onClick={(e) => e.stopPropagation()}
+        className="text-ink group-hover:text-primary transition"
+      >
+        {wl.worklistNumber}
+      </Link>
+    ),
+  },
+  { key: 'client', label: 'Client', sortKey: 'clientId', defaultVisible: true, className: 'text-ink',
+    render: (wl) => wl.clientName ?? `#${wl.clientId}` },
+  { key: 'location', label: 'Location', sortKey: 'locationId', defaultVisible: true, className: 'text-ink',
+    render: (wl) => wl.locationName ?? `#${wl.locationId}` },
+  { key: 'process', label: 'Process', sortKey: 'processId', defaultVisible: true, className: 'text-ink-muted',
+    render: (wl) => wl.processName ?? `#${wl.processId}` },
+  { key: 'speciality', label: 'Specialty', sortKey: 'primarySpecialityId', defaultVisible: true, className: 'text-ink-muted',
+    render: (wl) => wl.specialityName ?? `#${wl.primarySpecialityId}` },
+  { key: 'subSpeciality', label: 'Sub-specialty', sortKey: 'subSpecialityId', defaultVisible: true, className: 'text-ink-muted',
+    render: (wl) => wl.subSpecialityName ?? '—' },
+  { key: 'allocation', label: 'Allocation %', defaultVisible: true,
+    render: (wl) => <DualProgressBar percent={wl.totalCharts > 0 ? (wl.allocatedCharts / wl.totalCharts) * 100 : 0} /> },
+  { key: 'progress', label: 'Progress %', defaultVisible: true,
+    render: (wl) => <DualProgressBar percent={wl.totalCharts > 0 ? (wl.closedCharts / wl.totalCharts) * 100 : 0} tone="success" /> },
+  { key: 'changedBy', label: 'Changed by', defaultVisible: false,
+    render: () => <Avatar name="—" size="sm" /> },
+  { key: 'dateOfService', label: 'Date of service', sortKey: 'dateOfService', defaultVisible: true, className: 'text-ink-muted',
+    render: (wl) => formatDate(wl.dateOfService) },
+  { key: 'receivedDate', label: 'Received date', sortKey: 'receivedDate', defaultVisible: true, className: 'text-ink-muted',
+    render: (wl) => formatDate(wl.receivedDate) },
+  { key: 'status', label: 'Status', sortKey: 'status', defaultVisible: true,
+    render: (wl) => <WorklistStatusChip status={wl.status} /> },
+];
+
+const WL_COLUMN_KEYS = new Set(WL_COLUMNS.map((c) => c.key));
+const WL_LOCKED_KEYS = new Set(WL_COLUMNS.filter((c) => c.locked).map((c) => c.key));
+const WL_DEFAULT_VISIBLE = new Set(WL_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
+const WL_COLUMN_PREFS_KEY = 'worklists.columns.visible.v1';
+
+function loadWlVisibleColumns(): Set<string> {
+  const fallback = new Set<string>([...WL_DEFAULT_VISIBLE, ...WL_LOCKED_KEYS]);
+  try {
+    const raw = localStorage.getItem(WL_COLUMN_PREFS_KEY);
+    if (!raw) return fallback;
+    const parsed: string[] = JSON.parse(raw);
+    const next = new Set(parsed.filter((k) => WL_COLUMN_KEYS.has(k)));
+    WL_LOCKED_KEYS.forEach((k) => next.add(k)); // locked can never be hidden
+    return next;
+  } catch {
+    return fallback;
+  }
+}
+function saveWlVisibleColumns(visible: Set<string>) {
+  try {
+    localStorage.setItem(WL_COLUMN_PREFS_KEY, JSON.stringify([...visible]));
+  } catch {
+    /* ignore quota / disabled storage */
+  }
+}
 
 export function WorklistsPage() {
   const canCreate = useCan('worklist.create');
@@ -52,6 +133,19 @@ export function WorklistsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<WorklistListParams>({});
+
+  // Configurable columns (per-user, persisted) — mirrors the Charts page.
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => loadWlVisibleColumns());
+  const columnsBtnRef = useRef<HTMLButtonElement>(null);
+  const activeColumns = useMemo(
+    () => WL_COLUMNS.filter((c) => visibleColumns.has(c.key)),
+    [visibleColumns],
+  );
+  const changeColumns = (next: Set<string>) => {
+    setVisibleColumns(next);
+    saveWlVisibleColumns(next);
+  };
 
   // Merge a partial filter change and jump back to page 1 (the old page may no
   // longer exist once the result set shrinks).
@@ -180,6 +274,14 @@ export function WorklistsPage() {
             >
               Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
             </Button>
+            <Button
+              ref={columnsBtnRef}
+              variant="soft"
+              onClick={() => setColumnsOpen((v) => !v)}
+              leftIcon={<Columns3 className="w-3.5 h-3.5" />}
+            >
+              Columns
+            </Button>
             {canCreate && (
               <Button onClick={() => setModalOpen(true)} leftIcon={<Plus className="w-4 h-4" />}>
                 Add Volume
@@ -206,90 +308,52 @@ export function WorklistsPage() {
           <table className="w-full min-w-[1100px]">
             <thead>
               <tr>
-                <SortableHeader column="worklistNumber" sort={sort} onSort={onSort}>Worklist #</SortableHeader>
-                <SortableHeader column="clientId" sort={sort} onSort={onSort}>Client</SortableHeader>
-                <SortableHeader column="locationId" sort={sort} onSort={onSort}>Location</SortableHeader>
-                <SortableHeader column="processId" sort={sort} onSort={onSort}>Process</SortableHeader>
-                <SortableHeader column="primarySpecialityId" sort={sort} onSort={onSort}>Specialty</SortableHeader>
-                <SortableHeader column="subSpecialityId" sort={sort} onSort={onSort}>Sub-specialty</SortableHeader>
-                <SortableHeader>Allocation %</SortableHeader>
-                <SortableHeader>Progress %</SortableHeader>
-                <SortableHeader>Changed by</SortableHeader>
-                <SortableHeader column="dateOfService" sort={sort} onSort={onSort}>Date of service</SortableHeader>
-                <SortableHeader column="receivedDate" sort={sort} onSort={onSort}>Received date</SortableHeader>
-                <SortableHeader column="status" sort={sort} onSort={onSort}>Status</SortableHeader>
+                {activeColumns.map((col) =>
+                  col.sortKey ? (
+                    <SortableHeader key={col.key} column={col.sortKey} sort={sort} onSort={onSort}>
+                      {col.label}
+                    </SortableHeader>
+                  ) : (
+                    <SortableHeader key={col.key}>{col.label}</SortableHeader>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody>
               {list.isPending ? (
                 <tr>
-                  <td colSpan={12} className="py-16 text-center text-ink-muted">
+                  <td colSpan={activeColumns.length} className="py-16 text-center text-ink-muted">
                     <Loader2 className="w-5 h-5 animate-spin inline" />
                   </td>
                 </tr>
               ) : sortedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-20 text-center">
+                  <td colSpan={activeColumns.length} className="py-20 text-center">
                     <p className="text-sm text-ink-muted">No worklists yet.</p>
                   </td>
                 </tr>
               ) : (
-                sortedItems.map((wl) => {
-                  const allocPct = wl.totalCharts > 0
-                    ? (wl.allocatedCharts / wl.totalCharts) * 100
-                    : 0;
-                  const progressPct = wl.totalCharts > 0
-                    ? (wl.closedCharts / wl.totalCharts) * 100
-                    : 0;
-                  return (
-                    <tr
-                      key={wl.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => navigate(`/worklists/${wl.id}`)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          navigate(`/worklists/${wl.id}`);
-                        }
-                      }}
-                      className="group cursor-pointer hover:bg-surface-sunken/40 transition focus:outline-none focus-visible:bg-surface-sunken/40 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset"
-                    >
-                      <td className="table-cell font-bold">
-                        <Link
-                          to={`/worklists/${wl.id}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-ink group-hover:text-primary transition"
-                        >
-                          {wl.worklistNumber}
-                        </Link>
+                sortedItems.map((wl) => (
+                  <tr
+                    key={wl.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => navigate(`/worklists/${wl.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate(`/worklists/${wl.id}`);
+                      }
+                    }}
+                    className="group cursor-pointer hover:bg-surface-sunken/40 transition focus:outline-none focus-visible:bg-surface-sunken/40 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset"
+                  >
+                    {activeColumns.map((col) => (
+                      <td key={col.key} className={cn('table-cell', col.className)}>
+                        {col.render(wl)}
                       </td>
-                      <td className="table-cell text-ink">{wl.clientName ?? `#${wl.clientId}`}</td>
-                      <td className="table-cell text-ink">{wl.locationName ?? `#${wl.locationId}`}</td>
-                      <td className="table-cell text-ink-muted">{wl.processName ?? `#${wl.processId}`}</td>
-                      <td className="table-cell text-ink-muted">{wl.specialityName ?? `#${wl.primarySpecialityId}`}</td>
-                      <td className="table-cell text-ink-muted">{wl.subSpecialityName ?? '—'}</td>
-                      <td className="table-cell">
-                        <DualProgressBar percent={allocPct} />
-                      </td>
-                      <td className="table-cell">
-                        <DualProgressBar percent={progressPct} tone="success" />
-                      </td>
-                      <td className="table-cell">
-                        <Avatar name="—" size="sm" />
-                      </td>
-                      <td className="table-cell text-ink-muted">
-                        {formatDate(wl.dateOfService)}
-                      </td>
-                      <td className="table-cell text-ink-muted">
-                        {formatDate(wl.receivedDate)}
-                      </td>
-                      <td className="table-cell">
-                        <WorklistStatusChip status={wl.status} />
-                      </td>
-                    </tr>
-                  );
-                })
+                    ))}
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -309,6 +373,126 @@ export function WorklistsPage() {
       </Card>
 
       <AddVolumeModal open={modalOpen} onClose={() => setModalOpen(false)} />
+
+      <WlColumnsPopover
+        open={columnsOpen}
+        anchorRef={columnsBtnRef}
+        onClose={() => setColumnsOpen(false)}
+        columns={WL_COLUMNS}
+        visible={visibleColumns}
+        onChange={changeColumns}
+      />
+    </div>
+  );
+}
+
+/* ── Columns popover ─────────────────────────────────── */
+function WlColumnsPopover({
+  open,
+  anchorRef,
+  onClose,
+  columns,
+  visible,
+  onChange,
+}: {
+  open: boolean;
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  columns: WlColumn[];
+  visible: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t)) return;
+      if (anchorRef.current?.contains(t)) return;
+      onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, onClose, anchorRef]);
+
+  if (!open) return null;
+
+  const toggle = (key: string) => {
+    if (WL_LOCKED_KEYS.has(key)) return; // locked can't be hidden
+    const next = new Set(visible);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onChange(next);
+  };
+  const resetDefaults = () => {
+    const next = new Set(columns.filter((c) => c.defaultVisible).map((c) => c.key));
+    WL_LOCKED_KEYS.forEach((k) => next.add(k));
+    onChange(next);
+  };
+  const showAll = () => onChange(new Set(columns.map((c) => c.key)));
+
+  return (
+    <div
+      ref={panelRef}
+      className="w-72 rounded-card border border-line bg-surface shadow-pop dark:shadow-pop-dark"
+      style={{
+        position: 'fixed',
+        top: anchorRef.current ? anchorRef.current.getBoundingClientRect().bottom + 6 : undefined,
+        right: anchorRef.current
+          ? Math.max(8, window.innerWidth - anchorRef.current.getBoundingClientRect().right)
+          : 32,
+        zIndex: 40,
+      }}
+      role="dialog"
+      aria-label="Configure visible columns"
+    >
+      <div className="flex items-center justify-between px-4 pt-3 pb-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-ink-muted">Columns</p>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={showAll} className="text-[11px] font-semibold text-primary hover:underline">
+            Show all
+          </button>
+          <button type="button" onClick={resetDefaults} className="text-[11px] font-semibold text-ink-muted hover:underline">
+            Reset
+          </button>
+        </div>
+      </div>
+      <div className="max-h-80 overflow-y-auto px-2 pb-2">
+        {columns.map((col) => {
+          const checked = visible.has(col.key);
+          const locked = !!col.locked;
+          return (
+            <label
+              key={col.key}
+              className={cn(
+                'flex items-center gap-2 px-2 py-1.5 rounded-md',
+                locked ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:bg-surface-sunken/60',
+              )}
+              title={locked ? 'Always shown' : undefined}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={locked}
+                onChange={() => toggle(col.key)}
+                className="checkbox"
+              />
+              <span className="text-sm text-ink">{col.label}</span>
+              {locked && (
+                <span className="ml-auto text-[10px] uppercase tracking-wide text-ink-subtle">Locked</span>
+              )}
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
