@@ -381,7 +381,7 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
           </div>
           */}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4 items-start">
             {/* ── Documents column ── */}
             <DropZone
               title="Documents"
@@ -664,20 +664,21 @@ function DropZone({
       onDragOver={onDragOver}
       onDragLeave={() => setActive(false)}
       className={cn(
-        'rounded-card border bg-surface px-3 py-2.5 transition',
+        'rounded-card border bg-surface px-3 py-2 transition',
         active ? 'border-primary bg-primary-soft/30' : 'border-line border-dashed',
       )}
     >
-      <div className="flex items-center gap-1.5 mb-1">
-        <span className="text-ink-muted">{icon}</span>
-        <h4 className="text-xs font-semibold text-ink">{title}</h4>
-      </div>
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="w-full text-left text-[11px] text-ink-muted hover:text-ink-muted/80"
+        className="w-full flex items-center gap-1.5 text-left"
+        title={`${hint} — browse`}
       >
-        {hint} — <span className="text-primary-ink dark:text-primary font-semibold">browse</span>
+        <span className="text-ink-muted shrink-0">{icon}</span>
+        <span className="text-xs font-semibold text-ink shrink-0">{title}</span>
+        <span className="text-[11px] text-ink-muted truncate min-w-0">
+          · {hint} — <span className="text-primary-ink dark:text-primary font-semibold">browse</span>
+        </span>
       </button>
       <input
         ref={inputRef}
