@@ -35,18 +35,26 @@ const BUILTIN_AUDIT_AREAS = [
  * Standard sub-speciality catalogue seeded onto every location. Backfilled onto
  * existing locations by migration 1715001000000; this list keeps newly-created
  * locations in sync so every client + location pair carries the same set.
- * Keep in step with that migration's SEED array.
+ *
+ * Names MUST match the AI gateway's GET /api/specialities vocabulary byte-for-byte
+ * — we forward the worklist sub-speciality verbatim as `sub_speciality` and the
+ * gateway matches case/space-sensitively, so any drift silently disables the
+ * speciality-tuned RAG. `EM -OP` and `WHC Profee/ facility` use the gateway's
+ * (slightly odd) spacing on purpose. Migration 1715001200000 corrected the
+ * existing rows that 1715001000000 seeded with the old spacing — that older
+ * migration's SEED array intentionally keeps the pre-correction spelling so its
+ * own down() stays self-consistent; do not "sync" it to this list.
  */
 const DEFAULT_SUB_SPECIALITIES = [
   'ED Facility',
   'ED Profee',
-  'EM - OP',
+  'EM -OP',
   'EM-IP',
   'Ob-gyn',
   'New born',
   'SDS',
   'General Surgery',
-  'WHC Profee / facility',
+  'WHC Profee/ facility',
   'ASC',
   'Ancillary',
   'IP-DRG',
