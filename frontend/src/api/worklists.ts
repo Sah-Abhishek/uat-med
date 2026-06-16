@@ -17,6 +17,7 @@ export interface WorklistListParams {
   clientId?: number;
   locationId?: number;
   primarySpecialityId?: number;
+  subSpecialityId?: number;
   processId?: number;
   receivedDateFrom?: string;
   receivedDateTo?: string;

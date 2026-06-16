@@ -16,7 +16,7 @@ import {
 } from '@/api/charts';
 import { listUsers } from '@/api/users';
 import { listWorklists } from '@/api/worklists';
-import { listPrimarySpecialities } from '@/api/configurations';
+import { listPrimarySpecialities, listSubSpecialities } from '@/api/configurations';
 import type { ApiErrorShape, Priority } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { IcdBotWidget } from '@/components/IcdBotWidget';
@@ -925,6 +925,15 @@ function FilterModal({
     enabled: open,
   });
 
+  // Sub-specialities are location-scoped, so they come from the global header
+  // location. With no location picked there's nothing to choose from.
+  const scopeLocationId = useScope((s) => s.locationId);
+  const subSpecs = useQuery({
+    queryKey: ['configurations', 'sub-specialities', scopeLocationId],
+    queryFn: () => listSubSpecialities(scopeLocationId!),
+    enabled: open && scopeLocationId != null,
+  });
+
   // Allocated-user dropdown. Users can be many, so search is server-driven:
   // the FancySelect pushes the typed query here (debounced) and we refetch.
   const [userSearch, setUserSearch] = useState('');
@@ -1043,6 +1052,36 @@ function FilterModal({
                   options={[
                     { value: '', label: 'Any speciality' },
                     ...(specialities.data?.items ?? []).map((s) => ({
+                      value: String(s.id),
+                      label: s.name,
+                    })),
+                  ]}
+                />
+              )}
+            />
+          </div>
+          <div>
+            <Label>Sub Speciality</Label>
+            <Controller
+              control={control}
+              name="subSpecialityId"
+              render={({ field }) => (
+                <FancySelect
+                  searchable
+                  searchPlaceholder="Search sub-specialities…"
+                  placeholder={
+                    scopeLocationId == null
+                      ? 'Pick a location first'
+                      : subSpecs.isPending
+                      ? 'Loading…'
+                      : 'Any sub-speciality'
+                  }
+                  disabled={scopeLocationId == null}
+                  value={field.value != null ? String(field.value) : ''}
+                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                  options={[
+                    { value: '', label: 'Any sub-speciality' },
+                    ...(subSpecs.data?.items ?? []).map((s) => ({
                       value: String(s.id),
                       label: s.name,
                     })),

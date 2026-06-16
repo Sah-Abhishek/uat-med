@@ -175,6 +175,7 @@ export class ChartsService {
     if (q.milestone) qb.andWhere('c.milestone = :m', { m: q.milestone });
     if (q.allocatedUserId) qb.andWhere('(c.allocated_coder_id = :au OR c.allocated_auditor_id = :au)', { au: q.allocatedUserId });
     if (q.primarySpecialityId) qb.andWhere('worklist.primary_speciality_id = :ps', { ps: q.primarySpecialityId });
+    if (q.subSpecialityId) qb.andWhere('worklist.sub_speciality_id = :ss', { ss: q.subSpecialityId });
     // Global header scope (Client / Location). The worklist is already joined.
     if (q.clientId) qb.andWhere('worklist.client_id = :cid', { cid: q.clientId });
     if (q.locationId) qb.andWhere('worklist.location_id = :lid', { lid: q.locationId });

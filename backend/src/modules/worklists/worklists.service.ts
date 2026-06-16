@@ -34,6 +34,7 @@ export class WorklistsService {
     if (q.clientId) qb.andWhere('w.client_id = :c', { c: q.clientId });
     if (q.locationId) qb.andWhere('w.location_id = :l', { l: q.locationId });
     if (q.primarySpecialityId) qb.andWhere('w.primary_speciality_id = :p', { p: q.primarySpecialityId });
+    if (q.subSpecialityId) qb.andWhere('w.sub_speciality_id = :sp', { sp: q.subSpecialityId });
     if (q.processId) qb.andWhere('w.process_id = :pr', { pr: q.processId });
     if (q.receivedDateFrom) qb.andWhere('w.received_date >= :rf', { rf: q.receivedDateFrom });
     if (q.receivedDateTo) qb.andWhere('w.received_date <= :rt', { rt: q.receivedDateTo });

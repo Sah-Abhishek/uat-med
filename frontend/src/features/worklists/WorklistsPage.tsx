@@ -70,6 +70,7 @@ export function WorklistsPage() {
   const activeFilterCount =
     (filters.status ? 1 : 0) +
     (filters.primarySpecialityId ? 1 : 0) +
+    (filters.subSpecialityId ? 1 : 0) +
     (filters.processId ? 1 : 0) +
     (filters.receivedDateFrom || filters.receivedDateTo ? 1 : 0);
   // Client-side sort: reorders the rows on the page currently in view. The
@@ -95,8 +96,8 @@ export function WorklistsPage() {
   useEffect(() => {
     setPage(1);
     setFilters((f) =>
-      f.primarySpecialityId || f.processId
-        ? { ...f, primarySpecialityId: undefined, processId: undefined }
+      f.primarySpecialityId || f.subSpecialityId || f.processId
+        ? { ...f, primarySpecialityId: undefined, subSpecialityId: undefined, processId: undefined }
         : f,
     );
   }, [clientId, locationId]);
@@ -359,10 +360,17 @@ function WorklistFilterBar({
     queryFn: () => listProcessesByLocation(locationId!),
     enabled: locationId != null,
   });
+  // Sub-specialities are location-scoped (like processes).
+  const subSpecsQ = useQuery({
+    queryKey: ['configurations', 'sub-specialities', locationId],
+    queryFn: () => listSubSpecialities(locationId!),
+    enabled: locationId != null,
+  });
 
   const hasAny =
     !!filters.status ||
     !!filters.primarySpecialityId ||
+    !!filters.subSpecialityId ||
     !!filters.processId ||
     !!filters.receivedDateFrom ||
     !!filters.receivedDateTo;
@@ -428,6 +436,20 @@ function WorklistFilterBar({
               ...(specialitiesQ.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name })),
             ]}
             placeholder="All specialties"
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <Label>Sub-specialty</Label>
+          <FancySelect
+            value={filters.subSpecialityId ? String(filters.subSpecialityId) : ''}
+            onChange={(v) => onChange({ subSpecialityId: v ? Number(v) : undefined })}
+            options={[
+              { value: '', label: locationId != null ? 'All sub-specialties' : 'Pick a location first' },
+              ...(subSpecsQ.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name })),
+            ]}
+            placeholder="All sub-specialties"
+            disabled={locationId == null}
           />
         </div>
 

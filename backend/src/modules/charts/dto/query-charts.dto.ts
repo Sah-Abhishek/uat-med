@@ -30,6 +30,7 @@ export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() serialTo?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() allocatedUserId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() primarySpecialityId?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() subSpecialityId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() clientId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() locationId?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() chartNo?: string;

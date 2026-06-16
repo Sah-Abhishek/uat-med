@@ -11,6 +11,7 @@ export class QueryWorklistsDto extends PageParamsDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() clientId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() locationId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() primarySpecialityId?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() subSpecialityId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() processId?: number;
 
   @ApiPropertyOptional({ example: '2023-09-01' }) @IsOptional() @IsDateString() receivedDateFrom?: string;

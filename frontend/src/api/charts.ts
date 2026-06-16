@@ -29,6 +29,7 @@ export interface ChartListParams {
   serialTo?: number;
   allocatedUserId?: number | string;
   primarySpecialityId?: number;
+  subSpecialityId?: number;
   /** Global header scope (Client / Location). */
   clientId?: number;
   locationId?: number;
