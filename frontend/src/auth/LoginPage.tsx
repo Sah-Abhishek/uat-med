@@ -52,11 +52,13 @@ export function LoginPage() {
           return;
         }
 
-        // Exchange Microsoft ID token for Valerion JWT.
-        // We use idToken (not accessToken) because ID tokens are issued for our app
-        // and signed with the tenant's keys, so the backend can verify them via JWKS.
-        // Access tokens for Graph scopes (User.Read) are signed by Graph and not verifiable here.
-        const valerionSession = await ssoExchange(msalResult.idToken);
+        // Exchange Microsoft tokens for a Valerion JWT.
+        // - idToken: issued for our app and signed with the tenant's keys, so the
+        //   backend verifies it via JWKS to authenticate the user.
+        // - accessToken: the Graph token (User.Read scope) — the backend uses it to
+        //   fetch the profile photo. Graph rejects ID tokens, so this must be sent
+        //   separately rather than reusing the idToken.
+        const valerionSession = await ssoExchange(msalResult.idToken, msalResult.accessToken);
         setFromLogin(valerionSession);
         navigate('/', { replace: true });
       } catch (err) {

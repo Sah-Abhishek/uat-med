@@ -89,6 +89,7 @@ export class AuthService {
         fullName: user.fullName,
         clientId: user.clientId ?? null,
         locationId: user.locationId ?? null,
+        avatarUrl: user.avatarUrl ?? null,
       },
     };
   }

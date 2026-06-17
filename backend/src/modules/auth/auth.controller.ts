@@ -51,7 +51,7 @@ export class AuthController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Exchange a Microsoft Entra access token for a Valerion JWT.' })
   ssoExchange(@Body() dto: SsoExchangeDto, @Req() req) {
-    return this.sso.exchange(dto.accessToken, req.headers['user-agent']);
+    return this.sso.exchange(dto.idToken, dto.accessToken, req.headers['user-agent']);
   }
 
   @ApiBearerAuth('bearerAuth')

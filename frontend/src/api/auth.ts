@@ -21,9 +21,11 @@ export const signup = (email: string) =>
   post<{ status: string; message: string }>('/auth/signup', { email });
 
 /**
- * SSO exchange — trade a Microsoft-issued access token for a Valerion JWT.
- * Backend validates the token against Entra, matches the email to a local user,
- * and returns the standard LoginResponse shape.
+ * SSO exchange — trade Microsoft-issued tokens for a Valerion JWT.
+ * The backend verifies the ID token against Entra and matches the email to a
+ * local user. The Graph access token (User.Read) is passed separately and used
+ * best-effort to fetch the profile photo — Graph rejects ID tokens, so the two
+ * cannot be the same token. Returns the standard LoginResponse shape.
  */
-export const ssoExchange = (microsoftAccessToken: string) =>
-  post<LoginResponse>('/auth/sso/exchange', { accessToken: microsoftAccessToken });
+export const ssoExchange = (idToken: string, accessToken?: string) =>
+  post<LoginResponse>('/auth/sso/exchange', { idToken, accessToken });

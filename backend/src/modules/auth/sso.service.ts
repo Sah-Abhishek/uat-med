@@ -46,9 +46,9 @@ export class SsoService {
     return key.getPublicKey();
   }
 
-  async exchange(microsoftAccessToken: string, userAgent?: string) {
+  async exchange(idToken: string, graphAccessToken: string | undefined, userAgent?: string) {
     // 1. Decode header to get the kid (key ID used to sign the token)
-    const decoded = jwt.decode(microsoftAccessToken, { complete: true });
+    const decoded = jwt.decode(idToken, { complete: true });
     if (!decoded || typeof decoded === 'string') {
       throw new UnauthorizedException({ error: { code: 'unauthorized', message: 'Invalid token format.' } });
     }
@@ -62,7 +62,7 @@ export class SsoService {
     let claims: EntraTokenClaims;
     try {
       const publicKey = await this.getKey(kid);
-      claims = jwt.verify(microsoftAccessToken, publicKey, {
+      claims = jwt.verify(idToken, publicKey, {
         algorithms: ['RS256'],
         issuer: [
           `https://login.microsoftonline.com/${this.tenantId}/v2.0`,
@@ -99,11 +99,15 @@ export class SsoService {
       throw new UnauthorizedException({ error: { code: 'unauthorized', message: 'Account is inactive.' } });
     }
 
-    // 6. Capture the user's real Microsoft profile photo (best-effort — uses
-    // the same delegated token, no extra permissions). Refreshes on each login
-    // so a changed photo eventually propagates.
-    const photoUrl = await this.avatars.captureFromGraph(user.id, microsoftAccessToken);
-    if (photoUrl) user.avatarUrl = photoUrl;
+    // 6. Capture the user's real Microsoft profile photo (best-effort). This
+    // needs the Graph *access* token (User.Read scope) — NOT the ID token we
+    // verified above, which Graph rejects (its audience is our app, not Graph).
+    // Refreshes on each login so a changed photo eventually propagates; skipped
+    // if the frontend didn't send a Graph token.
+    if (graphAccessToken) {
+      const photoUrl = await this.avatars.captureFromGraph(user.id, graphAccessToken);
+      if (photoUrl) user.avatarUrl = photoUrl;
+    }
 
     // 7. Issue Valerion tokens via existing flow
     user.lastLoginAt = new Date();
