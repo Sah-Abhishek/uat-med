@@ -104,16 +104,24 @@ export const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(
   return (
     <label
       className={cn(
-        'inline-flex items-center gap-2.5 group select-none',
+        'relative inline-flex items-center gap-2.5 group select-none',
         disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
         className,
       )}
     >
+      {/* The input overlays its visual control (absolute, transparent) rather
+          than using `sr-only`. An sr-only radio is positioned away from where
+          it's painted, so focusing one that's below the fold makes the browser
+          scroll the page to "reach" it — and with the app shell's
+          `overflow:hidden` that scroll has no scrollbar to undo it, stranding
+          the layout (sidebar/content pushed up, blank below). Keeping the input
+          where it's clicked means focus never triggers that jump, while staying
+          fully focusable and screen-reader accessible. */}
       <input
         ref={ref}
         type="radio"
         disabled={disabled}
-        className="peer sr-only"
+        className="peer absolute inset-0 m-0 cursor-pointer opacity-0 disabled:cursor-not-allowed"
         {...rest}
       />
       <span
