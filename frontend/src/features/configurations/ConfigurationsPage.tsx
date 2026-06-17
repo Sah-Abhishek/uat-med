@@ -2025,7 +2025,20 @@ function ChartFieldsEditor({
                     )}
                   </div>
                 </th>
-                <th className="table-head text-center">Not-Applicable</th>
+                <th className="table-head text-center">
+                  <div className="flex flex-col items-center gap-1">
+                    Not-Applicable
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => setAllValidation('NOT_APPLICABLE')}
+                        className="text-[10px] px-2 py-0.5 rounded-pill bg-primary text-primary-ink font-semibold"
+                      >
+                        Select all
+                      </button>
+                    )}
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
