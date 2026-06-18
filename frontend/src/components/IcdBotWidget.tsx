@@ -111,6 +111,13 @@ export function IcdBotWidget() {
       root.style.height = '0px';
       root.style.overflow = 'visible'; // never clip the fixed children to 0×0
       root.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+      // Lift the whole widget (launcher + chat panel) above app modals/overlays
+      // so it stays clickable and un-blurred while a modal is open. The host's
+      // transform already makes it a stacking context; without a z-index it sits
+      // at z-auto and the modal backdrops (z-50 / z-[60], backdrop-blur) paint
+      // over it. A max-ish value keeps it on top — just below our drag grip
+      // (2147483001) so the grip stays grabbable.
+      root.style.zIndex = '2147483000';
     };
     apply();
     return () => cancelAnimationFrame(raf);
