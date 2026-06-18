@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Sparkles, X as XIcon } from 'lucide-react';
-import { Input, Label, FancySelect, DatePicker } from '@/components/ui/Field';
+import { Input, Label, FancySelect, DatePicker, type DateMarker } from '@/components/ui/Field';
 import { cn } from '@/lib/utils';
 
 /* ── Audit table row config (mirrors source) ─────────────── */
@@ -55,6 +55,11 @@ interface FormFieldProps {
   aiTag?: boolean;
   min?: string;
   max?: string;
+  /** Date-only: related dates to mark on the calendar + show in a legend. */
+  dateMarkers?: DateMarker[];
+  /** Date-only: shared, controlled calendar view-month. */
+  viewMonth?: Date;
+  onViewMonthChange?: (d: Date) => void;
 }
 
 export function FormField({
@@ -69,6 +74,9 @@ export function FormField({
   aiTag,
   min,
   max,
+  dateMarkers,
+  viewMonth,
+  onViewMonthChange,
 }: FormFieldProps) {
   const opts =
     options?.map((o) => (typeof o === 'string' ? { value: o, label: o } : o)) ?? [];
@@ -103,6 +111,9 @@ export function FormField({
           disabled={readOnly}
           min={min}
           max={max}
+          markers={dateMarkers}
+          viewMonth={viewMonth}
+          onViewMonthChange={onViewMonthChange}
         />
       ) : (
         <Input

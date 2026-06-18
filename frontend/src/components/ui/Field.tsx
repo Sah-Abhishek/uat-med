@@ -394,6 +394,20 @@ function isSameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+/** A related date to surface on the calendar (coloured dot) + in the legend. */
+export interface DateMarker {
+  /** ISO `YYYY-MM-DD`; when empty the marker still shows in the legend. */
+  date?: string | null;
+  label: string;
+  color: 'rose' | 'sky' | 'emerald';
+}
+
+const MARKER_DOT: Record<DateMarker['color'], string> = {
+  rose: 'bg-rose-500',
+  sky: 'bg-sky-500',
+  emerald: 'bg-emerald-500',
+};
+
 interface DatePickerProps {
   value?: string | null;
   onChange: (v: string) => void;
@@ -402,6 +416,13 @@ interface DatePickerProps {
   className?: string;
   min?: string;
   max?: string;
+  /** Related dates to mark on the calendar and list in a legend (e.g. the
+   *  other two of admit / DOS / discharge). Omit → plain picker. */
+  markers?: DateMarker[];
+  /** Controlled calendar view-month. When provided, the parent owns it so
+   *  several pickers can share one calendar position. */
+  viewMonth?: Date;
+  onViewMonthChange?: (d: Date) => void;
 }
 export function DatePicker({
   value,
@@ -411,6 +432,9 @@ export function DatePicker({
   className,
   min,
   max,
+  markers,
+  viewMonth: viewMonthProp,
+  onViewMonthChange,
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -421,15 +445,25 @@ export function DatePicker({
   const minDate = parseISODate(min);
   const maxDate = parseISODate(max);
 
-  const [viewMonth, setViewMonth] = useState<Date>(() => {
+  // The view-month can be controlled by a parent (so sibling pickers share one
+  // calendar position) or kept internal for a standalone picker.
+  const controlledView = viewMonthProp !== undefined;
+  const [internalViewMonth, setInternalViewMonth] = useState<Date>(() => {
     const base = selected ?? new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
+  const viewMonth = controlledView ? viewMonthProp! : internalViewMonth;
+  const setViewMonth = (d: Date) => {
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    if (controlledView) onViewMonthChange?.(first);
+    else setInternalViewMonth(first);
+  };
 
-  // When the value is cleared/changed externally, sync the view
+  // Uncontrolled only: keep the view in sync when the value changes externally.
   useEffect(() => {
+    if (controlledView) return;
     if (selected) {
-      setViewMonth((vm) =>
+      setInternalViewMonth((vm) =>
         vm.getFullYear() === selected.getFullYear() && vm.getMonth() === selected.getMonth()
           ? vm
           : new Date(selected.getFullYear(), selected.getMonth(), 1),
@@ -437,6 +471,17 @@ export function DatePicker({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
+
+  // On open, focus the calendar on this field's own value (if any) so a filled
+  // field always opens on its date, while an empty one keeps the shared month.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current && selected) {
+      setViewMonth(selected);
+    }
+    wasOpen.current = open;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Position the popover relative to the trigger; keep it on-screen.
   useLayoutEffect(() => {
@@ -589,6 +634,10 @@ export function DatePicker({
                 const isToday = isSameDay(d, today);
                 const isSelected = selected ? isSameDay(d, selected) : false;
                 const disabledCell = isOutOfRange(d);
+                const dayMarkers = (markers ?? []).filter((m) => {
+                  const md = parseISODate(m.date);
+                  return md ? isSameDay(d, md) : false;
+                });
                 return (
                   <button
                     key={d.toISOString()}
@@ -596,6 +645,7 @@ export function DatePicker({
                     disabled={disabledCell}
                     onClick={() => {
                       onChange(formatISODate(d));
+                      setViewMonth(d);
                       setOpen(false);
                     }}
                     className={cn(
@@ -612,6 +662,20 @@ export function DatePicker({
                     )}
                   >
                     {d.getDate()}
+                    {dayMarkers.length > 0 && (
+                      <span className="pointer-events-none absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5">
+                        {dayMarkers.map((m, i) => (
+                          <span
+                            key={i}
+                            className={cn(
+                              'w-1 h-1 rounded-full',
+                              MARKER_DOT[m.color],
+                              isSelected && 'ring-1 ring-white/80',
+                            )}
+                          />
+                        ))}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -628,6 +692,7 @@ export function DatePicker({
                     onClick={() => {
                       if (todayDisabled) return;
                       onChange(formatISODate(today));
+                      setViewMonth(today);
                       setOpen(false);
                     }}
                     title={todayDisabled ? 'Today is outside the allowed range' : undefined}
@@ -655,6 +720,22 @@ export function DatePicker({
                 </button>
               )}
             </div>
+
+            {/* Legend — what each coloured dot means (shown whenever markers
+                are provided, regardless of which dates are set). */}
+            {markers && markers.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 pt-2 border-t border-line">
+                {markers.map((m) => (
+                  <span
+                    key={m.label}
+                    className="inline-flex items-center gap-1 text-[10px] font-medium text-ink-muted"
+                  >
+                    <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', MARKER_DOT[m.color])} />
+                    {m.label}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>,
           document.body,
         )}

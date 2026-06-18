@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Toast } from '@/components/ui/Primitives';
 import { FormField, SkeletonGrid } from './shared';
+import type { DateMarker } from '@/components/ui/Field';
 import { CustomFieldsRenderer } from './CustomFieldsRenderer';
 import type { FormDraft, CustomFieldValues } from './formState';
 import type { FieldConfig } from './useFieldConfig';
@@ -53,6 +54,21 @@ export function ChartInfoSection({
 }: Props) {
   const dim = isAuditor ? 'opacity-50 pointer-events-none grayscale' : readOnly ? 'pointer-events-none' : '';
   const [orderAlert, setOrderAlert] = useState<string | null>(null);
+  // Shared calendar position for the three order-dependent date fields
+  // (admit ≤ DOS ≤ discharge): opening any of them lands on the month of
+  // whatever's already entered. Seeded from whichever of the three is set.
+  const [dateViewMonth, setDateViewMonth] = useState<Date>(() => {
+    const iso = draft.dateOfService || draft.admitDate || draft.dischargeDate;
+    const m = iso ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso) : null;
+    const base = m ? new Date(Number(m[1]), Number(m[2]) - 1, 1) : new Date();
+    return new Date(base.getFullYear(), base.getMonth(), 1);
+  });
+  // Cross-mark all three dates (fixed colours) on every one of their calendars.
+  const dateMarkers: DateMarker[] = [
+    { date: draft.admitDate, label: 'Admit date', color: 'rose' },
+    { date: draft.dateOfService, label: 'Date of Service', color: 'sky' },
+    { date: draft.dischargeDate, label: 'Discharge date', color: 'emerald' },
+  ];
 
   function handleDateChange(
     field: 'admitDate' | 'dateOfService' | 'dischargeDate',
@@ -135,6 +151,9 @@ export function ChartInfoSection({
               readOnly={readOnly}
               min={dosMin}
               max={dosMax}
+              dateMarkers={dateMarkers}
+              viewMonth={dateViewMonth}
+              onViewMonthChange={setDateViewMonth}
             />
           )}
         </div>
@@ -150,6 +169,9 @@ export function ChartInfoSection({
                 value={draft.admitDate}
                 onChange={(v) => handleDateChange('admitDate', v)}
                 readOnly={readOnly}
+                dateMarkers={dateMarkers}
+                viewMonth={dateViewMonth}
+                onViewMonthChange={setDateViewMonth}
               />
             )}
             {visible('dischargeDate') && (
@@ -160,6 +182,9 @@ export function ChartInfoSection({
                 value={draft.dischargeDate}
                 onChange={(v) => handleDateChange('dischargeDate', v)}
                 readOnly={readOnly}
+                dateMarkers={dateMarkers}
+                viewMonth={dateViewMonth}
+                onViewMonthChange={setDateViewMonth}
               />
             )}
             <div />
