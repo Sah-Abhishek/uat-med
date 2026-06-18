@@ -126,6 +126,18 @@ export function ChartInfoSection({
   const row5Visible = visible('poa') || visible('los') || visible('drgValue');
   const row6Visible = visible('procedureCode') || visible('subSpeciality');
 
+  // Order-aware ranges (admit ≤ DOS ≤ discharge): each picker greys out the
+  // dates that would break the order, on top of the worklist's DOS range — so
+  // out-of-order dates can't be picked, not just flagged afterwards.
+  const earliest = (...ds: (string | undefined)[]): string | undefined =>
+    ds.filter((d): d is string => !!d).sort()[0];
+  const latest = (...ds: (string | undefined)[]): string | undefined =>
+    ds.filter((d): d is string => !!d).sort().pop();
+  const admitMax = earliest(draft.dateOfService, draft.dischargeDate);
+  const dischargeMin = latest(draft.admitDate, draft.dateOfService);
+  const dosMinEff = latest(draft.admitDate, dosMin);
+  const dosMaxEff = earliest(draft.dischargeDate, dosMax);
+
   return (
     <CollapsibleCard title="Chart Info" subtitle="All relevant chart fields" defaultOpen={!isAuditor}>
       <div className={`pt-3 ${dim}`}>
@@ -157,8 +169,8 @@ export function ChartInfoSection({
               value={draft.dateOfService}
               onChange={(v) => handleDateChange('dateOfService', v)}
               readOnly={readOnly}
-              min={dosMin}
-              max={dosMax}
+              min={dosMinEff}
+              max={dosMaxEff}
               dateMarkers={dateMarkers}
               viewMonth={dateViewMonth}
               onViewMonthChange={setDateViewMonth}
@@ -177,6 +189,7 @@ export function ChartInfoSection({
                 value={draft.admitDate}
                 onChange={(v) => handleDateChange('admitDate', v)}
                 readOnly={readOnly}
+                max={admitMax}
                 dateMarkers={dateMarkers}
                 viewMonth={dateViewMonth}
                 onViewMonthChange={setDateViewMonth}
@@ -190,6 +203,7 @@ export function ChartInfoSection({
                 value={draft.dischargeDate}
                 onChange={(v) => handleDateChange('dischargeDate', v)}
                 readOnly={readOnly}
+                min={dischargeMin}
                 dateMarkers={dateMarkers}
                 viewMonth={dateViewMonth}
                 onViewMonthChange={setDateViewMonth}
