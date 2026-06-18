@@ -2,11 +2,27 @@ import { Bot, Eye, Sparkles } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
-import type { AiEncounterResult, AiPredictedCode } from '@/api/types';
+import type { AiPredictedCode } from '@/api/types';
+
+/** A predicted code annotated with what the coder did to it in review, so the
+ *  sidebar can surface every outcome (accepted / rejected / edited / untouched /
+ *  added) with colour coding — not just the codes that survived. */
+export interface AnnotatedCode extends AiPredictedCode {
+  decisionState?: 'accepted' | 'rejected' | 'edited' | 'untouched' | 'added';
+  /** For 'edited' — the AI's original code/description before the coder changed it. */
+  originalCode?: string;
+  originalDescription?: string;
+}
+export interface AnnotatedPrediction {
+  primary: AnnotatedCode[];
+  secondary: AnnotatedCode[];
+  procedures: AnnotatedCode[];
+  codes: AnnotatedCode[];
+}
 
 interface Props {
-  /** Encounter result from /charts/:id/process-documents — null until upload finishes. */
-  prediction?: AiEncounterResult | null;
+  /** Coder-decision-annotated prediction — null until upload finishes. */
+  prediction?: AnnotatedPrediction | null;
   hasUploadedDocs: boolean;
   timerRunning: boolean;
   onReview?: () => void;
@@ -36,21 +52,21 @@ export function AiIcdPrediction({ prediction, hasUploadedDocs, timerRunning, onR
           {!!prediction!.primary.length && (
             <Section label="Primary" tone="warn">
               {prediction!.primary.map((c, i) => (
-                <CodeRow key={`p-${i}`} c={c} tone="warn" />
+                <CodeRow key={`p-${i}`} c={c} />
               ))}
             </Section>
           )}
           {!!prediction!.secondary.length && (
             <Section label="Secondary" tone="muted">
               {prediction!.secondary.map((c, i) => (
-                <CodeRow key={`s-${i}`} c={c} tone="muted" />
+                <CodeRow key={`s-${i}`} c={c} />
               ))}
             </Section>
           )}
           {!!prediction!.procedures.length && (
             <Section label="Procedures" tone="success">
               {prediction!.procedures.map((c, i) => (
-                <CodeRow key={`pr-${i}`} c={c} tone="success" />
+                <CodeRow key={`pr-${i}`} c={c} />
               ))}
             </Section>
           )}
@@ -99,32 +115,53 @@ function Section({
   );
 }
 
-/**
- * Shows the ICD code in a colored pill alongside its description, with the AI
- * justification (if present) tucked into the row tooltip for hover context.
- */
-function CodeRow({ c, tone }: { c: AiPredictedCode; tone: Tone }) {
-  const bg = {
-    primary: 'bg-primary-soft text-primary-ink dark:text-primary',
-    warn: 'bg-warn-soft text-warn',
-    muted: 'bg-surface-sunken text-ink',
-    info: 'bg-info-soft text-info',
-    success: 'bg-success-soft text-success',
-  }[tone];
+/** Per-decision styling so each code's outcome is legible at a glance. */
+const DECISION_STYLE: Record<
+  NonNullable<AnnotatedCode['decisionState']>,
+  { pill: string; tag: string; tagClass: string; strike: boolean }
+> = {
+  accepted:  { pill: 'bg-success-soft text-success', tag: 'Accepted', tagClass: 'text-success', strike: false },
+  rejected:  { pill: 'bg-danger-soft text-danger', tag: 'Rejected', tagClass: 'text-danger', strike: true },
+  edited:    { pill: 'bg-warn-soft text-warn', tag: 'Edited', tagClass: 'text-warn', strike: false },
+  untouched: { pill: 'bg-surface-sunken text-ink-muted', tag: 'Untouched', tagClass: 'text-ink-subtle', strike: false },
+  added:     { pill: 'bg-info-soft text-info', tag: 'Added', tagClass: 'text-info', strike: false },
+};
 
+/**
+ * Shows the ICD code in a colored pill alongside its description, coloured by
+ * what the coder did with it in review (accepted / rejected / edited /
+ * untouched / added). Rejected codes are struck through; edited codes show the
+ * AI's original value beneath. Justification stays in the row tooltip on hover.
+ */
+function CodeRow({ c }: { c: AnnotatedCode }) {
+  const s = c.decisionState ? DECISION_STYLE[c.decisionState] : null;
   return (
     <div className="flex items-start gap-2" title={c.justification || undefined}>
       <span
         className={cn(
           'inline-flex items-center px-2 py-0.5 rounded-pill text-[11px] font-semibold flex-shrink-0',
-          bg,
+          s ? s.pill : 'bg-surface-sunken text-ink',
+          s?.strike && 'line-through',
         )}
       >
         {c.code}
       </span>
-      {c.description && (
-        <span className="text-[11px] leading-snug text-ink-muted flex-1 min-w-0 break-words">
-          {c.description}
+      <div className="flex-1 min-w-0">
+        {c.description && (
+          <span className={cn('text-[11px] leading-snug text-ink-muted break-words', s?.strike && 'line-through')}>
+            {c.description}
+          </span>
+        )}
+        {c.decisionState === 'edited' && c.originalCode && (
+          <p className="text-[10px] text-ink-subtle mt-0.5">
+            was <span className="line-through">{c.originalCode}</span>
+            {c.originalDescription ? ` · ${c.originalDescription}` : ''}
+          </p>
+        )}
+      </div>
+      {s && (
+        <span className={cn('text-[9px] uppercase tracking-wide font-bold shrink-0 mt-0.5', s.tagClass)}>
+          {s.tag}
         </span>
       )}
     </div>

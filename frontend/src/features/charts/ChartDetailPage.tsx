@@ -40,7 +40,7 @@ import { ChartDetailSkeleton } from './chart-detail/ChartDetailSkeleton';
 import { UsersPanel } from './chart-detail/sidebar/UsersPanel';
 import { ConversationLog } from './chart-detail/sidebar/ConversationLog';
 import { TimeTracker } from './chart-detail/sidebar/TimeTracker';
-import { AiIcdPrediction } from './chart-detail/sidebar/AiIcdPrediction';
+import { AiIcdPrediction, type AnnotatedCode, type AnnotatedPrediction } from './chart-detail/sidebar/AiIcdPrediction';
 import { DocumentationGaps } from './chart-detail/sidebar/DocumentationGaps';
 import { PhysicianQueries } from './chart-detail/sidebar/PhysicianQueries';
 import { CodingFeedback } from './chart-detail/sidebar/CodingFeedback';
@@ -201,40 +201,46 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     queryFn: () => listCodeDecisions(String(chart.id)),
     enabled: !!chart.id,
   });
-  const liveAiPrediction: AiEncounterResult | null = useMemo(() => {
+  const liveAiPrediction: AnnotatedPrediction | null = useMemo(() => {
     if (!aiPrediction) return null;
     const decisions = decisionsQ.data?.items ?? [];
     if (decisions.length === 0) return aiPrediction;
     const decisionByKey = new Map<string, CodeDecisionRecord>();
     for (const d of decisions) decisionByKey.set(`${d.codeType}|${d.codeValue}`, d);
-    const dedup = (arr: AiPredictedCode[]) => {
+    const dedup = (arr: AnnotatedCode[]) => {
       const seen = new Set<string>();
       return arr.filter((c) => (seen.has(c.code) ? false : (seen.add(c.code), true)));
     };
-    const apply = (codes: AiPredictedCode[], codeType: string): AiPredictedCode[] => {
-      const out: AiPredictedCode[] = [];
+    // Annotate every AI code with what the coder did (instead of dropping the
+    // rejected ones) so the sidebar can show the full outcome with colours.
+    const apply = (codes: AiPredictedCode[], codeType: string): AnnotatedCode[] => {
+      const out: AnnotatedCode[] = [];
       for (const c of codes) {
         const d = decisionByKey.get(`${codeType}|${c.code}`);
-        if (!d) { out.push(c); continue; }
-        if (d.decision === 'REJECTED') continue; // hide rejected
+        if (!d) { out.push({ ...c, decisionState: 'untouched' }); continue; }
+        if (d.decision === 'REJECTED') { out.push({ ...c, decisionState: 'rejected' }); continue; }
         if (d.decision === 'EDITED') {
           out.push({
             ...c,
             code: d.editedCode ?? c.code,
             description: d.editedDescription ?? c.description,
+            decisionState: 'edited',
+            originalCode: c.code,
+            originalDescription: c.description,
           });
           continue;
         }
-        out.push(c); // ACCEPTED: show as-is
+        out.push({ ...c, decisionState: 'accepted' }); // ACCEPTED
       }
       return out;
     };
-    const addedFor = (codeType: string): AiPredictedCode[] =>
+    const addedFor = (codeType: string): AnnotatedCode[] =>
       decisions
         .filter((d) => d.decision === 'ADDED' && d.codeType === codeType)
         .map((d) => ({
           code: d.editedCode ?? d.codeValue,
           description: d.editedDescription ?? '',
+          decisionState: 'added' as const,
         }));
     const primary = dedup([...apply(aiPrediction.primary, 'PRIMARY'), ...addedFor('PRIMARY')]);
     const secondary = dedup([...apply(aiPrediction.secondary, 'SECONDARY'), ...addedFor('SECONDARY')]);
