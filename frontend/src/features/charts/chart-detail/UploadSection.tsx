@@ -359,7 +359,8 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
           </div>
           */}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4">
+          {/* ── Top half: Documents + Image Groups, side by side ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4">
             {/* ── Documents column ── */}
             <DropZone
               title="Documents"
@@ -439,41 +440,41 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
                 </div>
               )}
             </DropZone>
+          </div>
 
-            {/* ── Text column ── */}
-            <div className="rounded-card border border-line bg-surface p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <ClipboardPaste className="w-5 h-5 text-ink-muted" />
-                <h4 className="text-sm font-semibold text-ink">Clinical Text</h4>
-              </div>
-              <p className="text-[11px] text-ink-muted mb-2">Paste clinical notes</p>
-              <textarea
-                rows={5}
-                value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                placeholder="Paste here…"
-                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-              <Button size="sm" disabled={!textInput.trim()} onClick={addText} className="w-full mt-2">
-                Add Entry
-              </Button>
-              {texts.length > 0 && (
-                <div className="space-y-1.5 mt-3">
-                  {texts.map((t) => (
-                    <div key={t.id} className="flex items-start gap-2 bg-surface-sunken/60 rounded-md px-2.5 py-1.5 text-xs">
-                      <span className="flex-1 text-ink-muted truncate">{t.text}</span>
-                      <button
-                        type="button"
-                        onClick={() => setTexts(texts.filter((x) => x.id !== t.id))}
-                        className="text-ink-subtle hover:text-danger"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+          {/* ── Bottom half: Clinical Text, full width ── */}
+          <div className="rounded-card border border-line bg-surface p-3 mt-3">
+            <div className="flex items-center gap-2 mb-1.5">
+              <ClipboardPaste className="w-5 h-5 text-ink-muted" />
+              <h4 className="text-sm font-semibold text-ink">Clinical Text</h4>
             </div>
+            <p className="text-[11px] text-ink-muted mb-1">Paste clinical notes</p>
+            <textarea
+              rows={2}
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder="Paste here…"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <Button size="sm" disabled={!textInput.trim()} onClick={addText} className="w-full mt-2">
+              Add Entry
+            </Button>
+            {texts.length > 0 && (
+              <div className="space-y-1.5 mt-3">
+                {texts.map((t) => (
+                  <div key={t.id} className="flex items-start gap-2 bg-surface-sunken/60 rounded-md px-2.5 py-1.5 text-xs">
+                    <span className="flex-1 text-ink-muted truncate">{t.text}</span>
+                    <button
+                      type="button"
+                      onClick={() => setTexts(texts.filter((x) => x.id !== t.id))}
+                      className="text-ink-subtle hover:text-danger"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* ── Process button ── */}
@@ -657,18 +658,18 @@ function DropZone({
       onDragOver={onDragOver}
       onDragLeave={() => setActive(false)}
       className={cn(
-        'rounded-card border bg-surface p-4 transition',
+        'rounded-card border bg-surface p-3 transition',
         active ? 'border-primary bg-primary-soft/30' : 'border-line border-dashed',
       )}
     >
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-1.5">
         <span className="text-ink-muted">{icon}</span>
         <h4 className="text-sm font-semibold text-ink">{title}</h4>
       </div>
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="w-full text-left text-[11px] text-ink-muted hover:text-ink-muted/80 mb-2"
+        className="w-full text-left text-[11px] text-ink-muted hover:text-ink-muted/80 mb-1"
       >
         {hint} — <span className="text-primary-ink dark:text-primary font-semibold">browse</span>
       </button>
