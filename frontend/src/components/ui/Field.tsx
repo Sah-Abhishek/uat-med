@@ -402,7 +402,7 @@ export interface DateMarker {
   color: 'rose' | 'sky' | 'emerald';
 }
 
-const MARKER_DOT: Record<DateMarker['color'], string> = {
+const MARKER_BG: Record<DateMarker['color'], string> = {
   rose: 'bg-rose-500',
   sky: 'bg-sky-500',
   emerald: 'bg-emerald-500',
@@ -634,7 +634,11 @@ export function DatePicker({
                 const isToday = isSameDay(d, today);
                 const isSelected = selected ? isSameDay(d, selected) : false;
                 const disabledCell = isOutOfRange(d);
-                const dayMarkers = (markers ?? []).filter((m) => {
+                // A sibling date (admit / DOS / discharge) on this day → fill the
+                // cell with that field's colour and keep the number inside it
+                // (white text for contrast). The active field's own pick still
+                // wins with the gold "selected" fill.
+                const marker = (markers ?? []).find((m) => {
                   const md = parseISODate(m.date);
                   return md ? isSameDay(d, md) : false;
                 });
@@ -653,6 +657,8 @@ export function DatePicker({
                       'flex items-center justify-center',
                       isSelected
                         ? 'bg-primary text-primary-ink font-bold shadow-card'
+                        : marker
+                        ? cn(MARKER_BG[marker.color], 'text-white font-bold shadow-card')
                         : isToday
                         ? 'border border-primary/60 text-ink font-semibold'
                         : isOther
@@ -662,20 +668,6 @@ export function DatePicker({
                     )}
                   >
                     {d.getDate()}
-                    {dayMarkers.length > 0 && (
-                      <span className="pointer-events-none absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5">
-                        {dayMarkers.map((m, i) => (
-                          <span
-                            key={i}
-                            className={cn(
-                              'w-1 h-1 rounded-full',
-                              MARKER_DOT[m.color],
-                              isSelected && 'ring-1 ring-white/80',
-                            )}
-                          />
-                        ))}
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -730,7 +722,7 @@ export function DatePicker({
                     key={m.label}
                     className="inline-flex items-center gap-1 text-[10px] font-medium text-ink-muted"
                   >
-                    <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', MARKER_DOT[m.color])} />
+                    <span className={cn('w-2.5 h-2.5 rounded-sm shrink-0', MARKER_BG[m.color])} />
                     {m.label}
                   </span>
                 ))}
