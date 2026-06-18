@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Toast } from '@/components/ui/Primitives';
 import { FormField, SkeletonGrid } from './shared';
@@ -63,6 +63,14 @@ export function ChartInfoSection({
     const base = m ? new Date(Number(m[1]), Number(m[2]) - 1, 1) : new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
+  // Follow the Date of Service month whenever it's set — including when it's
+  // auto-filled from the worklist and the user never opens its picker — so the
+  // other two pickers open on the right month. Manual navigation in another
+  // field still sticks (it doesn't change the DOS value, so this won't fire).
+  useEffect(() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(draft.dateOfService || '');
+    if (m) setDateViewMonth(new Date(Number(m[1]), Number(m[2]) - 1, 1));
+  }, [draft.dateOfService]);
   // Cross-mark all three dates (fixed colours) on every one of their calendars.
   const dateMarkers: DateMarker[] = [
     { date: draft.admitDate, label: 'Admit date', color: 'rose' },
