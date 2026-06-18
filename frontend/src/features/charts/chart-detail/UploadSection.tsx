@@ -359,12 +359,11 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
           </div>
           */}
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-4 items-start">
-            {/* ── Left half: square Documents + Image Groups drop zones ── */}
-            <div className="grid grid-cols-2 gap-3">
-            {/* ── Documents column ── */}
+          {/* Single short row: Document Upload | Image Groups | (wider) Clinical Text */}
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_2fr] gap-3 pt-4 items-stretch">
+            {/* ── Document Upload column ── */}
             <DropZone
-              title="Documents"
+              title="Document Upload"
               icon={<FileText className="w-7 h-7" />}
               hint="Drop PDF / DOC files here"
               accept=".pdf,.doc,.docx"
@@ -441,25 +440,32 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
                 </div>
               )}
             </DropZone>
-            </div>
 
-            {/* ── Right half: Clinical Text ── */}
-            <div className="rounded-card border border-line bg-surface p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <ClipboardPaste className="w-5 h-5 text-ink-muted" />
-                <h4 className="text-sm font-semibold text-ink">Clinical Text</h4>
+            {/* ── Clinical Text column (wider, horizontal: label left, input right) ── */}
+            <div className="rounded-card border border-line bg-surface p-3">
+              <div className="flex items-start gap-3">
+                {/* left: heading */}
+                <div className="shrink-0 w-28">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <ClipboardPaste className="w-5 h-5 text-ink-muted shrink-0" />
+                    <h4 className="text-sm font-semibold text-ink">Clinical Text</h4>
+                  </div>
+                  <p className="text-[11px] text-ink-muted leading-tight">Paste clinical notes</p>
+                </div>
+                {/* right: textarea + Add Entry */}
+                <div className="flex-1 min-w-0">
+                  <textarea
+                    rows={3}
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    placeholder="Paste here…"
+                    className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <Button size="sm" disabled={!textInput.trim()} onClick={addText} className="w-full mt-2">
+                    Add Entry
+                  </Button>
+                </div>
               </div>
-              <p className="text-[11px] text-ink-muted mb-2">Paste clinical notes</p>
-              <textarea
-                rows={5}
-                value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                placeholder="Paste here…"
-                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-              <Button size="sm" disabled={!textInput.trim()} onClick={addText} className="w-full mt-2">
-                Add Entry
-              </Button>
               {texts.length > 0 && (
                 <div className="space-y-1.5 mt-3">
                   {texts.map((t) => (
@@ -660,7 +666,7 @@ function DropZone({
       onDragOver={onDragOver}
       onDragLeave={() => setActive(false)}
       className={cn(
-        'aspect-square rounded-card border bg-surface p-3 transition flex flex-col',
+        'rounded-card border bg-surface p-3 transition flex flex-col',
         active ? 'border-primary bg-primary-soft/30' : 'border-line border-dashed',
       )}
     >
