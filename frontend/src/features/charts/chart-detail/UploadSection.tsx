@@ -194,7 +194,6 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
   }
 
   async function processDocuments() {
-    setOpen(true); // ensure the body (progress / status) is visible
     setStatus('uploading');
     setProgress(0);
     setPhase('uploading');
@@ -320,12 +319,12 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
 
   return (
     <div className="card overflow-hidden">
-      <div className="w-full flex items-center justify-between gap-3 px-6 py-5">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex-1 min-w-0 text-left hover:opacity-80 transition"
-        >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-6 py-5 text-left hover:bg-surface-2/60 transition"
+      >
+        <div className="min-w-0">
           <h3 className="text-[15px] font-semibold text-ink">
             {hasUploaded ? 'Upload More Documents' : 'Upload Medical Documents'}
           </h3>
@@ -334,32 +333,11 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
               ? `${uploadedDocs.length} document${uploadedDocs.length === 1 ? '' : 's'} uploaded`
               : 'PDFs, images, or paste clinical text below'}
           </p>
-        </button>
-        <div className="flex items-center gap-3 shrink-0">
-          {/* Process button — top-right of the section. */}
-          <Button
-            size="sm"
-            disabled={!hasStaged || busy}
-            loading={status === 'uploading'}
-            leftIcon={<Upload className="w-3.5 h-3.5" />}
-            onClick={processDocuments}
-          >
-            {status === 'uploading'
-              ? 'Uploading…'
-              : hasUploaded
-              ? 'Add & Re-run AI'
-              : 'Process Documents'}
-          </Button>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            aria-label={open ? 'Collapse' : 'Expand'}
-            className="w-7 h-7 rounded-full bg-surface-sunken flex items-center justify-center text-ink-muted shrink-0"
-          >
-            {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
         </div>
-      </div>
+        <span className="w-7 h-7 rounded-full bg-surface-sunken flex items-center justify-center text-ink-muted">
+          {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </span>
+      </button>
 
       {open && (
         <div className="px-6 pb-6 pt-1 border-t border-line">
@@ -381,11 +359,11 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
           </div>
           */}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4">
             {/* ── Documents column ── */}
             <DropZone
               title="Documents"
-              icon={<FileText className="w-4 h-4" />}
+              icon={<FileText className="w-5 h-5" />}
               hint="Drop PDF / DOC files here"
               accept=".pdf,.doc,.docx"
               inputRef={docInput}
@@ -403,7 +381,7 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
             {/* ── Image groups column ── */}
             <DropZone
               title="Image Groups"
-              icon={<FileImage className="w-4 h-4" />}
+              icon={<FileImage className="w-5 h-5" />}
               hint="Drop images for one group, label, then add"
               accept="image/jpeg,image/png,image/tiff,image/webp"
               inputRef={imgInput}
@@ -497,6 +475,21 @@ export function UploadSection({ chartId, uploadedDocs, customFields, onView, onP
               )}
             </div>
           </div>
+
+          {/* ── Process button ── */}
+          <Button
+            className="w-full mt-5"
+            disabled={!hasStaged || busy}
+            loading={status === 'uploading'}
+            leftIcon={<Upload className="w-4 h-4" />}
+            onClick={processDocuments}
+          >
+            {status === 'uploading'
+              ? 'Uploading…'
+              : hasUploaded
+              ? 'Add & Re-run AI'
+              : 'Process Documents'}
+          </Button>
 
           {/* ── Live progress ── */}
           {status === 'uploading' && (
@@ -664,21 +657,20 @@ function DropZone({
       onDragOver={onDragOver}
       onDragLeave={() => setActive(false)}
       className={cn(
-        'rounded-card border bg-surface px-3 py-2 transition',
+        'rounded-card border bg-surface p-4 transition',
         active ? 'border-primary bg-primary-soft/30' : 'border-line border-dashed',
       )}
     >
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-ink-muted">{icon}</span>
+        <h4 className="text-sm font-semibold text-ink">{title}</h4>
+      </div>
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="w-full flex items-center gap-1.5 text-left"
-        title={`${hint} — browse`}
+        className="w-full text-left text-[11px] text-ink-muted hover:text-ink-muted/80 mb-2"
       >
-        <span className="text-ink-muted shrink-0">{icon}</span>
-        <span className="text-xs font-semibold text-ink shrink-0">{title}</span>
-        <span className="text-[11px] text-ink-muted truncate min-w-0">
-          · {hint} — <span className="text-primary-ink dark:text-primary font-semibold">browse</span>
-        </span>
+        {hint} — <span className="text-primary-ink dark:text-primary font-semibold">browse</span>
       </button>
       <input
         ref={inputRef}
