@@ -21,7 +21,7 @@ import type { ApiErrorShape, Priority } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, SearchInput, Radio, FancySelect } from '@/components/ui/Field';
+import { Input, Label, SearchInput, Radio, FancySelect, FancyMultiSelect } from '@/components/ui/Field';
 import {
   Modal,
   ModalFooter,
@@ -588,6 +588,7 @@ export function ChartsPage() {
           v !== '' &&
           v !== undefined &&
           v !== null &&
+          !(Array.isArray(v) && v.length === 0) &&
           !(typeof v === 'number' && Number.isNaN(v)),
       ).length,
     [filters],
@@ -950,6 +951,14 @@ function FilterModal({
     enabled: open,
   });
 
+  // Normalise a single-or-array filter value to string[] for the multi-selects.
+  const arr = (v: unknown): string[] =>
+    v === undefined || v === null || v === ''
+      ? []
+      : Array.isArray(v)
+      ? v.map(String)
+      : [String(v)];
+
   return (
     <Modal open={open} onClose={onClose} title="Filter Charts" size="xl">
       <form
@@ -964,6 +973,7 @@ function FilterModal({
                 v !== '' &&
                 v !== undefined &&
                 v !== null &&
+                !(Array.isArray(v) && v.length === 0) &&
                 !(typeof v === 'number' && Number.isNaN(v)),
             ),
           ) as ChartListParams;
@@ -991,20 +1001,17 @@ function FilterModal({
               control={control}
               name="worklistId"
               render={({ field }) => (
-                <FancySelect
+                <FancyMultiSelect
                   searchable
                   searchPlaceholder="Search worklist…"
                   placeholder={worklists.isPending ? 'Loading…' : 'Any worklist'}
                   loading={worklists.isFetching}
-                  value={field.value != null && field.value !== '' ? String(field.value) : ''}
-                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
-                  options={[
-                    { value: '', label: 'Any worklist' },
-                    ...(worklists.data?.items ?? []).map((w) => ({
-                      value: String(w.id),
-                      label: w.worklistNumber,
-                    })),
-                  ]}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  options={(worklists.data?.items ?? []).map((w) => ({
+                    value: String(w.id),
+                    label: w.worklistNumber,
+                  }))}
                 />
               )}
             />
@@ -1015,21 +1022,18 @@ function FilterModal({
               control={control}
               name="allocatedUserId"
               render={({ field }) => (
-                <FancySelect
+                <FancyMultiSelect
                   searchable
                   onSearch={setUserSearch}
                   loading={users.isFetching}
                   searchPlaceholder="Search users…"
                   placeholder="Any user"
-                  value={field.value != null ? String(field.value) : ''}
-                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
-                  options={[
-                    { value: '', label: 'Any user' },
-                    ...(users.data?.items ?? []).map((u) => ({
-                      value: String(u.id),
-                      label: u.fullName,
-                    })),
-                  ]}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  options={(users.data?.items ?? []).map((u) => ({
+                    value: String(u.id),
+                    label: u.fullName,
+                  }))}
                 />
               )}
             />
@@ -1040,19 +1044,16 @@ function FilterModal({
               control={control}
               name="primarySpecialityId"
               render={({ field }) => (
-                <FancySelect
+                <FancyMultiSelect
                   searchable
                   searchPlaceholder="Search specialities…"
                   placeholder={specialities.isPending ? 'Loading…' : 'Any speciality'}
-                  value={field.value != null ? String(field.value) : ''}
-                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
-                  options={[
-                    { value: '', label: 'Any speciality' },
-                    ...(specialities.data?.items ?? []).map((s) => ({
-                      value: String(s.id),
-                      label: s.name,
-                    })),
-                  ]}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  options={(specialities.data?.items ?? []).map((s) => ({
+                    value: String(s.id),
+                    label: s.name,
+                  }))}
                 />
               )}
             />
@@ -1063,7 +1064,7 @@ function FilterModal({
               control={control}
               name="subSpecialityId"
               render={({ field }) => (
-                <FancySelect
+                <FancyMultiSelect
                   searchable
                   searchPlaceholder="Search sub-specialities…"
                   placeholder={
@@ -1074,15 +1075,12 @@ function FilterModal({
                       : 'Any sub-speciality'
                   }
                   disabled={scopeLocationId == null}
-                  value={field.value != null ? String(field.value) : ''}
-                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
-                  options={[
-                    { value: '', label: 'Any sub-speciality' },
-                    ...(subSpecs.data?.items ?? []).map((s) => ({
-                      value: String(s.id),
-                      label: s.name,
-                    })),
-                  ]}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  options={(subSpecs.data?.items ?? []).map((s) => ({
+                    value: String(s.id),
+                    label: s.name,
+                  }))}
                 />
               )}
             />
@@ -1093,10 +1091,11 @@ function FilterModal({
               control={control}
               name="chartStatus"
               render={({ field }) => (
-                <FancySelect
+                <FancyMultiSelect
+                  placeholder="Any"
                   options={CHART_STATUS_OPTIONS}
-                  value={field.value ?? ''}
-                  onChange={(v) => field.onChange(v || undefined)}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? (v as ChartListParams['chartStatus']) : undefined)}
                 />
               )}
             />
@@ -1107,10 +1106,11 @@ function FilterModal({
               control={control}
               name="milestone"
               render={({ field }) => (
-                <FancySelect
+                <FancyMultiSelect
+                  placeholder="Any"
                   options={MILESTONE_OPTIONS}
-                  value={field.value ?? ''}
-                  onChange={(v) => field.onChange(v || undefined)}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? (v as ChartListParams['milestone']) : undefined)}
                 />
               )}
             />
@@ -1121,10 +1121,11 @@ function FilterModal({
               control={control}
               name="aiStatus"
               render={({ field }) => (
-                <FancySelect
+                <FancyMultiSelect
+                  placeholder="Any"
                   options={AI_STATUS_OPTIONS}
-                  value={field.value ?? ''}
-                  onChange={(v) => field.onChange((v || undefined) as ChartListParams['aiStatus'])}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? (v as ChartListParams['aiStatus']) : undefined)}
                 />
               )}
             />

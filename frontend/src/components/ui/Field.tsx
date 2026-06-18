@@ -361,6 +361,206 @@ export function FancySelect({
   );
 }
 
+/* ── FancyMultiSelect — multi-select variant of FancySelect ── */
+interface FancyMultiSelectProps {
+  value: string[];
+  onChange: (v: string[]) => void;
+  options: FancySelectOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  searchable?: boolean;
+  /** Server-driven search (debounced); omit for local label filtering. */
+  onSearch?: (query: string) => void;
+  loading?: boolean;
+  searchPlaceholder?: string;
+}
+export function FancyMultiSelect({
+  value,
+  onChange,
+  options,
+  placeholder = 'Any',
+  disabled,
+  className,
+  searchable,
+  onSearch,
+  loading,
+  searchPlaceholder = 'Search…',
+}: FancyMultiSelectProps) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [query, setQuery] = useState('');
+  // Remember labels for chosen values so the trigger summary survives a
+  // server-driven option swap (a picked user may drop out of the latest page).
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!options.length) return;
+    setLabels((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const o of options) {
+        if (o.value && next[o.value] !== o.label) { next[o.value] = o.label; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [options]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const POPOVER_MAX_H = 320;
+    function reposition() {
+      const el = triggerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const popH = Math.min(POPOVER_MAX_H, options.length * 38 + 60);
+      let top = rect.bottom + 8;
+      if (top + popH > vh - 8 && rect.top - 8 > popH) top = rect.top - 8 - popH;
+      setPosition({ top, left: rect.left, width: rect.width });
+    }
+    reposition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open, options.length]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (triggerRef.current?.contains(e.target as Node) || popoverRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', onClickOutside, true);
+    return () => document.removeEventListener('mousedown', onClickOutside, true);
+  }, [open]);
+
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
+
+  useEffect(() => {
+    if (!open) { setQuery(''); return; }
+    if (searchable) {
+      const t = setTimeout(() => searchRef.current?.focus(), 0);
+      return () => clearTimeout(t);
+    }
+  }, [open, searchable]);
+
+  useEffect(() => {
+    if (!searchable || !onSearch) return;
+    const t = setTimeout(() => onSearch(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query, searchable, onSearch]);
+
+  const selectedSet = new Set(value);
+  const labelFor = (v: string) => labels[v] ?? options.find((o) => o.value === v)?.label ?? v;
+  const summary = value.length === 0 ? placeholder : value.length === 1 ? labelFor(value[0]) : `${value.length} selected`;
+  const toggle = (v: string) => {
+    if (!v) return;
+    onChange(selectedSet.has(v) ? value.filter((x) => x !== v) : [...value, v]);
+  };
+
+  // Multi-select never offers a blank "Any" row; clearing = deselect everything.
+  const base = options.filter((o) => o.value);
+  const visibleOptions =
+    searchable && !onSearch && query.trim()
+      ? base.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()))
+      : base;
+
+  return (
+    <div className={cn('relative', className)}>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'w-full h-10 pl-3.5 pr-2.5 rounded-pill border bg-surface flex items-center gap-2 text-sm transition',
+          'border-line hover:border-line-strong hover:bg-surface-sunken/60',
+          open && 'border-primary/70 bg-surface-sunken/60 shadow-card',
+          disabled && 'opacity-50 cursor-not-allowed pointer-events-none',
+        )}
+      >
+        <span className={cn('flex-1 text-left truncate', value.length ? 'font-semibold text-ink' : 'text-ink-subtle')}>
+          {summary}
+        </span>
+        <ChevronDown className={cn('w-3.5 h-3.5 text-ink-muted transition-transform shrink-0', open && 'rotate-180 text-primary')} />
+      </button>
+
+      {open && position && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            style={{ top: position.top, left: position.left, width: position.width }}
+            className={cn(
+              'fixed z-[100] flex flex-col',
+              'bg-surface border border-line rounded-xl shadow-pop dark:shadow-pop-dark p-1',
+              'max-h-[320px]',
+            )}
+          >
+            {searchable && (
+              <div className="relative px-1 pt-0.5 pb-1.5 shrink-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-subtle pointer-events-none" />
+                {loading && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-subtle animate-spin" />
+                )}
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="w-full h-8 pl-8 pr-8 rounded-lg border border-line bg-surface-sunken/40 text-sm text-ink placeholder:text-ink-subtle focus:outline-none focus:border-primary/60"
+                />
+              </div>
+            )}
+            <div className="overflow-y-auto">
+              {visibleOptions.length === 0 ? (
+                <div className="px-3 py-4 text-center text-xs text-ink-muted">{loading ? 'Searching…' : 'No matches'}</div>
+              ) : (
+                visibleOptions.map((o) => {
+                  const checked = selectedSet.has(o.value);
+                  return (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => toggle(o.value)}
+                      className={cn(
+                        'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition text-left',
+                        checked ? 'text-primary-ink dark:text-primary font-semibold' : 'text-ink hover:bg-surface-sunken font-medium',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'w-4 h-4 rounded border flex items-center justify-center shrink-0 transition',
+                          checked ? 'bg-primary border-primary' : 'bg-surface border-line',
+                        )}
+                      >
+                        {checked && <Check className="w-3 h-3 text-primary-ink" strokeWidth={3} />}
+                      </span>
+                      <span className="flex-1 truncate">{o.label}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            {value.length > 0 && (
+              <div className="flex items-center justify-between gap-2 mt-1 pt-1.5 px-2 border-t border-line shrink-0">
+                <span className="text-[11px] text-ink-muted">{value.length} selected</span>
+                <button type="button" onClick={() => onChange([])} className="text-[11px] font-semibold text-primary hover:underline">
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 /* ── DatePicker — themed calendar popover ─────────────── */
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];

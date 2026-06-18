@@ -24,22 +24,26 @@ export interface ChartListParams {
   sortBy?: string;
   sortDir?: SortDir;
   priority?: Priority;
-  worklistId?: number | string;
+  // Filter fields below accept a single value (other callers) OR an array
+  // (the multi-select chart filters). The backend matches with IN(...).
+  worklistId?: number | string | Array<number | string>;
   serialFrom?: number;
   serialTo?: number;
-  allocatedUserId?: number | string;
-  primarySpecialityId?: number;
-  subSpecialityId?: number;
+  allocatedUserId?: number | string | Array<number | string>;
+  primarySpecialityId?: number | number[];
+  subSpecialityId?: number | number[];
   /** Global header scope (Client / Location). */
   clientId?: number;
   locationId?: number;
   chartNo?: string;
-  chartStatus?: ChartStatus;
-  milestone?: ChartMilestone;
+  chartStatus?: ChartStatus | ChartStatus[];
+  milestone?: ChartMilestone | ChartMilestone[];
   /** AI-pipeline state, derived server-side from custom_fields. Use 'ERRORED'
    * to surface only charts whose AI prediction failed; 'IN_PROGRESS' is the
    * union of QUEUED + PROCESSING (any pending prediction). */
-  aiStatus?: 'QUEUED' | 'PROCESSING' | 'IN_PROGRESS' | 'DONE' | 'ERRORED';
+  aiStatus?:
+    | 'QUEUED' | 'PROCESSING' | 'IN_PROGRESS' | 'DONE' | 'ERRORED'
+    | Array<'QUEUED' | 'PROCESSING' | 'IN_PROGRESS' | 'DONE' | 'ERRORED'>;
   receivedDateFrom?: string;
   receivedDateTo?: string;
   dateOfServiceFrom?: string;

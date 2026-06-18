@@ -1,8 +1,20 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsDateString, IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { PageParamsDto } from '../../../common/dto/page-params.dto';
 import { ChartMilestone, ChartStatus, Priority } from '../../../common/enums';
+
+/** Coerce a single-or-array query value (?x=A or ?x[]=A&x[]=B) into an array,
+ *  or undefined when absent. The multi-select chart filters send arrays; other
+ *  callers still send a single value — both reach the same IN(...) match. */
+const toArray = ({ value }: { value: unknown }): unknown[] | undefined =>
+  value === undefined || value === null || value === ''
+    ? undefined
+    : Array.isArray(value)
+    ? value
+    : [value];
+const toNumberArray = (params: { value: unknown }): number[] | undefined =>
+  toArray(params)?.map((v) => Number(v));
 
 /**
  * AI-pipeline status, derived from `custom_fields` rather than a column.
@@ -25,18 +37,18 @@ export enum AiStatusFilter {
 
 export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional({ enum: Priority }) @IsOptional() @IsEnum(Priority) priority?: Priority;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() worklistId?: number;
+  @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) worklistId?: number[];
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() serialFrom?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() serialTo?: number;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() allocatedUserId?: number;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() primarySpecialityId?: number;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() subSpecialityId?: number;
+  @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) allocatedUserId?: number[];
+  @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) primarySpecialityId?: number[];
+  @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) subSpecialityId?: number[];
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() clientId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() locationId?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() chartNo?: string;
-  @ApiPropertyOptional({ enum: ChartStatus }) @IsOptional() @IsEnum(ChartStatus) chartStatus?: ChartStatus;
-  @ApiPropertyOptional({ enum: ChartMilestone }) @IsOptional() @IsEnum(ChartMilestone) milestone?: ChartMilestone;
-  @ApiPropertyOptional({ enum: AiStatusFilter }) @IsOptional() @IsEnum(AiStatusFilter) aiStatus?: AiStatusFilter;
+  @ApiPropertyOptional({ enum: ChartStatus, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(ChartStatus, { each: true }) chartStatus?: ChartStatus[];
+  @ApiPropertyOptional({ enum: ChartMilestone, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(ChartMilestone, { each: true }) milestone?: ChartMilestone[];
+  @ApiPropertyOptional({ enum: AiStatusFilter, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(AiStatusFilter, { each: true }) aiStatus?: AiStatusFilter[];
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateTo?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateOfServiceFrom?: string;

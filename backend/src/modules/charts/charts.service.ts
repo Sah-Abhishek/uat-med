@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, QueryFailedError, Repository, SelectQueryBuilder } from 'typeorm';
+import { Brackets, DataSource, In, IsNull, QueryFailedError, Repository, SelectQueryBuilder } from 'typeorm';
 import { Chart } from '../../entities/chart.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
 import { ChartFeedback } from '../../entities/chart-feedback.entity';
@@ -167,21 +167,21 @@ export class ChartsService {
     this.excludeOrphanedCharts(qb);
 
     if (q.priority) qb.andWhere('c.priority = :p', { p: q.priority });
-    if (q.worklistId) qb.andWhere('c.worklist_id = :w', { w: q.worklistId });
+    if (q.worklistId?.length) qb.andWhere('c.worklist_id IN (:...w)', { w: q.worklistId });
     if (q.serialFrom) qb.andWhere('c.serial_no >= :sf', { sf: q.serialFrom });
     if (q.serialTo) qb.andWhere('c.serial_no <= :st', { st: q.serialTo });
     if (q.chartNo) qb.andWhere('c.chart_no ILIKE :cn', { cn: `%${q.chartNo}%` });
-    if (q.chartStatus) qb.andWhere('c.chart_status = :cs', { cs: q.chartStatus });
-    if (q.milestone) qb.andWhere('c.milestone = :m', { m: q.milestone });
-    if (q.allocatedUserId) qb.andWhere('(c.allocated_coder_id = :au OR c.allocated_auditor_id = :au)', { au: q.allocatedUserId });
-    if (q.primarySpecialityId) qb.andWhere('worklist.primary_speciality_id = :ps', { ps: q.primarySpecialityId });
-    if (q.subSpecialityId) qb.andWhere('worklist.sub_speciality_id = :ss', { ss: q.subSpecialityId });
+    if (q.chartStatus?.length) qb.andWhere('c.chart_status IN (:...cs)', { cs: q.chartStatus });
+    if (q.milestone?.length) qb.andWhere('c.milestone IN (:...m)', { m: q.milestone });
+    if (q.allocatedUserId?.length) qb.andWhere('(c.allocated_coder_id IN (:...au) OR c.allocated_auditor_id IN (:...au))', { au: q.allocatedUserId });
+    if (q.primarySpecialityId?.length) qb.andWhere('worklist.primary_speciality_id IN (:...ps)', { ps: q.primarySpecialityId });
+    if (q.subSpecialityId?.length) qb.andWhere('worklist.sub_speciality_id IN (:...ss)', { ss: q.subSpecialityId });
     // Global header scope (Client / Location). The worklist is already joined.
     if (q.clientId) qb.andWhere('worklist.client_id = :cid', { cid: q.clientId });
     if (q.locationId) qb.andWhere('worklist.location_id = :lid', { lid: q.locationId });
     // Narrow to a single AI-pipeline state (e.g. ERRORED) using the same
     // custom_fields predicates that drive the AI summary tiles.
-    if (q.aiStatus) this.applyAiStatusFilter(qb, q.aiStatus);
+    if (q.aiStatus?.length) this.applyAiStatusFilters(qb, q.aiStatus);
     if (q.receivedDateFrom) qb.andWhere('worklist.received_date >= :rdf', { rdf: q.receivedDateFrom });
     if (q.receivedDateTo) qb.andWhere('worklist.received_date <= :rdt', { rdt: q.receivedDateTo });
 
@@ -365,35 +365,63 @@ export class ChartsService {
    * precedence over a stored aiPrediction (DONE). Shared by `list()` (the AI
    * Status filter) and `summary()` (the AI tile counts) so the two never drift.
    */
+  /** The AND-ed predicates for one AI status, wrapped in a Brackets so several
+   *  can be OR-ed together (multi-select) without their conditions bleeding into
+   *  each other. Predicates are literal SQL (no params), so OR-ing is safe. */
+  private aiStatusBrackets(status: AiStatusFilter): Brackets {
+    return new Brackets((qb) => {
+      switch (status) {
+        case AiStatusFilter.QUEUED:
+          qb.where(`c.custom_fields ? 'pendingPrediction'`)
+            .andWhere(`COALESCE(c.custom_fields->'pendingPrediction'->>'gatewayStatus','PENDING') = 'PENDING'`);
+          break;
+        case AiStatusFilter.PROCESSING:
+          qb.where(`c.custom_fields ? 'pendingPrediction'`)
+            .andWhere(`c.custom_fields->'pendingPrediction'->>'gatewayStatus' = 'STARTED'`);
+          break;
+        case AiStatusFilter.IN_PROGRESS:
+          // Union of QUEUED + PROCESSING — any chart with a pending prediction,
+          // matching the donut's "In progress" slice.
+          qb.where(`c.custom_fields ? 'pendingPrediction'`);
+          break;
+        case AiStatusFilter.ERRORED:
+          qb.where(`NOT (c.custom_fields ? 'pendingPrediction')`)
+            .andWhere(`c.custom_fields ? 'aiPredictionError'`);
+          break;
+        case AiStatusFilter.DONE:
+          qb.where(`NOT (c.custom_fields ? 'pendingPrediction')`)
+            .andWhere(`NOT (c.custom_fields ? 'aiPredictionError')`)
+            .andWhere(`c.custom_fields ? 'aiPrediction'`);
+          break;
+      }
+    });
+  }
+
+  /** Single status — used by summary()'s AI tile counts. */
   private applyAiStatusFilter(
     qb: SelectQueryBuilder<Chart>,
     status: AiStatusFilter,
   ): SelectQueryBuilder<Chart> {
-    switch (status) {
-      case AiStatusFilter.QUEUED:
-        return qb
-          .andWhere(`c.custom_fields ? 'pendingPrediction'`)
-          .andWhere(`COALESCE(c.custom_fields->'pendingPrediction'->>'gatewayStatus','PENDING') = 'PENDING'`);
-      case AiStatusFilter.PROCESSING:
-        return qb
-          .andWhere(`c.custom_fields ? 'pendingPrediction'`)
-          .andWhere(`c.custom_fields->'pendingPrediction'->>'gatewayStatus' = 'STARTED'`);
-      case AiStatusFilter.IN_PROGRESS:
-        // Union of QUEUED + PROCESSING — any chart with a pending prediction,
-        // matching the donut's "In progress" slice.
-        return qb.andWhere(`c.custom_fields ? 'pendingPrediction'`);
-      case AiStatusFilter.ERRORED:
-        return qb
-          .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)
-          .andWhere(`c.custom_fields ? 'aiPredictionError'`);
-      case AiStatusFilter.DONE:
-        return qb
-          .andWhere(`NOT (c.custom_fields ? 'pendingPrediction')`)
-          .andWhere(`NOT (c.custom_fields ? 'aiPredictionError')`)
-          .andWhere(`c.custom_fields ? 'aiPrediction'`);
-      default:
-        return qb;
+    return qb.andWhere(this.aiStatusBrackets(status));
+  }
+
+  /** One or more statuses OR-ed together — used by the list filter so a
+   *  multi-select can match any (e.g. Queued OR Errored). */
+  private applyAiStatusFilters(
+    qb: SelectQueryBuilder<Chart>,
+    statuses: AiStatusFilter[],
+  ): SelectQueryBuilder<Chart> {
+    if (statuses.length <= 1) {
+      return statuses.length ? this.applyAiStatusFilter(qb, statuses[0]) : qb;
     }
+    return qb.andWhere(
+      new Brackets((b) => {
+        statuses.forEach((s, i) => {
+          if (i === 0) b.where(this.aiStatusBrackets(s));
+          else b.orWhere(this.aiStatusBrackets(s));
+        });
+      }),
+    );
   }
 
   async detail(id: number) {
