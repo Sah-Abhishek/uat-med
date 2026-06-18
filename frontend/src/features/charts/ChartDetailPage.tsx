@@ -12,6 +12,7 @@ import {
 import {
   getChart,
   listCodeDecisions,
+  getCodeDecisionDraft,
   updateChart,
   getActiveTimer,
   type CodeDecisionRecord,
@@ -201,22 +202,55 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     queryFn: () => listCodeDecisions(String(chart.id)),
     enabled: !!chart.id,
   });
+  // The coder's in-progress (not-yet-submitted) decisions — the draft is
+  // deleted server-side on submit, so its presence means "unsubmitted". Shares
+  // the review modal's query key so a submit/edit there refreshes the sidebar.
+  const draftQ = useQuery({
+    queryKey: ['chart-code-decision-draft', String(chart.id)],
+    queryFn: () => getCodeDecisionDraft(String(chart.id)),
+    enabled: !!chart.id,
+  });
   const liveAiPrediction: AnnotatedPrediction | null = useMemo(() => {
     if (!aiPrediction) return null;
     const decisions = decisionsQ.data?.items ?? [];
-    if (decisions.length === 0) return aiPrediction;
-    const decisionByKey = new Map<string, CodeDecisionRecord>();
-    for (const d of decisions) decisionByKey.set(`${d.codeType}|${d.codeValue}`, d);
+    const draft = draftQ.data?.draft?.payload;
+    const draftDecisions = draft?.decisions ?? [];
+    const draftAdded = draft?.addedItems ?? [];
+    if (decisions.length === 0 && draftDecisions.length === 0 && draftAdded.length === 0) {
+      return aiPrediction; // nothing reviewed yet — show the raw prediction
+    }
+    const recordByKey = new Map<string, CodeDecisionRecord>();
+    for (const d of decisions) recordByKey.set(`${d.codeType}|${d.codeValue}`, d);
+    const draftByKey = new Map<string, (typeof draftDecisions)[number]>();
+    for (const d of draftDecisions) draftByKey.set(`${d.category}|${d.code}`, d);
     const dedup = (arr: AnnotatedCode[]) => {
       const seen = new Set<string>();
       return arr.filter((c) => (seen.has(c.code) ? false : (seen.add(c.code), true)));
     };
-    // Annotate every AI code with what the coder did (instead of dropping the
-    // rejected ones) so the sidebar can show the full outcome with colours.
+    // Annotate every AI code with what the coder did. A draft (not-yet-submitted)
+    // decision is the coder's current intent, so it wins over the last submitted
+    // record and is flagged notSubmitted.
     const apply = (codes: AiPredictedCode[], codeType: string): AnnotatedCode[] => {
       const out: AnnotatedCode[] = [];
       for (const c of codes) {
-        const d = decisionByKey.get(`${codeType}|${c.code}`);
+        const key = `${codeType}|${c.code}`;
+        const dr = draftByKey.get(key);
+        if (dr) {
+          if (dr.decision === 'rejected') out.push({ ...c, decisionState: 'rejected', notSubmitted: true });
+          else if (dr.decision === 'edited')
+            out.push({
+              ...c,
+              code: dr.editedCode || c.code,
+              description: dr.editedDescription || c.description,
+              decisionState: 'edited',
+              originalCode: c.code,
+              originalDescription: c.description,
+              notSubmitted: true,
+            });
+          else out.push({ ...c, decisionState: 'accepted', notSubmitted: true });
+          continue;
+        }
+        const d = recordByKey.get(key);
         if (!d) { out.push({ ...c, decisionState: 'untouched' }); continue; }
         if (d.decision === 'REJECTED') { out.push({ ...c, decisionState: 'rejected' }); continue; }
         if (d.decision === 'EDITED') {
@@ -234,14 +268,24 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       }
       return out;
     };
-    const addedFor = (codeType: string): AnnotatedCode[] =>
-      decisions
-        .filter((d) => d.decision === 'ADDED' && d.codeType === codeType)
-        .map((d) => ({
-          code: d.editedCode ?? d.codeValue,
-          description: d.editedDescription ?? '',
-          decisionState: 'added' as const,
-        }));
+    // Coder-added codes (not in the AI prediction): draft-added (not submitted)
+    // first, then submitted-added that a draft hasn't superseded.
+    const addedFor = (codeType: string): AnnotatedCode[] => {
+      const out: AnnotatedCode[] = [];
+      const seen = new Set<string>();
+      for (const a of draftAdded) {
+        if (a.category !== codeType) continue;
+        out.push({ code: a.code, description: a.description, decisionState: 'added', notSubmitted: true });
+        seen.add(a.code);
+      }
+      for (const d of decisions) {
+        if (d.decision !== 'ADDED' || d.codeType !== codeType) continue;
+        const code = d.editedCode ?? d.codeValue;
+        if (seen.has(code) || draftByKey.has(`${codeType}|${code}`)) continue;
+        out.push({ code, description: d.editedDescription ?? '', decisionState: 'added' });
+      }
+      return out;
+    };
     const primary = dedup([...apply(aiPrediction.primary, 'PRIMARY'), ...addedFor('PRIMARY')]);
     const secondary = dedup([...apply(aiPrediction.secondary, 'SECONDARY'), ...addedFor('SECONDARY')]);
     const procedures = dedup([
@@ -255,7 +299,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       procedures,
       codes: [...primary, ...secondary, ...procedures],
     };
-  }, [aiPrediction, decisionsQ.data]);
+  }, [aiPrediction, decisionsQ.data, draftQ.data]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [saveToastOpen, setSaveToastOpen] = useState(false);
@@ -706,7 +750,12 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
 
       <ReviewEditModal
         open={reviewOpen}
-        onClose={() => setReviewOpen(false)}
+        onClose={() => {
+          setReviewOpen(false);
+          // Reflect any draft edits / submission the modal made in the sidebar.
+          qc.invalidateQueries({ queryKey: ['chart-code-decision-draft', String(chart.id)] });
+          qc.invalidateQueries({ queryKey: ['chart-code-decisions', String(chart.id)] });
+        }}
         prediction={aiPrediction}
         docs={uploadedDocs}
         chartId={String(chart.id)}

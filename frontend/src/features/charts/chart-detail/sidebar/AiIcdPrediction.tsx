@@ -12,6 +12,8 @@ export interface AnnotatedCode extends AiPredictedCode {
   /** For 'edited' — the AI's original code/description before the coder changed it. */
   originalCode?: string;
   originalDescription?: string;
+  /** The decision is only in the coder's draft — not yet submitted. */
+  notSubmitted?: boolean;
 }
 export interface AnnotatedPrediction {
   primary: AnnotatedCode[];
@@ -142,6 +144,8 @@ function CodeRow({ c }: { c: AnnotatedCode }) {
           'inline-flex items-center px-2 py-0.5 rounded-pill text-[11px] font-semibold flex-shrink-0',
           s ? s.pill : 'bg-surface-sunken text-ink',
           s?.strike && 'line-through',
+          // Dashed outline reinforces that this decision isn't finalised yet.
+          c.notSubmitted && 'border border-dashed border-current',
         )}
       >
         {c.code}
@@ -159,10 +163,17 @@ function CodeRow({ c }: { c: AnnotatedCode }) {
           </p>
         )}
       </div>
-      {s && (
-        <span className={cn('text-[9px] uppercase tracking-wide font-bold shrink-0 mt-0.5', s.tagClass)}>
-          {s.tag}
-        </span>
+      {(s || c.notSubmitted) && (
+        <div className="shrink-0 flex flex-col items-end gap-0.5 mt-0.5">
+          {s && (
+            <span className={cn('text-[9px] uppercase tracking-wide font-bold', s.tagClass)}>{s.tag}</span>
+          )}
+          {c.notSubmitted && (
+            <span className="text-[8px] uppercase tracking-wide font-bold text-ink-subtle border border-dashed border-ink-subtle/60 rounded px-1 py-px whitespace-nowrap">
+              Not submitted
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
