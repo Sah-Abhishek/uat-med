@@ -845,6 +845,17 @@ function AllocateFreshVolume({
     placeholderData: (prev) => prev,
   });
 
+  // Allocations already saved on the server. Coders that already hold charts are
+  // flagged in the picker, and this list keeps showing who has what even after a
+  // draft is saved and cleared — so the record never just disappears. Same query
+  // keys as AllocationsBreakdown, so the cache is shared (no extra requests).
+  const persistedCharts = useQuery({
+    queryKey: ['worklist', worklistId, 'charts-allocations'],
+    queryFn: () => fetchAllCharts(worklistId),
+    enabled: !!worklistId,
+  });
+  const allUsers = useQuery({ queryKey: ['users', 'all-active'], queryFn: fetchAllActiveUsers });
+
   // Committed allocations accrue here as a static ledger; the single active row
   // below is what the allocator is filling in now. On "Add" the active row is
   // validated, frozen into this list, and a fresh blank row opens for the next coder.
@@ -867,8 +878,26 @@ function AllocateFreshVolume({
     onError: (err) => setServerError((err as unknown as ApiErrorShape).message),
   });
 
-  // Coders already in the ledger → tagged (but still selectable) in the picker.
-  const takenIds = new Set(committed.map((c) => String(c.assigneeId)));
+  // coderId → name from the full active-user list (independent of the search box).
+  const coderNames = new Map<string, string>();
+  for (const u of allUsers.data ?? []) coderNames.set(String(u.id), u.fullName);
+
+  // Persisted allocations grouped by coder → their chart serial numbers.
+  const persistedGroups = new Map<string, number[]>();
+  for (const c of persistedCharts.data ?? []) {
+    if (!c.allocatedCoderId) continue;
+    const k = String(c.allocatedCoderId);
+    const arr = persistedGroups.get(k) ?? [];
+    arr.push(c.serialNo);
+    persistedGroups.set(k, arr);
+  }
+
+  // A coder is "already allocated" if they hold saved charts OR are in the current
+  // draft → tagged (but still selectable) in the picker.
+  const takenIds = new Set<string>([
+    ...persistedGroups.keys(),
+    ...committed.map((c) => String(c.assigneeId)),
+  ]);
   // Charts queued in this unsaved session, and what would remain after saving.
   const queuedCharts = committed.reduce((n, c) => n + (c.to - c.from + 1), 0);
   const remainingAfterSave = unallocatedCount - queuedCharts;
@@ -973,46 +1002,79 @@ function AllocateFreshVolume({
         </div>
       )}
 
-      {/* Static ledger — committed allocations stay visible: who gets which charts */}
-      {committed.length > 0 && (
-        <div className="space-y-1.5 mb-3">
-          {committed.map((c, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-3 rounded-xl border border-line bg-surface-sunken/50 pl-3 pr-2 py-2"
-            >
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-soft text-primary text-[11px] font-bold shrink-0">
-                {i + 1}
-              </span>
-              <span className="text-[13px] font-semibold text-ink whitespace-nowrap">
-                Charts {c.from}–{c.to}
-              </span>
-              <span className="text-ink-subtle" aria-hidden="true">→</span>
-              <span className="flex-1 text-[13px] font-semibold text-ink truncate">
-                {c.assigneeName}
-              </span>
-              <span className="text-[11px] text-ink-muted whitespace-nowrap">
-                {c.to - c.from + 1} charts
-              </span>
-              <button
-                type="button"
-                onClick={() => setCommitted((prev) => prev.filter((_, j) => j !== i))}
-                className="w-8 h-8 rounded-full bg-danger-soft text-danger hover:bg-danger/20 transition flex items-center justify-center shrink-0"
-                aria-label="Remove allocation"
-              >
-                <XIcon className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
-          <p className="text-[11px] text-ink-muted px-1 pt-0.5">
-            {queuedCharts} chart{queuedCharts === 1 ? '' : 's'} queued across {committed.length}{' '}
-            coder{committed.length === 1 ? '' : 's'}
-            {remainingAfterSave < 0 && (
-              <span className="text-danger font-semibold">
-                {' '}· {Math.abs(remainingAfterSave)} over the available volume
-              </span>
-            )}
+      {/* Already saved on the server — stays visible so the record never disappears */}
+      {persistedGroups.size > 0 && (
+        <div className="mb-3">
+          <p className="text-[11px] uppercase tracking-[0.08em] text-ink-muted font-semibold mb-1.5 px-1">
+            Already allocated
           </p>
+          <div className="space-y-1.5">
+            {[...persistedGroups.entries()].map(([coderId, serials]) => (
+              <div
+                key={coderId}
+                className="flex items-center gap-2.5 rounded-xl border border-success/30 bg-success-soft/30 px-3 py-2"
+              >
+                <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
+                <span className="flex-1 text-[13px] font-semibold text-ink truncate">
+                  {coderNames.get(coderId) ?? `Coder #${coderId}`}
+                </span>
+                <span className="text-[12px] font-mono text-ink-muted truncate max-w-[40%] text-right">
+                  {formatRanges(serials)}
+                </span>
+                <span className="text-[11px] text-ink-muted whitespace-nowrap shrink-0">
+                  {serials.length} charts
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Draft ledger — the batch being added now (clears once saved) */}
+      {committed.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[11px] uppercase tracking-[0.08em] text-ink-muted font-semibold mb-1.5 px-1">
+            Adding now
+          </p>
+          <div className="space-y-1.5">
+            {committed.map((c, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 rounded-xl border border-line bg-surface-sunken/50 pl-3 pr-2 py-2"
+              >
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-soft text-primary text-[11px] font-bold shrink-0">
+                  {i + 1}
+                </span>
+                <span className="text-[13px] font-semibold text-ink whitespace-nowrap">
+                  Charts {c.from}–{c.to}
+                </span>
+                <span className="text-ink-subtle" aria-hidden="true">→</span>
+                <span className="flex-1 text-[13px] font-semibold text-ink truncate">
+                  {c.assigneeName}
+                </span>
+                <span className="text-[11px] text-ink-muted whitespace-nowrap">
+                  {c.to - c.from + 1} charts
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCommitted((prev) => prev.filter((_, j) => j !== i))}
+                  className="w-8 h-8 rounded-full bg-danger-soft text-danger hover:bg-danger/20 transition flex items-center justify-center shrink-0"
+                  aria-label="Remove allocation"
+                >
+                  <XIcon className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            <p className="text-[11px] text-ink-muted px-1 pt-0.5">
+              {queuedCharts} chart{queuedCharts === 1 ? '' : 's'} queued across {committed.length}{' '}
+              coder{committed.length === 1 ? '' : 's'}
+              {remainingAfterSave < 0 && (
+                <span className="text-danger font-semibold">
+                  {' '}· {Math.abs(remainingAfterSave)} over the available volume
+                </span>
+              )}
+            </p>
+          </div>
         </div>
       )}
 
