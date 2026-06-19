@@ -8,6 +8,7 @@ import {
   Clock,
   Download,
   FileText,
+  GripVertical,
   Loader2,
   Menu,
   Minus,
@@ -963,15 +964,27 @@ export function ReviewEditModal({
             }}
             onDoubleClick={() => setCodesW(SPLIT_DEFAULT)}
             title="Drag to resize · double-click to reset"
-            className="hidden lg:flex absolute top-0 bottom-0 z-20 w-2 cursor-col-resize items-center justify-center group"
-            style={{ right: `calc(var(--codes-w) - 4px)` }}
+            className="hidden lg:flex absolute top-0 bottom-0 z-30 w-5 cursor-col-resize items-center justify-center group"
+            style={{ right: `calc(var(--codes-w) - 10px)` }}
           >
+            {/* Full-height divider line that brightens on hover/drag */}
             <span
               className={cn(
-                'h-12 w-1 rounded-full transition-colors',
-                resizing ? 'bg-primary' : 'bg-line-strong/50 group-hover:bg-primary/70',
+                'absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 transition-colors',
+                resizing ? 'bg-primary' : 'bg-line-strong group-hover:bg-primary/60',
               )}
             />
+            {/* Grip pill — sits on the divider so it's obviously draggable */}
+            <span
+              className={cn(
+                'relative flex items-center justify-center h-16 w-5 rounded-full border shadow-card transition-colors',
+                resizing
+                  ? 'bg-primary border-primary text-white'
+                  : 'bg-surface border-line-strong text-ink-muted group-hover:border-primary group-hover:text-primary',
+              )}
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </span>
           </div>
           <CodesPane
             items={items}
