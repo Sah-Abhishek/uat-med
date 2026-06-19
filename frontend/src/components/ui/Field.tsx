@@ -969,6 +969,25 @@ export function RangeDatePicker({
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
   const [hover, setHover] = useState<Date | null>(null);
+  // Year-jump overlay: when open, the two month grids are replaced by a grid of
+  // years so the user can pick a year directly instead of stepping month-by-month.
+  // `yearPageStart` is the first year of the 12-year page on show.
+  const [yearView, setYearView] = useState(false);
+  const [yearPageStart, setYearPageStart] = useState(() => viewMonth.getFullYear() - 6);
+
+  function openYearView() {
+    setYearPageStart(viewMonth.getFullYear() - 6);
+    setYearView(true);
+  }
+  function pickYear(yr: number) {
+    setViewMonth(new Date(yr, viewMonth.getMonth(), 1));
+    setYearView(false);
+  }
+  function isYearDisabled(yr: number) {
+    if (minDate && yr < minDate.getFullYear()) return true;
+    if (maxDate && yr > maxDate.getFullYear()) return true;
+    return false;
+  }
 
   useEffect(() => {
     if (fromDate) {
@@ -1029,6 +1048,11 @@ export function RangeDatePicker({
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
+
+  // Always reopen on the calendar, never the year-jump overlay.
+  useEffect(() => {
+    if (!open) setYearView(false);
+  }, [open]);
 
   function isOutOfRange(d: Date) {
     if (minDate && d < new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate()))
@@ -1105,6 +1129,55 @@ export function RangeDatePicker({
               'bg-surface border border-line rounded-xl shadow-pop dark:shadow-pop-dark p-3',
             )}
           >
+            {yearView ? (
+              <div className="px-1">
+                {/* Year-page header: step a dozen years at a time */}
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <button
+                    type="button"
+                    onClick={() => setYearPageStart((y) => y - 12)}
+                    className="w-6 h-6 rounded-md hover:bg-surface-sunken flex items-center justify-center text-ink-muted transition"
+                    aria-label="Earlier years"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-[13px] font-bold text-ink select-none">
+                    {yearPageStart} – {yearPageStart + 11}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setYearPageStart((y) => y + 12)}
+                    className="w-6 h-6 rounded-md hover:bg-surface-sunken flex items-center justify-center text-ink-muted transition"
+                    aria-label="Later years"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {Array.from({ length: 12 }, (_, i) => yearPageStart + i).map((yr) => {
+                    const isCurrent = yr === viewMonth.getFullYear();
+                    const yrDisabled = isYearDisabled(yr);
+                    return (
+                      <button
+                        key={yr}
+                        type="button"
+                        disabled={yrDisabled}
+                        onClick={() => pickYear(yr)}
+                        className={cn(
+                          'h-9 rounded-md text-[13px] transition flex items-center justify-center',
+                          isCurrent
+                            ? 'bg-primary text-primary-ink font-bold shadow-card'
+                            : 'text-ink hover:bg-surface-sunken font-medium',
+                          yrDisabled && 'opacity-30 pointer-events-none',
+                        )}
+                      >
+                        {yr}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
             <div className="flex items-stretch gap-2">
               <RangeMonthGrid
                 month={monthA}
@@ -1114,6 +1187,7 @@ export function RangeDatePicker({
                 isOutOfRange={isOutOfRange}
                 onHover={setHover}
                 onSelect={handleSelect}
+                onLabelClick={openYearView}
                 showPrev
                 onPrev={() =>
                   setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))
@@ -1128,16 +1202,20 @@ export function RangeDatePicker({
                 isOutOfRange={isOutOfRange}
                 onHover={setHover}
                 onSelect={handleSelect}
+                onLabelClick={openYearView}
                 showNext
                 onNext={() =>
                   setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))
                 }
               />
             </div>
+            )}
 
             <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-line">
               <span className="text-[11px] text-ink-muted">
-                {fromDate && !toDate
+                {yearView
+                  ? 'Pick a year to jump to'
+                  : fromDate && !toDate
                   ? 'Pick the end date'
                   : fromDate && toDate
                   ? 'Click any date to start a new range'
@@ -1171,6 +1249,7 @@ function RangeMonthGrid({
   isOutOfRange,
   onHover,
   onSelect,
+  onLabelClick,
   showPrev,
   showNext,
   onPrev,
@@ -1183,6 +1262,8 @@ function RangeMonthGrid({
   isOutOfRange: (d: Date) => boolean;
   onHover: (d: Date | null) => void;
   onSelect: (d: Date) => void;
+  /** Click the month/year label → open the year-jump grid. */
+  onLabelClick?: () => void;
   showPrev?: boolean;
   showNext?: boolean;
   onPrev?: () => void;
@@ -1236,9 +1317,22 @@ function RangeMonthGrid({
         ) : (
           <span className="w-6 h-6" />
         )}
-        <span className="text-[13px] font-bold text-ink select-none">
-          {MONTH_NAMES[month.getMonth()]} {month.getFullYear()}
-        </span>
+        {onLabelClick ? (
+          <button
+            type="button"
+            onClick={onLabelClick}
+            className="px-2 py-0.5 -my-0.5 rounded-md text-[13px] font-bold text-ink hover:bg-surface-sunken transition flex items-center gap-1 select-none"
+            title="Choose a year"
+            aria-label="Choose a year"
+          >
+            {MONTH_NAMES[month.getMonth()]} {month.getFullYear()}
+            <ChevronDown className="w-3 h-3 text-ink-muted" />
+          </button>
+        ) : (
+          <span className="text-[13px] font-bold text-ink select-none">
+            {MONTH_NAMES[month.getMonth()]} {month.getFullYear()}
+          </span>
+        )}
         {showNext ? (
           <button
             type="button"
