@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -284,6 +284,47 @@ export function ReviewEditModal({
   const [addedItems, setAddedItems] = useState<CodeItem[]>([]);
   const [addCodeOpen, setAddCodeOpen] = useState(false);
   const [addRuleOpen, setAddRuleOpen] = useState(false);
+
+  // Resizable split between the document pane (left) and codes pane (right).
+  // We drive only the codes-pane width and let the document pane take the rest,
+  // applied via a CSS var so the stacked layout below `lg` is untouched. Width is
+  // persisted so a coder's preferred split sticks across charts.
+  const SPLIT_MIN_CODES = 340;
+  const SPLIT_MIN_DOC = 460;
+  const SPLIT_DEFAULT = 460;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [codesW, setCodesW] = useState<number>(() => {
+    if (typeof window === 'undefined') return SPLIT_DEFAULT;
+    const saved = Number(window.localStorage.getItem('reviewEditCodesW'));
+    return Number.isFinite(saved) && saved >= SPLIT_MIN_CODES && saved <= 1000 ? saved : SPLIT_DEFAULT;
+  });
+  const [resizing, setResizing] = useState(false);
+
+  // Translate the pointer X into a codes-pane width measured from the modal's
+  // right edge, clamped so neither pane collapses.
+  useEffect(() => {
+    if (!resizing) return;
+    function onMove(e: MouseEvent) {
+      const rect = bodyRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const max = Math.max(SPLIT_MIN_CODES, rect.width - SPLIT_MIN_DOC);
+      const next = Math.round(rect.right - e.clientX);
+      setCodesW(Math.min(Math.max(next, SPLIT_MIN_CODES), max));
+    }
+    function onUp() {
+      setResizing(false);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [resizing]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.localStorage.setItem('reviewEditCodesW', String(codesW));
+  }, [codesW]);
   // AI items first (in their natural category order), user-added items
   // after — added codes show up at the end of their respective category
   // section because CategoryRow filters by `it.category`. Declared after
@@ -898,7 +939,11 @@ export function ReviewEditModal({
         </header>
 
         {/* Body */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_460px] min-h-0">
+        <div
+          ref={bodyRef}
+          className="relative flex-1 grid grid-cols-1 lg:grid-cols-[1fr_var(--codes-w)] min-h-0"
+          style={{ '--codes-w': `${codesW}px` } as CSSProperties}
+        >
           <DocumentPane
             docs={docs}
             topTab={topTab}
@@ -907,6 +952,27 @@ export function ReviewEditModal({
             setActiveDocId={setActiveDocId}
             prediction={prediction}
           />
+          {/* Drag handle — desktop only. Drag to resize, double-click to reset. */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize document and codes panes"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setResizing(true);
+            }}
+            onDoubleClick={() => setCodesW(SPLIT_DEFAULT)}
+            title="Drag to resize · double-click to reset"
+            className="hidden lg:flex absolute top-0 bottom-0 z-20 w-2 cursor-col-resize items-center justify-center group"
+            style={{ right: `calc(var(--codes-w) - 4px)` }}
+          >
+            <span
+              className={cn(
+                'h-12 w-1 rounded-full transition-colors',
+                resizing ? 'bg-primary' : 'bg-line-strong/50 group-hover:bg-primary/70',
+              )}
+            />
+          </div>
           <CodesPane
             items={items}
             state={state}
@@ -929,6 +995,10 @@ export function ReviewEditModal({
             }}
           />
         </div>
+
+        {/* While dragging, this overlay captures mouse events so the PDF iframe
+            doesn't swallow them and the resize stays smooth. */}
+        {resizing && <div className="fixed inset-0 z-[60] cursor-col-resize" />}
       </div>
 
       {confirmOpen && (
@@ -1235,7 +1305,7 @@ function DocumentPane({
     docs.find((d) => d.id === activeDocId) ?? (docs.length > 0 ? docs[0] : undefined);
 
   return (
-    <div className="flex flex-col min-h-0 border-r border-line">
+    <div className="flex flex-col min-h-0 min-w-0 border-r border-line">
       {/* Top-level tabs */}
       <div className="flex items-stretch border-b border-line bg-surface">
         <TopLevelTab
@@ -1427,7 +1497,7 @@ function CodesPane({
     .filter((g) => g.list.length > 0);
 
   return (
-    <div className="flex flex-col min-h-0 bg-surface">
+    <div className="flex flex-col min-h-0 min-w-0 bg-surface">
       {/* Header row */}
       <div className="px-5 py-4 border-b border-line">
         <div className="flex items-start justify-between gap-3">
