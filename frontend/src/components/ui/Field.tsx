@@ -144,6 +144,9 @@ export const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(
 export interface FancySelectOption {
   value: string;
   label: string;
+  /** Muted tag shown on the right of the option row inside the dropdown only
+   *  (never on the closed trigger). E.g. "already allocated". */
+  hint?: string;
 }
 interface FancySelectProps {
   value: string;
@@ -348,6 +351,16 @@ export function FancySelect({
                       )}
                     >
                       <span className="flex-1 truncate">{o.label}</span>
+                      {o.hint && (
+                        <span
+                          className={cn(
+                            'shrink-0 text-[10px] font-semibold whitespace-nowrap',
+                            isSelected ? 'text-primary/80' : 'text-ink-subtle',
+                          )}
+                        >
+                          • {o.hint}
+                        </span>
+                      )}
                       {isSelected && <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />}
                     </button>
                   );

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm, useFieldArray, Controller } from 'react-hook-form';
+import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form';
 import {
   getWorklist,
   updateWorklist,
@@ -830,15 +830,24 @@ function AllocateFreshVolume({
   const qc = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
 
+  // Server-driven coder search: the picker pushes the typed query here (debounced
+  // inside FancySelect) so the roster can grow without outgrowing the dropdown.
+  const [userSearch, setUserSearch] = useState('');
   const users = useQuery({
-    queryKey: ['users', 'coders-list'],
-    queryFn: () => listUsers({ pageSize: 100 }),
+    queryKey: ['users', 'coders-list', userSearch],
+    queryFn: () => listUsers({ pageSize: 100, search: userSearch || undefined }),
+    // Keep the last results on screen while the next query is in flight (no flicker).
+    placeholderData: (prev) => prev,
   });
 
   const { control, register, handleSubmit, reset } = useForm<AllocationForm>({
     defaultValues: { ranges: [{ from: 1, to: 1, assigneeId: 0 }] },
   });
   const { fields, append, remove } = useFieldArray({ control, name: 'ranges' });
+
+  // Live view of every row's chosen coder, so each picker can flag coders already
+  // assigned in another row of this same allocation.
+  const watchedRanges = useWatch({ control, name: 'ranges' });
 
   const allocateMutation = useMutation({
     mutationFn: (ranges: AllocationRange[]) => allocateWorklist(worklistId, ranges),
@@ -891,7 +900,16 @@ function AllocateFreshVolume({
           </div>
         )}
 
-        {fields.map((f, i) => (
+        {fields.map((f, i) => {
+          // Coders already chosen in the OTHER rows → tag (but still allow) them
+          // in this row's picker.
+          const takenElsewhere = new Set(
+            (watchedRanges ?? [])
+              .map((r, j) => (j !== i ? Number(r?.assigneeId) : 0))
+              .filter((id) => id > 0)
+              .map(String),
+          );
+          return (
           <div key={f.id} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
             <div>
               {i === 0 && (
@@ -931,9 +949,14 @@ function AllocateFreshVolume({
                     placeholder={users.isPending ? 'Loading…' : 'Select coder'}
                     value={field.value ? String(field.value) : ''}
                     onChange={(v) => field.onChange(Number(v))}
+                    searchable
+                    onSearch={setUserSearch}
+                    loading={users.isFetching}
+                    searchPlaceholder="Search coders…"
                     options={(users.data?.items ?? []).map((u) => ({
                       value: String(u.id),
                       label: u.fullName,
+                      hint: takenElsewhere.has(String(u.id)) ? 'already allocated' : undefined,
                     }))}
                   />
                 )}
@@ -948,7 +971,8 @@ function AllocateFreshVolume({
               <XIcon className="w-3.5 h-3.5" />
             </button>
           </div>
-        ))}
+          );
+        })}
 
         <div className="flex items-center justify-between pt-2">
           <Button
