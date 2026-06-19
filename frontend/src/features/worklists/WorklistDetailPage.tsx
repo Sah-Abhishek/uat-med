@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import {
   getWorklist,
   updateWorklist,
@@ -814,8 +814,13 @@ function DetailsTable({ summary }: { summary: NonNullable<Awaited<ReturnType<typ
 }
 
 /* ── Allocate Fresh Volume panel ─────────────────────────── */
-interface AllocationForm {
-  ranges: Array<{ from: number; to: number; assigneeId: number }>;
+/** One committed allocation in the in-progress ledger. The coder name is captured
+ *  at commit time so the static line still renders after a search swaps the user list. */
+interface CommittedAllocation {
+  from: number;
+  to: number;
+  assigneeId: number;
+  assigneeName: string;
 }
 
 function AllocateFreshVolume({
@@ -840,23 +845,103 @@ function AllocateFreshVolume({
     placeholderData: (prev) => prev,
   });
 
-  const { control, register, handleSubmit, reset } = useForm<AllocationForm>({
-    defaultValues: { ranges: [{ from: 1, to: 1, assigneeId: 0 }] },
-  });
-  const { fields, append, remove } = useFieldArray({ control, name: 'ranges' });
-
-  // Live view of every row's chosen coder, so each picker can flag coders already
-  // assigned in another row of this same allocation.
-  const watchedRanges = useWatch({ control, name: 'ranges' });
+  // Committed allocations accrue here as a static ledger; the single active row
+  // below is what the allocator is filling in now. On "Add" the active row is
+  // validated, frozen into this list, and a fresh blank row opens for the next coder.
+  const [committed, setCommitted] = useState<CommittedAllocation[]>([]);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [assigneeId, setAssigneeId] = useState(0);
+  const [rowError, setRowError] = useState<string | null>(null);
 
   const allocateMutation = useMutation({
     mutationFn: (ranges: AllocationRange[]) => allocateWorklist(worklistId, ranges),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['worklist', worklistId] });
-      reset();
+      setCommitted([]);
+      setFrom('');
+      setTo('');
+      setAssigneeId(0);
+      setRowError(null);
     },
     onError: (err) => setServerError((err as unknown as ApiErrorShape).message),
   });
+
+  // Coders already in the ledger → tagged (but still selectable) in the picker.
+  const takenIds = new Set(committed.map((c) => String(c.assigneeId)));
+  // Charts queued in this unsaved session, and what would remain after saving.
+  const queuedCharts = committed.reduce((n, c) => n + (c.to - c.from + 1), 0);
+  const remainingAfterSave = unallocatedCount - queuedCharts;
+
+  // Validate the active row → a committed entry, or an error message.
+  function buildActiveRow(): CommittedAllocation | { error: string } {
+    const f = Number(from);
+    const t = Number(to);
+    if (!from.trim() || !to.trim()) return { error: 'Enter a From and To chart number.' };
+    if (!Number.isInteger(f) || !Number.isInteger(t) || f < 1 || t < 1)
+      return { error: 'Enter whole chart numbers (1 or higher).' };
+    if (totalCharts > 0 && (f > totalCharts || t > totalCharts))
+      return { error: `Chart numbers go up to ${totalCharts}.` };
+    if (f > t) return { error: 'From must be less than or equal to To.' };
+    if (!assigneeId) return { error: 'Pick a coder to assign these charts to.' };
+    const name =
+      (users.data?.items ?? []).find((u) => String(u.id) === String(assigneeId))?.fullName ??
+      `Coder #${assigneeId}`;
+    return { from: f, to: t, assigneeId, assigneeName: name };
+  }
+
+  // Freeze the active row into the ledger and open a fresh blank row, prefilling
+  // the next "From" with the chart after the highest one allocated so far.
+  function commitActiveRow() {
+    setServerError(null);
+    const built = buildActiveRow();
+    if ('error' in built) {
+      setRowError(built.error);
+      return;
+    }
+    setRowError(null);
+    const next = [...committed, built];
+    setCommitted(next);
+    const nextStart = Math.max(...next.map((c) => c.to)) + 1;
+    setFrom(totalCharts > 0 && nextStart > totalCharts ? '' : String(nextStart));
+    setTo('');
+    setAssigneeId(0);
+  }
+
+  function handleSave() {
+    setServerError(null);
+    // Fold in the active row too if it was filled but not yet added.
+    let rows = committed;
+    if (from.trim() || to.trim() || assigneeId) {
+      const built = buildActiveRow();
+      if ('error' in built) {
+        setRowError(built.error);
+        return;
+      }
+      rows = [...committed, built];
+      setCommitted(rows);
+      setFrom('');
+      setTo('');
+      setAssigneeId(0);
+      setRowError(null);
+    }
+    if (rows.length === 0) {
+      setRowError('Add at least one allocation before saving.');
+      return;
+    }
+    allocateMutation.mutate(
+      rows.map((r) => ({ from: r.from, to: r.to, assigneeId: r.assigneeId, role: 'CODER' as const })),
+    );
+  }
+
+  function clearAll() {
+    setCommitted([]);
+    setFrom('');
+    setTo('');
+    setAssigneeId(0);
+    setRowError(null);
+    setServerError(null);
+  }
 
   return (
     <Card padding="default">
@@ -874,129 +959,148 @@ function AllocateFreshVolume({
         </div>
         <div className="text-right">
           <p className="text-2xl font-bold text-danger">
-            {formatNumber(unallocatedCount)}
+            {formatNumber(Math.max(0, remainingAfterSave))}
           </p>
-          <p className="text-[11px] text-danger font-semibold">Remaining</p>
+          <p className="text-[11px] text-danger font-semibold">
+            {queuedCharts > 0 ? 'Remaining after save' : 'Remaining'}
+          </p>
         </div>
       </div>
 
-      <form
-        onSubmit={handleSubmit((d) => {
-          setServerError(null);
-          allocateMutation.mutate(
-            d.ranges.map((r) => ({
-              from: Number(r.from),
-              to: Number(r.to),
-              assigneeId: Number(r.assigneeId),
-              role: 'CODER' as const,
-            })),
-          );
-        })}
-        className="space-y-3"
-      >
-        {serverError && (
-          <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger border border-danger/30">
-            {serverError}
-          </div>
-        )}
-
-        {fields.map((f, i) => {
-          // Coders already chosen in the OTHER rows → tag (but still allow) them
-          // in this row's picker.
-          const takenElsewhere = new Set(
-            (watchedRanges ?? [])
-              .map((r, j) => (j !== i ? Number(r?.assigneeId) : 0))
-              .filter((id) => id > 0)
-              .map(String),
-          );
-          return (
-          <div key={f.id} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
-            <div>
-              {i === 0 && (
-                <Label className="text-[11px]">
-                  From {totalCharts > 0 && <span className="text-ink-subtle font-normal">(1–{totalCharts})</span>}
-                </Label>
-              )}
-              <Input
-                type="number"
-                min={1}
-                max={totalCharts > 0 ? totalCharts : undefined}
-                placeholder="From"
-                {...register(`ranges.${i}.from`, { valueAsNumber: true, required: true, min: 1 })}
-              />
-            </div>
-            <div>
-              {i === 0 && (
-                <Label className="text-[11px]">
-                  To {totalCharts > 0 && <span className="text-ink-subtle font-normal">(1–{totalCharts})</span>}
-                </Label>
-              )}
-              <Input
-                type="number"
-                min={1}
-                max={totalCharts > 0 ? totalCharts : undefined}
-                placeholder="To"
-                {...register(`ranges.${i}.to`, { valueAsNumber: true, required: true, min: 1 })}
-              />
-            </div>
-            <div>
-              {i === 0 && <Label className="text-[11px]">Assign to</Label>}
-              <Controller
-                control={control}
-                name={`ranges.${i}.assigneeId`}
-                render={({ field }) => (
-                  <FancySelect
-                    placeholder={users.isPending ? 'Loading…' : 'Select coder'}
-                    value={field.value ? String(field.value) : ''}
-                    onChange={(v) => field.onChange(Number(v))}
-                    searchable
-                    onSearch={setUserSearch}
-                    loading={users.isFetching}
-                    searchPlaceholder="Search coders…"
-                    options={(users.data?.items ?? []).map((u) => ({
-                      value: String(u.id),
-                      label: u.fullName,
-                      hint: takenElsewhere.has(String(u.id)) ? 'already allocated' : undefined,
-                    }))}
-                  />
-                )}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => remove(i)}
-              disabled={fields.length === 1}
-              className="w-10 h-10 rounded-full bg-danger-soft text-danger hover:bg-danger/20 transition flex items-center justify-center disabled:opacity-30"
-            >
-              <XIcon className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          );
-        })}
-
-        <div className="flex items-center justify-between pt-2">
-          <Button
-            type="button"
-            variant="soft"
-            leftIcon={<Plus className="w-3.5 h-3.5" />}
-            onClick={() => append({ from: 1, to: 1, assigneeId: 0 })}
-          >
-            Add another
-          </Button>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => reset({ ranges: [{ from: 1, to: 1, assigneeId: 0 }] })}
-            >
-              Clear
-            </Button>
-            <Button type="submit" loading={allocateMutation.isPending}>
-              Save
-            </Button>
-          </div>
+      {serverError && (
+        <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger border border-danger/30 mb-3">
+          {serverError}
         </div>
-      </form>
+      )}
+
+      {/* Static ledger — committed allocations stay visible: who gets which charts */}
+      {committed.length > 0 && (
+        <div className="space-y-1.5 mb-3">
+          {committed.map((c, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-3 rounded-xl border border-line bg-surface-sunken/50 pl-3 pr-2 py-2"
+            >
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-soft text-primary text-[11px] font-bold shrink-0">
+                {i + 1}
+              </span>
+              <span className="text-[13px] font-semibold text-ink whitespace-nowrap">
+                Charts {c.from}–{c.to}
+              </span>
+              <span className="text-ink-subtle" aria-hidden="true">→</span>
+              <span className="flex-1 text-[13px] font-semibold text-ink truncate">
+                {c.assigneeName}
+              </span>
+              <span className="text-[11px] text-ink-muted whitespace-nowrap">
+                {c.to - c.from + 1} charts
+              </span>
+              <button
+                type="button"
+                onClick={() => setCommitted((prev) => prev.filter((_, j) => j !== i))}
+                className="w-8 h-8 rounded-full bg-danger-soft text-danger hover:bg-danger/20 transition flex items-center justify-center shrink-0"
+                aria-label="Remove allocation"
+              >
+                <XIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+          <p className="text-[11px] text-ink-muted px-1 pt-0.5">
+            {queuedCharts} chart{queuedCharts === 1 ? '' : 's'} queued across {committed.length}{' '}
+            coder{committed.length === 1 ? '' : 's'}
+            {remainingAfterSave < 0 && (
+              <span className="text-danger font-semibold">
+                {' '}· {Math.abs(remainingAfterSave)} over the available volume
+              </span>
+            )}
+          </p>
+        </div>
+      )}
+
+      {/* Active entry — fill From / To / coder, then + to add it to the list above */}
+      <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
+        <div>
+          <Label className="text-[11px]">
+            From {totalCharts > 0 && <span className="text-ink-subtle font-normal">(1–{totalCharts})</span>}
+          </Label>
+          <Input
+            type="number"
+            min={1}
+            max={totalCharts > 0 ? totalCharts : undefined}
+            placeholder="From"
+            value={from}
+            onChange={(e) => {
+              setFrom(e.target.value);
+              setRowError(null);
+            }}
+          />
+        </div>
+        <div>
+          <Label className="text-[11px]">
+            To {totalCharts > 0 && <span className="text-ink-subtle font-normal">(1–{totalCharts})</span>}
+          </Label>
+          <Input
+            type="number"
+            min={1}
+            max={totalCharts > 0 ? totalCharts : undefined}
+            placeholder="To"
+            value={to}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setRowError(null);
+            }}
+          />
+        </div>
+        <div>
+          <Label className="text-[11px]">Assign to</Label>
+          <FancySelect
+            placeholder={users.isPending ? 'Loading…' : 'Select coder'}
+            value={assigneeId ? String(assigneeId) : ''}
+            onChange={(v) => {
+              setAssigneeId(Number(v));
+              setRowError(null);
+            }}
+            searchable
+            onSearch={setUserSearch}
+            loading={users.isFetching}
+            searchPlaceholder="Search coders…"
+            options={(users.data?.items ?? []).map((u) => ({
+              value: String(u.id),
+              label: u.fullName,
+              hint: takenIds.has(String(u.id)) ? 'already allocated' : undefined,
+            }))}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={commitActiveRow}
+          title="Add this allocation to the list"
+          aria-label="Add this allocation to the list"
+          className="w-10 h-10 rounded-full bg-primary text-primary-ink hover:bg-primary/90 transition flex items-center justify-center shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+      {rowError ? (
+        <p className="mt-1.5 text-xs text-danger">{rowError}</p>
+      ) : (
+        <p className="mt-1.5 text-[11px] text-ink-subtle">
+          Fill a range and coder, then tap + to add it. Repeat for each coder, then Save.
+        </p>
+      )}
+
+      <div className="flex items-center justify-end gap-2 pt-4">
+        <Button type="button" variant="ghost" onClick={clearAll}>
+          Clear
+        </Button>
+        <Button
+          type="button"
+          onClick={handleSave}
+          loading={allocateMutation.isPending}
+          disabled={committed.length === 0 && !from.trim() && !to.trim() && !assigneeId}
+        >
+          Save
+        </Button>
+      </div>
     </Card>
   );
 }
