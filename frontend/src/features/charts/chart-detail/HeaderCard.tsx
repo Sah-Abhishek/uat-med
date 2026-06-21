@@ -14,6 +14,9 @@ import {
   AlertCircle,
   Lock,
   UserPlus,
+  Sparkles,
+  Copy,
+  Check,
 } from 'lucide-react';
 import type { ApiErrorShape, Chart } from '@/api/types';
 import { startChart, stopChart, getActiveTimer, selfAllocateCharts } from '@/api/charts';
@@ -44,6 +47,15 @@ export function HeaderCard({ chart, canStop = true }: HeaderCardProps) {
     enabled: !!chart.worklistId,
     staleTime: 60_000,
   });
+
+  // The AI-pipeline encounter ID lives in customFields.aiPrediction (set when a
+  // prediction runs); there's no column for it. Present only after the chart has
+  // been through the ICD Predictor, so we render the chip only when it exists.
+  const cf = chart.customFields as { aiPrediction?: { encounterId?: unknown } } | undefined;
+  const encounterId =
+    typeof cf?.aiPrediction?.encounterId === 'string' && cf.aiPrediction.encounterId.trim()
+      ? cf.aiPrediction.encounterId
+      : null;
 
   return (
     <div className="card p-6 grid grid-cols-[1fr_auto] gap-6">
@@ -78,6 +90,7 @@ export function HeaderCard({ chart, canStop = true }: HeaderCardProps) {
           <MetaItem icon={<Search className="w-3.5 h-3.5" />}>
             QC Status: {chart.qcStatus ?? '—'}
           </MetaItem>
+          {encounterId && <EncounterId encounterId={encounterId} />}
         </div>
 
         <div className="grid grid-cols-4 gap-0 border-t border-line pt-4 mb-3">
@@ -111,6 +124,44 @@ function Stat({ label, value }: { label: string; value?: string | null }) {
       <div className="text-[13px] font-semibold text-ink truncate">{value || '—'}</div>
       <div className="text-[11px] text-ink-subtle">{label}</div>
     </div>
+  );
+}
+
+/** AI-pipeline encounter ID shown as a monospace chip with click-to-copy — the
+ * value is a long UUID support staff cross-reference against the gateway, so
+ * copying it verbatim matters more than reading it. */
+function EncounterId({ encounterId }: { encounterId: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(encounterId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked (insecure context / denied) — leave the value visible */
+    }
+  };
+
+  return (
+    <MetaItem icon={<Sparkles className="w-3.5 h-3.5" />}>
+      <span className="inline-flex items-center gap-1.5">
+        Encounter ID:
+        <button
+          type="button"
+          onClick={copy}
+          title={copied ? 'Copied' : `${encounterId} — click to copy`}
+          className="inline-flex items-center gap-1 font-mono text-[11.5px] text-ink hover:text-primary transition max-w-[220px]"
+        >
+          <span className="truncate">{encounterId}</span>
+          {copied ? (
+            <Check className="w-3 h-3 text-success shrink-0" />
+          ) : (
+            <Copy className="w-3 h-3 text-ink-subtle shrink-0" />
+          )}
+        </button>
+      </span>
+    </MetaItem>
   );
 }
 
