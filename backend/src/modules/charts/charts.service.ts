@@ -156,6 +156,7 @@ export class ChartsService {
       .leftJoinAndSelect('worklist.client', 'client')
       .leftJoinAndSelect('worklist.location', 'location')
       .leftJoinAndSelect('worklist.primarySpeciality', 'primarySpeciality')
+      .leftJoinAndSelect('worklist.subSpeciality', 'subSpeciality')
       .leftJoinAndSelect('worklist.process', 'process')
       .leftJoinAndSelect('c.serviceLine', 'serviceLine');
 
@@ -264,9 +265,12 @@ export class ChartsService {
         originalAuditorName: rest.originalAuditorId ? userMap.get(Number(rest.originalAuditorId))?.name ?? null : null,
         coderAllocatedAt: alloc.coderAt ?? null,
         auditorAllocatedAt: alloc.auditorAt ?? null,
-        // Pulled from custom_fields where the seed/import populates them. Null
-        // when the tenant hasn't promoted these into structured columns yet.
-        subSpecialityName: typeof cf.subSpeciality === 'string' ? cf.subSpeciality : null,
+        // Prefer the worklist's structured sub-speciality (sub_speciality_id);
+        // fall back to the free-text custom_fields value for tenants that
+        // haven't promoted it into a column yet. Mirrors detail() so the list
+        // column and the detail header agree.
+        subSpecialityName:
+          worklist?.subSpeciality?.name ?? (typeof cf.subSpeciality === 'string' ? cf.subSpeciality : null),
         qcStatus: typeof cf.qcStatus === 'string' ? cf.qcStatus : null,
       };
     });
