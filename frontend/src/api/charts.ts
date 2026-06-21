@@ -44,6 +44,11 @@ export interface ChartListParams {
   aiStatus?:
     | 'QUEUED' | 'PROCESSING' | 'IN_PROGRESS' | 'DONE' | 'ERRORED'
     | Array<'QUEUED' | 'PROCESSING' | 'IN_PROGRESS' | 'DONE' | 'ERRORED'>;
+  /** Whether the chart has been reviewed — i.e. worked upon: it has at least
+   * one submitted code decision. Derived server-side from chart_code_decisions
+   * (there's no column for it). 'YES' keeps only reviewed charts, 'NO' keeps
+   * only untouched ones; omit for no filter. */
+  reviewed?: 'YES' | 'NO';
   receivedDateFrom?: string;
   receivedDateTo?: string;
   dateOfServiceFrom?: string;

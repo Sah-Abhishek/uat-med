@@ -35,6 +35,17 @@ export enum AiStatusFilter {
   ERRORED = 'ERRORED',
 }
 
+/**
+ * Whether the chart has been reviewed — i.e. worked upon. A chart counts as
+ * reviewed once it has at least one submitted code decision
+ * (chart_code_decisions); there's no column for this, so list() matches it with
+ * a correlated EXISTS. YES keeps only reviewed charts, NO only untouched ones.
+ */
+export enum ReviewedFilter {
+  YES = 'YES',
+  NO = 'NO',
+}
+
 export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional({ enum: Priority }) @IsOptional() @IsEnum(Priority) priority?: Priority;
   @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) worklistId?: number[];
@@ -49,6 +60,7 @@ export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional({ enum: ChartStatus, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(ChartStatus, { each: true }) chartStatus?: ChartStatus[];
   @ApiPropertyOptional({ enum: ChartMilestone, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(ChartMilestone, { each: true }) milestone?: ChartMilestone[];
   @ApiPropertyOptional({ enum: AiStatusFilter, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(AiStatusFilter, { each: true }) aiStatus?: AiStatusFilter[];
+  @ApiPropertyOptional({ enum: ReviewedFilter }) @IsOptional() @IsEnum(ReviewedFilter) reviewed?: ReviewedFilter;
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateTo?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateOfServiceFrom?: string;

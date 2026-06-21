@@ -17,7 +17,7 @@ import { AiGatewayClient, type ReviewActionPayload } from '../ai-gateway/ai-gate
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
-import { AiStatusFilter, QueryChartsDto } from './dto/query-charts.dto';
+import { AiStatusFilter, QueryChartsDto, ReviewedFilter } from './dto/query-charts.dto';
 import { UpdateChartDto } from './dto/update-chart.dto';
 import { BulkModifyDto } from './dto/bulk-modify.dto';
 import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
@@ -182,6 +182,13 @@ export class ChartsService {
     // Narrow to a single AI-pipeline state (e.g. ERRORED) using the same
     // custom_fields predicates that drive the AI summary tiles.
     if (q.aiStatus?.length) this.applyAiStatusFilters(qb, q.aiStatus);
+    // "Reviewed" = the chart has been worked upon — it has at least one
+    // submitted code decision. No column tracks this, so match with a
+    // correlated EXISTS; 'NO' inverts it to surface charts no one has touched.
+    if (q.reviewed) {
+      const reviewedExists = 'EXISTS (SELECT 1 FROM chart_code_decisions cd WHERE cd.chart_id = c.id)';
+      qb.andWhere(q.reviewed === ReviewedFilter.YES ? reviewedExists : `NOT ${reviewedExists}`);
+    }
     if (q.receivedDateFrom) qb.andWhere('worklist.received_date >= :rdf', { rdf: q.receivedDateFrom });
     if (q.receivedDateTo) qb.andWhere('worklist.received_date <= :rdt', { rdt: q.receivedDateTo });
 

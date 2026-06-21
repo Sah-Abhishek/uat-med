@@ -111,6 +111,14 @@ const AI_STATUS_OPTIONS = [
   { value: 'DONE', label: 'Done' },
   { value: 'ERRORED', label: 'Errored' },
 ];
+// "Reviewed" = the chart has been worked upon — it has at least one submitted
+// code decision. Derived server-side from chart_code_decisions (see the list
+// endpoint), so it's a single value rather than a multi-select.
+const REVIEWED_OPTIONS = [
+  { value: '', label: 'Any' },
+  { value: 'YES', label: 'Reviewed' },
+  { value: 'NO', label: 'Not reviewed' },
+];
 
 /* ── Configurable column catalog ──────────────────────────
  * Each entry pairs a label with a renderer; visibility is toggled from the
@@ -1126,6 +1134,21 @@ function FilterModal({
                   options={AI_STATUS_OPTIONS}
                   value={arr(field.value)}
                   onChange={(v) => field.onChange(v.length ? (v as ChartListParams['aiStatus']) : undefined)}
+                />
+              )}
+            />
+          </div>
+          <div>
+            <Label>Reviewed</Label>
+            <Controller
+              control={control}
+              name="reviewed"
+              render={({ field }) => (
+                <FancySelect
+                  placeholder="Any"
+                  options={REVIEWED_OPTIONS}
+                  value={field.value ?? ''}
+                  onChange={(v) => field.onChange(v ? (v as ChartListParams['reviewed']) : undefined)}
                 />
               )}
             />
