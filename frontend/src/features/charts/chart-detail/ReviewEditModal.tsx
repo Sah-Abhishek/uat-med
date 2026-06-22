@@ -855,10 +855,19 @@ export function ReviewEditModal({
     })
     .filter((v): v is string => v !== null);
 
+  // Every reviewable code must be touched before submit — a code still on
+  // 'pending' is one the coder hasn't looked at. ADMIT-mirror rows (no
+  // codeType) aren't submittable, so they don't count.
+  const unreviewedCodes = items
+    .filter((it) => categoryToCodeType(it.category))
+    .filter((it) => (state[it.key]?.decision ?? 'pending') === 'pending')
+    .map((it) => state[it.key]?.editedCode || it.code);
+
   const payloadCount = buildPayload().length;
   const submitDisabled =
     submitMut.isPending ||
     payloadCount === 0 ||
+    unreviewedCodes.length > 0 ||
     invalidReasons.length > 0 ||
     !clientId ||
     !locationId;
@@ -868,7 +877,9 @@ export function ReviewEditModal({
   // confirmation.
   const openConfirm = () => {
     setSubmitError(null);
-    if (buildPayload().length === 0) return;
+    // Don't open the summary while anything is still incomplete — the button is
+    // already disabled in these cases, but guard here too for keyboard paths.
+    if (buildPayload().length === 0 || unreviewedCodes.length > 0 || invalidReasons.length > 0) return;
     setConfirmOpen(true);
   };
 
@@ -958,7 +969,15 @@ export function ReviewEditModal({
                 {submitError}
               </span>
             )}
-            {!readOnly && invalidReasons.length > 0 && (
+            {!readOnly && unreviewedCodes.length > 0 && (
+              <span
+                className="hidden md:inline text-[11px] text-warn"
+                title={`Review every code first — still pending: ${unreviewedCodes.join(', ')}`}
+              >
+                {unreviewedCodes.length} code(s) not reviewed yet
+              </span>
+            )}
+            {!readOnly && unreviewedCodes.length === 0 && invalidReasons.length > 0 && (
               <span
                 className="hidden md:inline text-[11px] text-warn"
                 title={`Missing reason on: ${invalidReasons.join(', ')}`}
@@ -974,11 +993,13 @@ export function ReviewEditModal({
                 title={
                   !clientId || !locationId
                     ? 'Chart is missing client/location'
-                    : invalidReasons.length > 0
-                      ? 'Provide reason text (≥20 chars) and dropdown for every Reject/Edit'
-                      : payloadCount === 0
-                        ? 'Mark at least one code as Accept / Reject / Edit'
-                        : 'Open submission summary'
+                    : payloadCount === 0
+                      ? 'Mark at least one code as Accept / Reject / Edit'
+                      : unreviewedCodes.length > 0
+                        ? `Review every code before submitting — still pending: ${unreviewedCodes.join(', ')}`
+                        : invalidReasons.length > 0
+                          ? 'Provide reason text (≥20 chars) and dropdown for every Reject/Edit'
+                          : 'Open submission summary'
                 }
                 className="inline-flex items-center gap-2 h-9 px-4 rounded-pill bg-success text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
