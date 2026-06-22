@@ -57,6 +57,16 @@ export class DocumentStorageService {
       throw new ServiceUnavailableException('Document storage (S3/MinIO) is not configured.');
     }
     const key = this.buildKey(chartId, file.originalname);
+    // HTTP headers (incl. x-amz-meta-*) must be ASCII; non-ASCII bytes in a
+    // SIGNED header break SigV4 → "SignatureDoesNotMatch". Filenames routinely
+    // pick up non-breaking spaces (U+00A0) and other non-ASCII via copy/paste
+    // from Excel/Word/PDF or EHR/worklist exports, so strip/replace anything
+    // non-ASCII before it goes into object metadata. The full original name is
+    // still preserved verbatim in the chart's uploadedDocs JSONB (returned
+    // below as `filename`); this only sanitizes the S3 metadata copy.
+    const asciiFilename = file.originalname
+      .normalize('NFKC')              // fold NBSP and other compatibility forms toward ASCII
+      .replace(/[^\x20-\x7E]/g, '_'); // backstop: replace any remaining non-printable-ASCII byte
     try {
       await this.client.send(
         new PutObjectCommand({
@@ -66,7 +76,7 @@ export class DocumentStorageService {
           ContentType: file.mimetype,
           ACL: 'public-read',
           Metadata: {
-            'original-filename': file.originalname,
+            'original-filename': asciiFilename,
             'chart-id': String(chartId),
           },
         }),
