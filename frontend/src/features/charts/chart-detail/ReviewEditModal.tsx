@@ -78,6 +78,14 @@ type Decision = 'pending' | 'accepted' | 'rejected' | 'edited' | 'added';
 type Category = 'ADMIT CODE' | 'PRIMARY' | 'SECONDARY' | 'PROCEDURE';
 const REASON_MIN_CHARS = 20;
 
+/** Canonical form for comparing ICD/CPT codes when deciding whether a code is
+ * already on the board: dots stripped, trimmed, upper-cased. So `K64.9`,
+ * `k649` and `K649` all collapse to the same key and count as one code. Used by
+ * the Add-Code duplicate guard. */
+function normalizeCode(code: string): string {
+  return code.replace(/\./g, '').trim().toUpperCase();
+}
+
 /**
  * Maps the on-screen Category onto the API's CodeReviewType. ADMIT CODE
  * is a UI mirror of the first PRIMARY, so we treat it as PRIMARY for
@@ -285,6 +293,11 @@ export function ReviewEditModal({
   const [addedItems, setAddedItems] = useState<CodeItem[]>([]);
   const [addCodeOpen, setAddCodeOpen] = useState(false);
   const [addRuleOpen, setAddRuleOpen] = useState(false);
+  // In-place category moves, keyed by item.key. Lets a coder change ANY code's
+  // category (AI-predicted or user-added) straight from its detail card, instead
+  // of removing + re-adding it. Applied over the derived `items` below so the
+  // override survives the AI items being recomputed. Reset on every open.
+  const [categoryOverrides, setCategoryOverrides] = useState<Record<string, Category>>({});
 
   // Resizable split between the document pane (left) and codes pane (right).
   // We drive only the codes-pane width and let the document pane take the rest,
@@ -330,7 +343,14 @@ export function ReviewEditModal({
   // after — added codes show up at the end of their respective category
   // section because CategoryRow filters by `it.category`. Declared after
   // addedItems to keep the closure reference order valid.
-  const items = useMemo(() => [...aiItems, ...addedItems], [aiItems, addedItems]);
+  const items = useMemo(
+    () =>
+      [...aiItems, ...addedItems].map((it) => {
+        const moved = categoryOverrides[it.key];
+        return moved && moved !== it.category ? { ...it, category: moved } : it;
+      }),
+    [aiItems, addedItems, categoryOverrides],
+  );
 
   // Reset transient UI + clear added codes whenever the modal opens. Stays
   // in [open] only — we don't want to wipe user decisions if the items
@@ -342,6 +362,7 @@ export function ReviewEditModal({
     setSubmitError(null);
     setConfirmOpen(false);
     setAddedItems([]);
+    setCategoryOverrides({});
     setAddCodeOpen(false);
     setAddRuleOpen(false);
     setActiveDocId(docs[0]?.id ?? null);
@@ -540,6 +561,9 @@ export function ReviewEditModal({
       version: 1,
       decisions,
       addedItems: addedItems
+        // Reflect in-place category moves so a moved added code is recreated in
+        // its new category on restore (its decision is keyed by that category).
+        .map((it) => ({ ...it, category: categoryOverrides[it.key] ?? it.category }))
         .filter((it) => categoryToCodeType(it.category))
         .map((it) => ({
           category: it.category as CodeDraftCategory,
@@ -547,7 +571,7 @@ export function ReviewEditModal({
           description: it.description,
         })),
     };
-  }, [items, state, addedItems]);
+  }, [items, state, addedItems, categoryOverrides]);
 
   // Restore: stamp the draft over whatever the submitted-decisions hydration
   // seeded (the draft is newer working state, so it wins — codes absent from
@@ -591,11 +615,30 @@ export function ReviewEditModal({
         description: a.description,
       }));
 
+    const boardItems = [...current, ...draftAdds];
     const byIdentity = new Map(payload.decisions.map((d) => [`${d.category}|${d.code}`, d]));
+
+    // Re-apply in-place category moves. A drafted decision whose (category|code)
+    // matches nothing on the board, yet whose code exists under a DIFFERENT
+    // category, was a moved code — recreate the move so it (and its decision)
+    // survive a refresh. (Added-code moves round-trip via draftAdds already.)
+    const exactKeys = new Set(boardItems.map((it) => `${it.category}|${it.code}`));
+    const movedDecisionByKey: Record<string, CodeDecisionDraftEntry> = {};
+    const moveOverrides: Record<string, Category> = {};
+    for (const d of payload.decisions) {
+      if (exactKeys.has(`${d.category}|${d.code}`)) continue;
+      const target = boardItems.find(
+        (it) => normalizeCode(it.code) === normalizeCode(d.code) && !movedDecisionByKey[it.key],
+      );
+      if (!target) continue;
+      movedDecisionByKey[target.key] = d;
+      moveOverrides[target.key] = d.category as Category;
+    }
+
     setState((prevState) => {
       const next = { ...prevState };
-      for (const it of [...current, ...draftAdds]) {
-        const d = byIdentity.get(`${it.category}|${it.code}`);
+      for (const it of boardItems) {
+        const d = movedDecisionByKey[it.key] ?? byIdentity.get(`${it.category}|${it.code}`);
         if (!d) continue;
         next[it.key] = {
           decision: d.decision,
@@ -607,6 +650,9 @@ export function ReviewEditModal({
       }
       return next;
     });
+    if (Object.keys(moveOverrides).length > 0) {
+      setCategoryOverrides((prev) => ({ ...prev, ...moveOverrides }));
+    }
     if (draftAdds.length > 0) {
       // Functional dedupe (not just `have`): the submitted-ADDED seeding can
       // land in this same commit, and addedItemsRef is one commit behind it.
@@ -747,6 +793,18 @@ export function ReviewEditModal({
   const setDecision = (d: Decision) => {
     if (!selected) return;
     update(selected.key, { decision: d });
+  };
+
+  // Move a code to a different category in place. Reason dropdowns are
+  // code-type-specific, so a stale dropdown reason may not belong to the new
+  // category's list — clear it so the coder re-picks (the free-text note stays).
+  const setItemCategory = (key: string, category: Category) => {
+    setCategoryOverrides((prev) => ({ ...prev, [key]: category }));
+    setState((prev) =>
+      prev[key]?.reasonDropdown
+        ? { ...prev, [key]: { ...prev[key], reasonDropdown: '' } }
+        : prev,
+    );
   };
 
   // Build the API payload, dropping ADMIT CODE rows (UI mirror of the
@@ -1002,8 +1060,15 @@ export function ReviewEditModal({
             readOnly={readOnly}
             onAddCode={() => setAddCodeOpen(true)}
             onAddRule={() => setAddRuleOpen(true)}
+            onChangeCategory={setItemCategory}
             onRemoveItem={(key) => {
               setAddedItems((prev) => prev.filter((it) => it.key !== key));
+              setCategoryOverrides((prev) => {
+                if (!(key in prev)) return prev;
+                const rest = { ...prev };
+                delete rest[key];
+                return rest;
+              });
               setSelectedIdx(0);
             }}
           />
@@ -1027,6 +1092,9 @@ export function ReviewEditModal({
       {addCodeOpen && (
         <AddCodeModal
           onClose={() => setAddCodeOpen(false)}
+          // Every code currently on the board, normalized (dots/case stripped),
+          // so the modal can reject a duplicate before it's added.
+          existingCodes={new Set(items.map((it) => normalizeCode(state[it.key]?.editedCode || it.code)))}
           onAdd={(item, reason) => {
             // Seed state for the new item BEFORE appending it, so the
             // items-merge effect sees prev[item.key] already set and
@@ -1486,6 +1554,7 @@ function CodesPane({
   readOnly,
   onAddCode,
   onAddRule,
+  onChangeCategory,
   onRemoveItem,
 }: {
   items: CodeItem[];
@@ -1503,6 +1572,7 @@ function CodesPane({
   readOnly: boolean;
   onAddCode: () => void;
   onAddRule: () => void;
+  onChangeCategory: (key: string, category: Category) => void;
   onRemoveItem: (key: string) => void;
 }) {
   const groups = CATEGORY_ORDER
@@ -1575,6 +1645,7 @@ function CodesPane({
             setEditing={setEditing}
             reasonRows={reasonRows}
             readOnly={readOnly}
+            onChangeCategory={(cat) => onChangeCategory(selected.key, cat)}
             onRemove={() => onRemoveItem(selected.key)}
           />
         )}
@@ -1696,6 +1767,7 @@ function SelectedCard({
   setEditing,
   reasonRows,
   readOnly,
+  onChangeCategory,
   onRemove,
 }: {
   item: CodeItem;
@@ -1706,6 +1778,7 @@ function SelectedCard({
   setEditing: (v: boolean) => void;
   reasonRows: CodeReviewReasonRow[];
   readOnly: boolean;
+  onChangeCategory: (category: Category) => void;
   onRemove: () => void;
 }) {
   const codeType = categoryToCodeType(item.category);
@@ -1727,9 +1800,27 @@ function SelectedCard({
 
   return (
     <div className="rounded-xl border border-line bg-surface-sunken/30 p-4">
-      <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
-        {item.category}
-      </p>
+      {readOnly ? (
+        <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
+          {item.category}
+        </p>
+      ) : (
+        // Change a code's category in place — the supported alternative to
+        // removing + re-adding it under another section.
+        <div className="mb-3">
+          <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+            Category
+          </label>
+          <FancySelect
+            value={CATEGORY_ORDER.includes(item.category) ? item.category : 'PRIMARY'}
+            onChange={(v) => onChangeCategory(v as Category)}
+            options={CATEGORY_ORDER.map((c) => ({
+              value: c,
+              label: ADD_CODE_CATEGORY_LABEL[c as AddCodeCategory],
+            }))}
+          />
+        </div>
+      )}
       {editing ? (
         <div className="space-y-2 mb-3">
           <Input
@@ -2207,9 +2298,13 @@ function IcdCodeAutocomplete({
 function AddCodeModal({
   onClose,
   onAdd,
+  existingCodes,
 }: {
   onClose: () => void;
   onAdd: (item: CodeItem, reason: string) => void;
+  /** Normalized codes already on the board (any category). Adding a duplicate
+   * is blocked — the coder moves the existing code's category instead. */
+  existingCodes: Set<string>;
 }) {
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');
@@ -2251,7 +2346,10 @@ function AddCodeModal({
   const codeMissing = trimmedCode.length === 0;
   const descMissing = trimmedDesc.length === 0;
   const reasonShort = trimmedReason.length < REASON_MIN_CHARS;
-  const canSubmit = !codeMissing && !descMissing && !reasonShort;
+  // Duplicate guard: a code already on the board (in ANY category) can't be
+  // added again. Dot- and case-insensitive, so K64.9 and K649 are the same.
+  const isDuplicate = !codeMissing && existingCodes.has(normalizeCode(trimmedCode));
+  const canSubmit = !codeMissing && !descMissing && !reasonShort && !isDuplicate;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -2331,11 +2429,19 @@ function AddCodeModal({
                 placeholder={category === 'PROCEDURE' ? 'e.g. 99213' : 'e.g. E11.9'}
                 autoFocus
               />
-              {category !== 'PROCEDURE' && (
-                <p className="mt-1 text-[10px] text-ink-subtle">
-                  Type {ICD_SUGGEST_MIN_CHARS}+ characters to search ICD-10-CM codes — the
-                  description fills in automatically.
+              {isDuplicate ? (
+                <p className="mt-1 text-[11px] text-danger">
+                  <strong className="font-semibold font-mono">{trimmedCode}</strong> is
+                  already on the board — duplicate codes aren't allowed (K64.9 and K649
+                  count as the same). To move it, open that code and change its category.
                 </p>
+              ) : (
+                category !== 'PROCEDURE' && (
+                  <p className="mt-1 text-[10px] text-ink-subtle">
+                    Type {ICD_SUGGEST_MIN_CHARS}+ characters to search ICD-10-CM codes — the
+                    description fills in automatically.
+                  </p>
+                )
               )}
             </div>
           </div>
