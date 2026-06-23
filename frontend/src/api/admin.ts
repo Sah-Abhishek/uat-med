@@ -1,4 +1,4 @@
-import { get } from './client';
+import { api, get } from './client';
 import type { Paginated, Role } from './types';
 
 export type DecisionVerdict = 'ACCEPTED' | 'REJECTED' | 'EDITED' | 'ADDED';
@@ -78,6 +78,12 @@ export const getCodeDecisionDetail = (id: number | string) =>
 export interface AdminChartWithDecisions {
   chartId: number;
   chartNo: string | null;
+  /** Worklist context, resolved server-side via the chart's worklist. */
+  clientName: string | null;
+  locationName: string | null;
+  subSpecialityName: string | null;
+  /** Worklist received date (YYYY-MM-DD). */
+  receivedDate: string | null;
   milestone: string | null;
   chartStatus: string | null;
   allocatedCoderId: number | null;
@@ -106,6 +112,34 @@ export interface ListChartsWithDecisionsParams {
 
 export const listChartsWithDecisions = (params: ListChartsWithDecisionsParams = {}) =>
   get<Paginated<AdminChartWithDecisions>>('/admin/code-decisions/charts', params);
+
+/**
+ * Downloads the chart-decision list as an .xlsx file honoring the current
+ * filters (pagination is ignored server-side — the whole filtered set is
+ * exported). Receives the workbook as a binary blob and triggers a browser
+ * download.
+ */
+export async function exportChartsWithDecisionsXlsx(
+  params: ListChartsWithDecisionsParams = {},
+): Promise<void> {
+  const { page: _page, pageSize: _pageSize, ...filters } = params;
+  const res = await api.get('/admin/code-decisions/charts/export.xlsx', {
+    params: filters,
+    responseType: 'blob',
+  });
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const blob = res.data as Blob;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `code-decisions-${stamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Give the browser a tick to start the download before revoking.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 /** AI-side predicted code shape (live from gateway via /api/review/encounter/.../codes). */
 export interface AiPredictedCode {

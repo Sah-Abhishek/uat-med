@@ -1,10 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as ExcelJS from 'exceljs';
 
 import { ChartCodeDecision } from '../../entities/chart-code-decision.entity';
 import { Chart } from '../../entities/chart.entity';
 import { User } from '../../entities/user.entity';
+import { Worklist } from '../../entities/worklist.entity';
+import { Client } from '../../entities/client.entity';
+import { Location } from '../../entities/location.entity';
+import { SubSpeciality } from '../../entities/sub-speciality.entity';
 import {
   AiGatewayClient,
   type GatewayCorrection,
@@ -13,6 +18,9 @@ import {
 import { ListCodeDecisionsDto } from './dto/list-code-decisions.dto';
 import { ListChartsWithDecisionsDto } from './dto/list-charts-with-decisions.dto';
 import { CodeReviewDecision } from '../../common/enums';
+
+/** Hard cap on rows pulled into an Excel export, mirroring the reports module. */
+const EXPORT_ROW_LIMIT = 50_000;
 
 /**
  * Read-only admin queries over chart_code_decisions, joined with chart # and
@@ -168,6 +176,39 @@ export class AdminCodeDecisionsService {
    * now a forwarded ACCEPT carries a timestamp and counts as synced.
    */
   async listCharts(q: ListChartsWithDecisionsDto) {
+    const { qb, matchingChartIds } = this.buildChartsAggregateQuery(q);
+
+    // For total chart count we need a distinct-chart count over the same
+    // filter — derive via a raw subquery so HAVING-based filters still apply.
+    const totalRow = await this.decisions
+      .createQueryBuilder('d')
+      .select('COUNT(DISTINCT d.chart_id)::int', 'total')
+      .where(`d.chart_id IN (${matchingChartIds.getQuery()})`)
+      .setParameters(matchingChartIds.getParameters())
+      .getRawOne<{ total: number }>();
+    const total = Number(totalRow?.total ?? 0);
+
+    const items = await qb
+      .offset((q.page - 1) * q.pageSize)
+      .limit(q.pageSize)
+      .getRawMany();
+
+    return {
+      items: items.map((r) => this.mapChartRow(r)),
+      total,
+      page: q.page,
+      pageSize: q.pageSize,
+    };
+  }
+
+  /**
+   * Shared aggregate query behind both the chart list and its Excel export.
+   * One row per chart (grouped by chart_id) carrying decision counts, the
+   * reviewers involved, the synced/not-synced split, and the chart's worklist
+   * context — client, location, sub-speciality and received date — resolved
+   * the same way the charts list does. No pagination: callers add offset/limit.
+   */
+  private buildChartsAggregateQuery(q: ListChartsWithDecisionsDto) {
     // Sub-condition: a chart should appear when it has at least one decision
     // matching the per-decision filters (coderId / decision). The outer query
     // then aggregates ALL decisions on that chart so counts reflect the full
@@ -182,12 +223,25 @@ export class AdminCodeDecisionsService {
       .createQueryBuilder('d')
       .leftJoin(Chart, 'c', 'c.id = d.chart_id')
       .leftJoin(User, 'u', 'u.id = d.decided_by_user_id')
+      // Worklist carries the chart's client / location / sub-speciality + the
+      // received date. Each chart maps to exactly one worklist, so these joins
+      // are 1:1 and don't inflate the per-chart decision counts.
+      .leftJoin(Worklist, 'w', 'w.id = c.worklist_id')
+      .leftJoin(Client, 'cl', 'cl.id = w.client_id')
+      .leftJoin(Location, 'loc', 'loc.id = w.location_id')
+      .leftJoin(SubSpeciality, 'ss', 'ss.id = w.sub_speciality_id')
       .select('d.chart_id', 'chartId')
       .addSelect('MAX(c.chart_no)', 'chartNo')
       .addSelect('MAX(c.milestone)', 'milestone')
       .addSelect('MAX(c.chart_status)', 'chartStatus')
       .addSelect('MAX(c.allocated_coder_id)', 'allocatedCoderId')
       .addSelect('MAX(c.allocated_auditor_id)', 'allocatedAuditorId')
+      .addSelect('MAX(cl.name)', 'clientName')
+      .addSelect('MAX(loc.name)', 'locationName')
+      // Prefer the structured sub-speciality; fall back to the chart's
+      // custom_fields blob (mirrors the charts-list name resolution).
+      .addSelect(`COALESCE(MAX(ss.name), MAX(c.custom_fields->>'subSpeciality'))`, 'subSpecialityName')
+      .addSelect('MAX(w.received_date)::text', 'receivedDate')
       .addSelect('COUNT(*)::int', 'totalDecisions')
       .addSelect(`SUM(CASE WHEN d.decision = '${CodeReviewDecision.ACCEPTED}' THEN 1 ELSE 0 END)::int`, 'accepted')
       .addSelect(`SUM(CASE WHEN d.decision = '${CodeReviewDecision.REJECTED}' THEN 1 ELSE 0 END)::int`, 'rejected')
@@ -220,44 +274,85 @@ export class AdminCodeDecisionsService {
     if (q.from)    qb.andHaving('MAX(d.decided_at) >= :from', { from: `${q.from}T00:00:00Z` });
     if (q.to)      qb.andHaving('MAX(d.decided_at) <= :to',   { to:   `${q.to}T23:59:59.999Z` });
 
-    // For total chart count we need a distinct-chart count over the same
-    // filter — derive via a raw subquery so HAVING-based filters still apply.
-    const totalRow = await this.decisions
-      .createQueryBuilder('d')
-      .select('COUNT(DISTINCT d.chart_id)::int', 'total')
-      .where(`d.chart_id IN (${matchingChartIds.getQuery()})`)
-      .setParameters(matchingChartIds.getParameters())
-      .getRawOne<{ total: number }>();
-    const total = Number(totalRow?.total ?? 0);
+    return { qb, matchingChartIds };
+  }
 
-    const items = await qb
-      .offset((q.page - 1) * q.pageSize)
-      .limit(q.pageSize)
-      .getRawMany();
-
+  /** Shapes one raw aggregate row into the API/Excel row object. */
+  private mapChartRow(r: any) {
     return {
-      items: items.map((r) => ({
-        chartId: Number(r.chartId),
-        chartNo: r.chartNo as string | null,
-        milestone: r.milestone as string | null,
-        chartStatus: r.chartStatus as string | null,
-        allocatedCoderId: r.allocatedCoderId != null ? Number(r.allocatedCoderId) : null,
-        allocatedAuditorId: r.allocatedAuditorId != null ? Number(r.allocatedAuditorId) : null,
-        totalDecisions: r.totalDecisions ?? 0,
-        accepted: r.accepted ?? 0,
-        rejected: r.rejected ?? 0,
-        edited: r.edited ?? 0,
-        added: r.added ?? 0,
-        syncedCount: r.syncedCount ?? 0,
-        notSyncedCount: r.notSyncedCount ?? 0,
-        coderNames: (r.coderNames as string | null) ?? '',
-        coderCount: r.coderCount ?? 0,
-        lastDecidedAt: r.lastDecidedAt as string,
-      })),
-      total,
-      page: q.page,
-      pageSize: q.pageSize,
+      chartId: Number(r.chartId),
+      chartNo: r.chartNo as string | null,
+      clientName: (r.clientName as string | null) ?? null,
+      locationName: (r.locationName as string | null) ?? null,
+      subSpecialityName: (r.subSpecialityName as string | null) ?? null,
+      receivedDate: (r.receivedDate as string | null) ?? null,
+      milestone: r.milestone as string | null,
+      chartStatus: r.chartStatus as string | null,
+      allocatedCoderId: r.allocatedCoderId != null ? Number(r.allocatedCoderId) : null,
+      allocatedAuditorId: r.allocatedAuditorId != null ? Number(r.allocatedAuditorId) : null,
+      totalDecisions: r.totalDecisions ?? 0,
+      accepted: r.accepted ?? 0,
+      rejected: r.rejected ?? 0,
+      edited: r.edited ?? 0,
+      added: r.added ?? 0,
+      syncedCount: r.syncedCount ?? 0,
+      notSyncedCount: r.notSyncedCount ?? 0,
+      coderNames: (r.coderNames as string | null) ?? '',
+      coderCount: r.coderCount ?? 0,
+      lastDecidedAt: r.lastDecidedAt as string,
     };
+  }
+
+  /**
+   * The chart-centric list rendered to an .xlsx workbook: same filters, no
+   * pagination (capped at EXPORT_ROW_LIMIT). Columns mirror the on-screen table
+   * plus the worklist context so the file is self-contained for offline review.
+   */
+  async exportChartsXlsx(q: ListChartsWithDecisionsDto): Promise<Buffer> {
+    const { qb } = this.buildChartsAggregateQuery(q);
+    const rows = (await qb.limit(EXPORT_ROW_LIMIT).getRawMany()).map((r) => this.mapChartRow(r));
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Valerion';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('Code decisions', {
+      views: [{ state: 'frozen', ySplit: 1 }], // freeze header row when scrolling
+    });
+
+    ws.columns = [
+      { header: 'Chart', key: 'chartNo', width: 18 },
+      { header: 'Client', key: 'clientName', width: 24 },
+      { header: 'Location', key: 'locationName', width: 24 },
+      { header: 'Sub-speciality', key: 'subSpecialityName', width: 22 },
+      { header: 'Received date', key: 'receivedDate', width: 16, style: { numFmt: 'yyyy-mm-dd' } },
+      { header: 'Milestone', key: 'milestone', width: 18 },
+      { header: 'Status', key: 'chartStatus', width: 16 },
+      { header: 'Reviewer(s)', key: 'coderNames', width: 30 },
+      { header: 'Decisions', key: 'totalDecisions', width: 11, style: { numFmt: '0' } },
+      { header: 'Accepted', key: 'accepted', width: 10, style: { numFmt: '0' } },
+      { header: 'Rejected', key: 'rejected', width: 10, style: { numFmt: '0' } },
+      { header: 'Edited', key: 'edited', width: 9, style: { numFmt: '0' } },
+      { header: 'Added', key: 'added', width: 9, style: { numFmt: '0' } },
+      { header: 'Synced', key: 'syncedCount', width: 9, style: { numFmt: '0' } },
+      { header: 'Not synced', key: 'notSyncedCount', width: 11, style: { numFmt: '0' } },
+      { header: 'Date of coding', key: 'lastDecidedAt', width: 20, style: { numFmt: 'yyyy-mm-dd hh:mm' } },
+    ];
+
+    const header = ws.getRow(1);
+    header.font = { bold: true };
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
+    header.alignment = { vertical: 'middle' };
+
+    for (const r of rows) {
+      ws.addRow({
+        ...r,
+        // Dates as real Date cells so Excel formats/sorts them as dates.
+        receivedDate: r.receivedDate ? new Date(`${r.receivedDate}T00:00:00`) : null,
+        lastDecidedAt: r.lastDecidedAt ? new Date(r.lastDecidedAt) : null,
+      });
+    }
+
+    return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
   }
 
   /**

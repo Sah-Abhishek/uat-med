@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { FileSpreadsheet } from 'lucide-react';
 
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -8,13 +9,14 @@ import { Button } from '@/components/ui/Button';
 import { Input, Label, Select } from '@/components/ui/Field';
 import { PillBadge, Pagination } from '@/components/ui/Primitives';
 import {
+  exportChartsWithDecisionsXlsx,
   listChartsWithDecisions,
   type AdminChartWithDecisions,
   type DecisionVerdict,
   type ListChartsWithDecisionsParams,
 } from '@/api/admin';
 import { listUsers } from '@/api/users';
-import { formatDateTime } from '@/lib/utils';
+import { formatDate, formatDateTime } from '@/lib/utils';
 
 const DECISIONS: Array<{ value: DecisionVerdict; label: string }> = [
   { value: 'ACCEPTED', label: 'Accepted' },
@@ -69,11 +71,37 @@ export function CodeDecisionsPage() {
 
   const totalPages = q.data ? Math.max(1, Math.ceil(q.data.total / 25)) : 1;
 
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportMut = useMutation({
+    // Exports the whole filtered set (server ignores pagination), not just the
+    // current page.
+    mutationFn: () => exportChartsWithDecisionsXlsx(filters),
+    onError: (e) =>
+      setExportError((e as { message?: string })?.message ?? 'Excel export failed.'),
+  });
+
   return (
     <div className="p-8 max-w-[1600px] space-y-5">
       <PageHeader
         title="Code decisions"
         subtitle="Charts whose codes have been reviewed. Click a chart to see what the AI predicted and what the coder did."
+        actions={
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              variant="outline"
+              leftIcon={<FileSpreadsheet className="w-3.5 h-3.5" />}
+              loading={exportMut.isPending}
+              disabled={!q.data || q.data.total === 0}
+              onClick={() => {
+                setExportError(null);
+                exportMut.mutate();
+              }}
+            >
+              Export to Excel
+            </Button>
+            {exportError && <p className="text-[11px] text-danger">{exportError}</p>}
+          </div>
+        }
       />
 
       <Card padding="default">
@@ -144,23 +172,27 @@ export function CodeDecisionsPage() {
 
       <Card padding="none">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px]">
+          <table className="w-full min-w-[1500px]">
             <thead>
               <tr>
                 <th className="table-head">Chart</th>
+                <th className="table-head">Client</th>
+                <th className="table-head">Location</th>
+                <th className="table-head">Sub-speciality</th>
+                <th className="table-head">Received date</th>
                 <th className="table-head">Milestone / Status</th>
                 <th className="table-head">Reviewer(s)</th>
                 <th className="table-head text-right">Decisions</th>
                 <th className="table-head">Breakdown</th>
                 <th className="table-head">AI sync</th>
-                <th className="table-head">Last decided</th>
+                <th className="table-head">Date of coding</th>
               </tr>
             </thead>
             <tbody>
               {q.isPending && !q.data ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={`skel-${i}`} className="border-b border-line/60">
-                    {Array.from({ length: 7 }).map((__, j) => (
+                    {Array.from({ length: 11 }).map((__, j) => (
                       <td key={j} className="table-cell">
                         <div className="h-3 w-24 rounded bg-surface-sunken animate-pulse" />
                       </td>
@@ -169,7 +201,7 @@ export function CodeDecisionsPage() {
                 ))
               ) : q.data?.items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-20 text-center text-sm text-ink-muted">
+                  <td colSpan={11} className="py-20 text-center text-sm text-ink-muted">
                     No charts match the current filters.
                   </td>
                 </tr>
@@ -202,6 +234,12 @@ function ChartRow({ row }: { row: AdminChartWithDecisions }) {
         >
           {row.chartNo ?? `#${row.chartId}`}
         </Link>
+      </td>
+      <td className="table-cell text-sm text-ink">{row.clientName ?? '—'}</td>
+      <td className="table-cell text-sm text-ink">{row.locationName ?? '—'}</td>
+      <td className="table-cell text-sm text-ink">{row.subSpecialityName ?? '—'}</td>
+      <td className="table-cell text-xs text-ink-muted whitespace-nowrap">
+        {formatDate(row.receivedDate)}
       </td>
       <td className="table-cell">
         <div className="flex flex-col gap-0.5">
