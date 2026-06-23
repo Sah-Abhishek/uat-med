@@ -1,4 +1,5 @@
 import { get } from './client';
+import type { CodeDecisionDraftPayload } from './charts';
 
 export type CodeReviewType = 'PRIMARY' | 'SECONDARY' | 'PROCEDURE' | 'EM_LEVEL' | 'MODIFIER';
 
@@ -112,3 +113,42 @@ export const listQaWorklists = (params?: { clientId?: number; search?: string; l
 /** Distinct facility values present on charts, optionally scoped by client/location. */
 export const listQaFacilities = (params?: { clientId?: number; locationId?: number }) =>
   get<{ items: string[] }>('/qa/facilities', params);
+
+/* ── Live mode — watch in-progress decisions in real time ──── */
+
+export interface QaLiveUser {
+  id: number;
+  fullName: string | null;
+  role: string | null;
+  avatarUrl: string | null;
+}
+
+/** One coder/auditor's in-progress board on one chart, as autosaved to the
+ * code-decision draft. `payload` is the same versioned blob the Review & Edit
+ * modal writes — decode it via {@link CodeDecisionDraftPayload}. `updatedAt`
+ * is the row's last autosave, used to tell live from idle and to gate stale
+ * toasts. */
+export interface QaLiveDraft {
+  chartId: number;
+  chartNo: string | null;
+  milestone: string | null;
+  /** Derived server-side from milestone (AUDIT_* ⇒ AUDIT, else CODING). */
+  kind: 'CODING' | 'AUDIT';
+  user: QaLiveUser;
+  clientName: string | null;
+  locationName: string | null;
+  subSpecialityName: string | null;
+  payload: CodeDecisionDraftPayload | null;
+  updatedAt: string; // ISO
+}
+
+export interface QaLiveResponse {
+  /** Server clock at response time — subtract from the client clock to correct
+   * skew before computing liveness from `updatedAt`. */
+  serverNow: string; // ISO
+  drafts: QaLiveDraft[];
+}
+
+/** Charts being worked on right now (drafts touched in the last 30 min),
+ * excluding the caller and soft-deleted/orphaned charts. Poll this. */
+export const getQaLive = () => get<QaLiveResponse>('/qa/live');

@@ -443,6 +443,73 @@ export class QaService {
    * and emit the values in the order they appear. Returns
    * `[rewrittenSql, paramsArray]` so it can be spread into `ds.query`.
    */
+  /* ── Live mode — in-progress drafts ──────────────────────── */
+
+  /**
+   * Charts being worked on RIGHT NOW, for QA to watch coders/auditors in real
+   * time. Sourced from `chart_code_decision_drafts` — the Review & Edit modal
+   * autosaves the in-progress accept/reject/edit/add board every ~800ms, one
+   * row per (chart, user). We hand the raw, versioned `payload` blob back
+   * verbatim (the frontend owns its shape) plus enough chart/worklist context
+   * to render a live card, and the row's `updated_at` so the client can tell
+   * live from idle and suppress stale toasts. `serverNow` lets the client
+   * correct clock skew when computing liveness.
+   *
+   * Scope: drafts touched in the last 30 min, excluding the caller's own draft
+   * and soft-deleted / orphaned charts (the same exclusion applied across QA
+   * and AI stats so orphans never surface).
+   */
+  async live(currentUserId: number) {
+    const rows = await this.run<any[]>({ currentUserId }, `
+      SELECT
+        d.chart_id    AS "chartId",
+        c.chart_no    AS "chartNo",
+        c.milestone   AS "milestone",
+        CASE WHEN c.milestone LIKE 'AUDIT%' THEN 'AUDIT' ELSE 'CODING' END AS "kind",
+        d.payload     AS "payload",
+        d.updated_at  AS "updatedAt",
+        u.id          AS "userId",
+        u.full_name   AS "userName",
+        u.role        AS "userRole",
+        u.avatar_url  AS "userAvatarUrl",
+        cl.name       AS "clientName",
+        loc.name      AS "locationName",
+        ss.name       AS "subSpecialityName"
+      FROM chart_code_decision_drafts d
+      JOIN charts    c ON c.id = d.chart_id
+      JOIN worklists w ON w.id = c.worklist_id
+      JOIN users     u ON u.id = d.user_id
+      LEFT JOIN clients          cl  ON cl.id  = w.client_id
+      LEFT JOIN locations        loc ON loc.id = w.location_id
+      LEFT JOIN sub_specialities ss  ON ss.id  = w.sub_speciality_id
+      WHERE d.updated_at > now() - interval '30 minutes'
+        AND c.deleted_at IS NULL
+        AND w.deleted_at IS NULL
+        AND d.user_id <> :currentUserId
+      ORDER BY d.updated_at DESC
+    `);
+
+    const drafts = rows.map((r: any) => ({
+      chartId: Number(r.chartId),
+      chartNo: r.chartNo ?? null,
+      milestone: r.milestone ?? null,
+      kind: r.kind as 'CODING' | 'AUDIT',
+      user: {
+        id: Number(r.userId),
+        fullName: r.userName ?? null,
+        role: r.userRole ?? null,
+        avatarUrl: r.userAvatarUrl ?? null,
+      },
+      clientName: r.clientName ?? null,
+      locationName: r.locationName ?? null,
+      subSpecialityName: r.subSpecialityName ?? null,
+      payload: r.payload ?? null,
+      updatedAt: r.updatedAt,
+    }));
+
+    return { serverNow: new Date().toISOString(), drafts };
+  }
+
   private async run<T = any>(params: Record<string, unknown>, sql: string): Promise<T> {
     const [rewritten, ordered] = this.bind(params, sql);
     return this.ds.query(rewritten, ordered);

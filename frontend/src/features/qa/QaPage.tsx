@@ -7,8 +7,9 @@ import type { QaFilters } from '@/api/qa';
 import { QaFilterBar } from './QaFilterBar';
 import { SubmissionsTab } from './SubmissionsTab';
 import { AccuracyTab } from './AccuracyTab';
+import { LiveTab } from './live/LiveTab';
 
-type TabKey = 'submissions' | 'accuracy';
+type TabKey = 'submissions' | 'accuracy' | 'live';
 
 export function QaPage() {
   const [params, setParams] = useSearchParams();
@@ -70,6 +71,7 @@ export function QaPage() {
             tabs={[
               { key: 'submissions', label: 'Submissions' },
               { key: 'accuracy', label: 'AI Accuracy' },
+              { key: 'live', label: 'Live' },
             ]}
             value={tab}
             onChange={(k) => setTab(k as TabKey)}
@@ -77,15 +79,20 @@ export function QaPage() {
         </div>
 
         <div className="p-6 space-y-5">
-          <QaFilterBar
-            filters={filters}
-            onChange={updateFilters}
-            onReset={resetFilters}
-          />
+          {/* Live is "everyone active", not a filtered view — it skips the shared filter bar. */}
+          {tab !== 'live' && (
+            <QaFilterBar
+              filters={filters}
+              onChange={updateFilters}
+              onReset={resetFilters}
+            />
+          )}
           {tab === 'submissions' ? (
             <SubmissionsTab filters={filters} onResetFilters={resetFilters} />
-          ) : (
+          ) : tab === 'accuracy' ? (
             <AccuracyTab filters={filters} />
+          ) : (
+            <LiveTab />
           )}
         </div>
       </Card>

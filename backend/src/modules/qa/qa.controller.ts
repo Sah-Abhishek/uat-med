@@ -4,7 +4,9 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { QaService } from './qa.service';
 import { QaFiltersDto, QaSubmissionsQueryDto } from './dto/qa-filters.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
+import { AuthenticatedUser } from '../../common/types/request-user.type';
 
 @ApiTags('Quality Assurance')
 @ApiBearerAuth('bearerAuth')
@@ -29,6 +31,15 @@ export class QaController {
   })
   aiAccuracy(@Query() q: QaFiltersDto) {
     return this.svc.aiAccuracy(q);
+  }
+
+  @Get('live')
+  @ApiOperation({
+    summary:
+      'Live mode: in-progress code-decision drafts (charts being worked on right now) for QA to watch coders/auditors in real time. Sourced from chart_code_decision_drafts touched in the last 30 min; excludes the caller and soft-deleted/orphaned charts. Returns serverNow + the raw versioned draft payloads.',
+  })
+  live(@CurrentUser() user: AuthenticatedUser) {
+    return this.svc.live(user.id);
   }
 
   @Get('coders')
