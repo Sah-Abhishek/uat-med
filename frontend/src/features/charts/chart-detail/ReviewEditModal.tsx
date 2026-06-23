@@ -285,7 +285,6 @@ export function ReviewEditModal({
   // which uploaded document is in view.
   const [topTab, setTopTab] = useState<TopTab>('documents');
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Codes the coder added that the AI didn't suggest. Persisted into
@@ -358,7 +357,6 @@ export function ReviewEditModal({
   useEffect(() => {
     if (!open) return;
     setSelectedIdx(0);
-    setEditing(false);
     setSubmitError(null);
     setConfirmOpen(false);
     setAddedItems([]);
@@ -790,9 +788,30 @@ export function ReviewEditModal({
   const update = (key: string, patch: Partial<CodeState>) =>
     setState((p) => ({ ...p, [key]: { ...p[key], ...patch } }));
 
-  const setDecision = (d: Decision) => {
+  // After a code is decided, jump to the next one that still needs review so
+  // the coder is walked straight through the worklist. Wraps around to catch
+  // earlier skipped codes; if every code is reviewed, steps forward (or stays
+  // on the last). Drives the SelectedCard's "Save & Next".
+  const goToNextAfterSave = () => {
+    const n = items.length;
+    if (n === 0) return;
+    for (let off = 1; off <= n; off++) {
+      const i = (selectedIdx + off) % n;
+      if (i === selectedIdx) continue;
+      if ((state[items[i].key]?.decision ?? 'pending') === 'pending') {
+        setSelectedIdx(i);
+        return;
+      }
+    }
+    setSelectedIdx(Math.min(selectedIdx + 1, n - 1));
+  };
+
+  // The single save-point of the guided per-code flow: commit the chosen
+  // decision (plus any reason / edited values) and advance.
+  const saveDecisionAndAdvance = (patch: Partial<CodeState> & { decision: Decision }) => {
     if (!selected) return;
-    update(selected.key, { decision: d });
+    update(selected.key, patch);
+    goToNextAfterSave();
   };
 
   // Move a code to a different category in place. Reason dropdowns are
@@ -1073,9 +1092,7 @@ export function ReviewEditModal({
             selectedIdx={selectedIdx}
             setSelectedIdx={setSelectedIdx}
             update={update}
-            setDecision={setDecision}
-            editing={editing}
-            setEditing={setEditing}
+            onSaveAndNext={saveDecisionAndAdvance}
             reviewedCount={reviewedCount}
             reasonRows={reasonRows}
             readOnly={readOnly}
@@ -1567,9 +1584,7 @@ function CodesPane({
   selectedIdx,
   setSelectedIdx,
   update,
-  setDecision,
-  editing,
-  setEditing,
+  onSaveAndNext,
   reviewedCount,
   reasonRows,
   readOnly,
@@ -1585,9 +1600,7 @@ function CodesPane({
   selectedIdx: number;
   setSelectedIdx: (i: number) => void;
   update: (key: string, patch: Partial<CodeState>) => void;
-  setDecision: (d: Decision) => void;
-  editing: boolean;
-  setEditing: (v: boolean) => void;
+  onSaveAndNext: (patch: Partial<CodeState> & { decision: Decision }) => void;
   reviewedCount: number;
   reasonRows: CodeReviewReasonRow[];
   readOnly: boolean;
@@ -1658,12 +1671,13 @@ function CodesPane({
       <div className="flex-1 overflow-auto p-5">
         {selected && selectedSt && (
           <SelectedCard
+            key={selected.key}
             item={selected}
             st={selectedSt}
+            position={selectedIdx + 1}
+            total={items.length}
             update={(p) => update(selected.key, p)}
-            setDecision={setDecision}
-            editing={editing}
-            setEditing={setEditing}
+            onSaveAndNext={onSaveAndNext}
             reasonRows={reasonRows}
             readOnly={readOnly}
             onChangeCategory={(cat) => onChangeCategory(selected.key, cat)}
@@ -1779,88 +1793,57 @@ function Legend() {
   );
 }
 
-function SelectedCard({
-  item,
-  st,
-  update,
-  setDecision,
-  editing,
-  setEditing,
-  reasonRows,
-  readOnly,
-  onChangeCategory,
-  onRemove,
-}: {
+/* ── Selected code detail ────────────────────────────────────
+   Guided, one-code-at-a-time review surface. Selecting a code shows either its
+   verdict summary (already decided) or the action picker (Accept / Reject /
+   Edit). Choosing an action opens a single focused panel; "Save & Next" commits
+   it and advances to the next code that still needs review. The card is keyed by
+   item.key in CodesPane, so it remounts — and resets its step — per code. */
+
+interface SelectedCardProps {
   item: CodeItem;
   st: CodeState;
+  position: number;
+  total: number;
   update: (patch: Partial<CodeState>) => void;
-  setDecision: (d: Decision) => void;
-  editing: boolean;
-  setEditing: (v: boolean) => void;
+  onSaveAndNext: (patch: Partial<CodeState> & { decision: Decision }) => void;
   reasonRows: CodeReviewReasonRow[];
   readOnly: boolean;
   onChangeCategory: (category: Category) => void;
   onRemove: () => void;
-}) {
-  const codeType = categoryToCodeType(item.category);
-  // Reason form shows under any non-pending decision that needs a reason.
-  // ADDED uses the same form (text field only — no dropdown for ADD since
-  // we haven't seeded ADD reason lists yet).
-  const isAdded = st.decision === 'added';
-  const showReasonForm = !editing && (st.decision === 'rejected' || st.decision === 'edited' || isAdded);
-  const action = st.decision === 'rejected' ? 'REJECT' : 'EDIT';
-  const filteredReasons =
-    codeType !== null
-      ? reasonRows
-          .filter((r) => r.codeType === codeType && r.action === action && r.isActive)
-          .sort((a, b) => a.displayOrder - b.displayOrder || a.text.localeCompare(b.text))
-      : [];
-  const reasonChars = st.rejectReason.trim().length;
-  const dropdownMissing = showReasonForm && !isAdded && !st.reasonDropdown.trim();
-  const textShort = showReasonForm && reasonChars < REASON_MIN_CHARS;
+}
 
+function SelectedCard(props: SelectedCardProps) {
+  if (props.readOnly) return <ReadOnlyCard item={props.item} st={props.st} />;
+  if (props.st.decision === 'added') {
+    return (
+      <AddedCard
+        item={props.item}
+        st={props.st}
+        update={props.update}
+        onRemove={props.onRemove}
+      />
+    );
+  }
+  return <DecisionCard {...props} />;
+}
+
+const CARD_SHELL = 'rounded-xl border border-line bg-surface-sunken/30 p-4';
+
+/** Big code + description read display. */
+function CodeDisplay({ st }: { st: CodeState }) {
   return (
-    <div className="rounded-xl border border-line bg-surface-sunken/30 p-4">
-      {readOnly ? (
-        <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
-          {item.category}
-        </p>
-      ) : (
-        // Change a code's category in place — the supported alternative to
-        // removing + re-adding it under another section.
-        <div className="mb-3">
-          <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
-            Category
-          </label>
-          <FancySelect
-            value={CATEGORY_ORDER.includes(item.category) ? item.category : 'PRIMARY'}
-            onChange={(v) => onChangeCategory(v as Category)}
-            options={CATEGORY_ORDER.map((c) => ({
-              value: c,
-              label: ADD_CODE_CATEGORY_LABEL[c as AddCodeCategory],
-            }))}
-          />
-        </div>
-      )}
-      {editing ? (
-        <div className="space-y-2 mb-3">
-          <Input
-            value={st.editedCode}
-            onChange={(e) => update({ editedCode: e.target.value })}
-            className="font-mono"
-          />
-          <Input
-            value={st.editedDescription}
-            onChange={(e) => update({ editedDescription: e.target.value })}
-          />
-        </div>
-      ) : (
-        <>
-          <p className="text-2xl font-bold font-mono text-ink mb-1.5">{st.editedCode}</p>
-          <p className="text-sm text-ink leading-snug">{st.editedDescription}</p>
-        </>
-      )}
+    <>
+      <p className="text-2xl font-bold font-mono text-ink mb-1.5">{st.editedCode}</p>
+      <p className="text-sm text-ink leading-snug">{st.editedDescription}</p>
+    </>
+  );
+}
 
+/** AI justification + confidence — shown for context in every mode. */
+function AiReasoning({ item }: { item: CodeItem }) {
+  return (
+    <>
       {item.reasoning && (
         <div className="mt-4 rounded-lg border border-warn/30 bg-warn-soft/40 p-3">
           <p className="text-[10px] uppercase tracking-wide font-semibold text-warn mb-1">
@@ -1869,164 +1852,484 @@ function SelectedCard({
           <p className="text-xs text-ink leading-relaxed">{item.reasoning}</p>
         </div>
       )}
-
       {typeof item.confidence === 'number' && (
         <p className="mt-3 text-[10px] uppercase tracking-wide font-semibold text-danger">
           {item.confidence.toFixed(1)} confidence
         </p>
       )}
+    </>
+  );
+}
 
-      {showReasonForm && (
-        <div className="mt-4 rounded-xl border border-line bg-surface p-3 space-y-3">
-          {/* Dropdown row only renders for REJECT/EDIT — ADD has no
-              dropdown reason list configured today. */}
-          {!isAdded && (
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted inline-flex items-center gap-1.5">
-                <span
-                  className={cn(
-                    'w-1.5 h-1.5 rounded-full',
-                    st.decision === 'rejected' ? 'bg-danger' : 'bg-info',
-                  )}
-                />
-                Reason {st.decision === 'rejected' ? '(reject)' : '(edit)'}
-                {!readOnly && <span className="text-danger normal-case">*</span>}
+type CardMode = 'summary' | 'pick' | 'accept' | 'reject' | 'edit';
+
+function DecisionCard({
+  item,
+  st,
+  position,
+  total,
+  onSaveAndNext,
+  reasonRows,
+  onChangeCategory,
+}: SelectedCardProps) {
+  const codeType = categoryToCodeType(item.category);
+  const decided = st.decision !== 'pending';
+  // Step state for THIS code. Starts on the verdict summary when the code was
+  // already decided (e.g. reopened after a prior submit), otherwise the picker.
+  const [mode, setMode] = useState<CardMode>(decided ? 'summary' : 'pick');
+
+  // Working copy. Edits live here and only land in committed state on Save, so
+  // the code pill, reviewed-count and validation don't shift until the coder
+  // commits. Seeded from committed state each time a panel is opened.
+  const [draftCode, setDraftCode] = useState(st.editedCode);
+  const [draftDesc, setDraftDesc] = useState(st.editedDescription);
+  const [draftDropdown, setDraftDropdown] = useState(st.reasonDropdown);
+  const [draftNotes, setDraftNotes] = useState(st.rejectReason);
+
+  const enter = (m: 'accept' | 'reject' | 'edit') => {
+    setDraftCode(st.editedCode);
+    setDraftDesc(st.editedDescription);
+    setDraftDropdown(st.reasonDropdown);
+    setDraftNotes(st.rejectReason);
+    setMode(m);
+  };
+
+  const action = mode === 'reject' ? 'REJECT' : 'EDIT';
+  const reasonOptions =
+    codeType !== null
+      ? reasonRows
+          .filter((r) => r.codeType === codeType && r.action === action && r.isActive)
+          .sort((a, b) => a.displayOrder - b.displayOrder || a.text.localeCompare(b.text))
+      : [];
+
+  const notesChars = draftNotes.trim().length;
+  const notesOk = notesChars >= REASON_MIN_CHARS;
+  const dropdownOk = draftDropdown.trim().length > 0;
+  const canSaveReject = dropdownOk && notesOk;
+  const canSaveEdit =
+    draftCode.trim().length > 0 && draftDesc.trim().length > 0 && dropdownOk && notesOk;
+
+  // Commit, then settle this card onto its verdict summary. When there's a next
+  // pending code the parent advances and this card remounts (so the summary is
+  // a no-op); when this was the last one, selection stays put and the summary is
+  // what the coder should now see instead of the still-open action panel.
+  // Accept/Reject keep the AI's original code; Edit commits the new values. All
+  // three carry their reason fields so the committed state is internally
+  // consistent regardless of what the coder did before.
+  const saveAccept = () => {
+    onSaveAndNext({
+      decision: 'accepted',
+      editedCode: item.code,
+      editedDescription: item.description,
+    });
+    setMode('summary');
+  };
+  const saveReject = () => {
+    onSaveAndNext({
+      decision: 'rejected',
+      editedCode: item.code,
+      editedDescription: item.description,
+      reasonDropdown: draftDropdown.trim(),
+      rejectReason: draftNotes.trim(),
+    });
+    setMode('summary');
+  };
+  const saveEdit = () => {
+    onSaveAndNext({
+      decision: 'edited',
+      editedCode: draftCode.trim(),
+      editedDescription: draftDesc.trim(),
+      reasonDropdown: draftDropdown.trim(),
+      rejectReason: draftNotes.trim(),
+    });
+    setMode('summary');
+  };
+
+  return (
+    <div className={CARD_SHELL}>
+      {/* Category (changeable in place) + position */}
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted">
+          Category
+        </label>
+        <span className="text-[10px] font-mono text-ink-subtle">
+          {position} / {total}
+        </span>
+      </div>
+      <FancySelect
+        value={CATEGORY_ORDER.includes(item.category) ? item.category : 'PRIMARY'}
+        onChange={(v) => onChangeCategory(v as Category)}
+        options={CATEGORY_ORDER.map((c) => ({
+          value: c,
+          label: ADD_CODE_CATEGORY_LABEL[c as AddCodeCategory],
+        }))}
+        disabled={mode !== 'pick' && mode !== 'summary'}
+      />
+
+      {/* Code: read display everywhere except the Edit panel, where it becomes
+          editable fields. */}
+      <div className="mt-3">
+        {mode === 'edit' ? (
+          <div className="space-y-2">
+            <div>
+              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+                Code
               </label>
-              {!readOnly && (
-                <span className="text-[10px] text-ink-muted/70 font-mono">
-                  {filteredReasons.length} option{filteredReasons.length === 1 ? '' : 's'}
-                </span>
-              )}
-            </div>
-            {readOnly ? (
-              <div className="text-sm text-ink px-3 py-2 rounded-lg border border-line bg-surface-sunken/40">
-                {st.reasonDropdown || <span className="text-ink-muted">— No reason recorded —</span>}
-              </div>
-            ) : filteredReasons.length === 0 ? (
-              <div className="text-xs px-3 py-2 rounded-lg border border-warn/30 bg-warn-soft/30 text-warn">
-                No reasons configured for this code type. Ask a Team Lead to add some in
-                Configurations → Review Reasons.
-              </div>
-            ) : (
-              <FancySelect
-                value={st.reasonDropdown}
-                onChange={(v) => update({ reasonDropdown: v })}
-                options={filteredReasons.map((r) => ({ value: r.text, label: r.text }))}
-                placeholder="Select a reason…"
-                className={cn(dropdownMissing && '[&>button]:border-danger/60')}
+              <Input
+                value={draftCode}
+                onChange={(e) => setDraftCode(e.target.value)}
+                className="font-mono"
               />
-            )}
-            {!readOnly && dropdownMissing && filteredReasons.length > 0 && (
-              <p className="mt-1 text-[11px] text-danger">Reason is required.</p>
-            )}
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+                Description
+              </label>
+              <Input
+                value={draftDesc}
+                onChange={(e) => setDraftDesc(e.target.value)}
+              />
+            </div>
           </div>
-          )}
+        ) : (
+          <CodeDisplay st={st} />
+        )}
+      </div>
 
-          <div>
-            <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
-              Notes {!readOnly && <span className="text-danger normal-case">*</span>}
-            </label>
-            {readOnly ? (
-              <div className="text-sm text-ink px-3 py-2 rounded-lg border border-line bg-surface-sunken/40 whitespace-pre-wrap leading-relaxed">
-                {st.rejectReason || <span className="text-ink-muted">— No notes recorded —</span>}
-              </div>
-            ) : (
-              <>
-                <Textarea
-                  placeholder={`Describe the ${st.decision === 'rejected' ? 'rejection' : st.decision === 'edited' ? 'edit' : 'addition'} (min ${REASON_MIN_CHARS} characters)…`}
-                  value={st.rejectReason}
-                  onChange={(e) => update({ rejectReason: e.target.value })}
-                  rows={3}
-                  error={textShort ? `Minimum ${REASON_MIN_CHARS} characters.` : undefined}
-                />
-                <div className="flex items-center justify-between mt-1">
-                  <div className="flex-1 h-1 bg-surface-sunken rounded-full overflow-hidden mr-3">
-                    <div
-                      className={cn(
-                        'h-full transition-all',
-                        textShort ? 'bg-danger/70' : 'bg-success',
-                      )}
-                      style={{ width: `${Math.min(100, (reasonChars / REASON_MIN_CHARS) * 100)}%` }}
-                    />
-                  </div>
-                  <span className={cn(
-                    'text-[11px] font-mono shrink-0',
-                    textShort ? 'text-danger' : 'text-success',
-                  )}>
-                    {reasonChars} / {REASON_MIN_CHARS}
-                  </span>
-                </div>
-              </>
-            )}
+      <AiReasoning item={item} />
+
+      {/* ── Verdict summary (already decided) ── */}
+      {mode === 'summary' && (
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <ReadOnlyVerdictRow decision={st.decision} className="mt-0" />
+            <button
+              type="button"
+              onClick={() => setMode('pick')}
+              className="inline-flex items-center gap-1 px-3 h-8 rounded-md border border-line text-xs font-semibold text-ink hover:bg-surface-2 transition"
+            >
+              <RotateCw className="w-3.5 h-3.5" /> Change decision
+            </button>
+          </div>
+          {(st.decision === 'rejected' || st.decision === 'edited') && (
+            <RecordedReason dropdown={st.reasonDropdown} notes={st.rejectReason} />
+          )}
+        </div>
+      )}
+
+      {/* ── Action picker ── */}
+      {mode === 'pick' && (
+        <div className="mt-5">
+          <p className="text-xs font-semibold text-ink-muted mb-2.5">
+            How do you want to handle this code?
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <ActionTile
+              tone="success"
+              icon={<Check className="w-4 h-4" />}
+              label="Accept"
+              hint="Use as-is"
+              active={st.decision === 'accepted'}
+              onClick={() => enter('accept')}
+            />
+            <ActionTile
+              tone="danger"
+              icon={<X className="w-4 h-4" />}
+              label="Reject"
+              hint="Doesn't apply"
+              active={st.decision === 'rejected'}
+              onClick={() => enter('reject')}
+            />
+            <ActionTile
+              tone="info"
+              icon={<Pencil className="w-4 h-4" />}
+              label="Edit"
+              hint="Change code"
+              active={st.decision === 'edited'}
+              onClick={() => enter('edit')}
+            />
           </div>
         </div>
       )}
 
-      {readOnly ? (
-        <ReadOnlyVerdictRow decision={st.decision} />
-      ) : isAdded ? (
-        <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-violet-300/40 bg-violet-50/40 dark:bg-violet-500/10 px-3 py-2">
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
-            <Plus className="w-3 h-3" />
-            Added by you
-          </span>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="inline-flex items-center gap-1 px-3 h-7 rounded-md border border-line text-xs font-semibold text-ink-muted hover:bg-danger-soft/40 hover:text-danger hover:border-danger/30 transition"
-          >
-            <X className="w-3 h-3" /> Remove
-          </button>
+      {/* ── Accept ── */}
+      {mode === 'accept' && (
+        <div className="mt-5">
+          <div className="flex items-start gap-2.5 rounded-lg border border-success/30 bg-success-soft/40 p-3">
+            <Check className="w-4 h-4 text-success mt-0.5 shrink-0" />
+            <p className="text-xs text-ink leading-relaxed">
+              Accept <span className="font-mono font-semibold">{st.editedCode}</span> exactly as
+              predicted by the AI. No changes will be made.
+            </p>
+          </div>
+          <SaveFooter tone="success" canSave onBack={() => setMode('pick')} onSave={saveAccept} />
         </div>
-      ) : (
-        <div className="grid grid-cols-3 gap-2 mt-4">
-          {editing ? (
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(false);
-                setDecision('edited');
-              }}
-              className="col-span-3 inline-flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg border border-info/30 bg-info-soft/50 text-info hover:bg-info-soft transition"
-            >
-              <Save className="w-3.5 h-3.5" /> Save Edit
-            </button>
-          ) : (
-            <>
-              <DecisionButton
-                tone="success"
-                active={st.decision === 'accepted'}
-                icon={<Check className="w-3.5 h-3.5" />}
-                onClick={() => setDecision(st.decision === 'accepted' ? 'pending' : 'accepted')}
-              >
-                Accept
-              </DecisionButton>
-              <DecisionButton
-                tone="danger"
-                active={st.decision === 'rejected'}
-                icon={<X className="w-3.5 h-3.5" />}
-                onClick={() => setDecision(st.decision === 'rejected' ? 'pending' : 'rejected')}
-              >
-                Reject
-              </DecisionButton>
-              <DecisionButton
-                tone="info"
-                active={false}
-                icon={<Pencil className="w-3.5 h-3.5" />}
-                onClick={() => setEditing(true)}
-              >
-                Edit
-              </DecisionButton>
-            </>
-          )}
+      )}
+
+      {/* ── Reject ── */}
+      {mode === 'reject' && (
+        <div className="mt-5 space-y-3">
+          <ReasonFields
+            tone="danger"
+            label="Reason for rejecting"
+            options={reasonOptions}
+            dropdown={draftDropdown}
+            onDropdown={setDraftDropdown}
+            notes={draftNotes}
+            onNotes={setDraftNotes}
+            notesPlaceholder="Describe why this code doesn't apply"
+          />
+          <SaveFooter
+            tone="danger"
+            canSave={canSaveReject}
+            onBack={() => setMode('pick')}
+            onSave={saveReject}
+          />
+        </div>
+      )}
+
+      {/* ── Edit ── */}
+      {mode === 'edit' && (
+        <div className="mt-5 space-y-3">
+          <ReasonFields
+            tone="info"
+            label="Reason for editing"
+            options={reasonOptions}
+            dropdown={draftDropdown}
+            onDropdown={setDraftDropdown}
+            notes={draftNotes}
+            onNotes={setDraftNotes}
+            notesPlaceholder="Describe what you changed and why"
+          />
+          <SaveFooter
+            tone="info"
+            canSave={canSaveEdit}
+            onBack={() => setMode('pick')}
+            onSave={saveEdit}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function ReadOnlyVerdictRow({ decision }: { decision: Decision }) {
+/** One of the three big choices in the action picker. `active` marks the code's
+ * current committed decision so re-opening the picker shows what was chosen. */
+function ActionTile({
+  tone,
+  icon,
+  label,
+  hint,
+  active,
+  onClick,
+}: {
+  tone: 'success' | 'danger' | 'info';
+  icon: ReactNode;
+  label: string;
+  hint: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const base = {
+    success: 'border-success/30 hover:border-success/60 hover:bg-success-soft/40 text-success',
+    danger: 'border-danger/30 hover:border-danger/60 hover:bg-danger-soft/40 text-danger',
+    info: 'border-info/30 hover:border-info/60 hover:bg-info-soft/40 text-info',
+  }[tone];
+  const activeCls = {
+    success: 'ring-success/40 bg-success-soft/40',
+    danger: 'ring-danger/40 bg-danger-soft/40',
+    info: 'ring-info/40 bg-info-soft/40',
+  }[tone];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'min-h-[76px] flex flex-col items-center justify-center gap-1 rounded-xl border bg-surface px-2 py-3 transition',
+        base,
+        active && 'ring-2 ring-offset-1 ring-offset-surface',
+        active && activeCls,
+      )}
+    >
+      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-surface-sunken">
+        {icon}
+      </span>
+      <span className="text-xs font-semibold text-ink">{label}</span>
+      <span className="text-[10px] text-ink-muted leading-none">{hint}</span>
+    </button>
+  );
+}
+
+/** Sticky Back / Save & Next footer for every action panel. */
+function SaveFooter({
+  tone,
+  canSave,
+  onBack,
+  onSave,
+}: {
+  tone: 'success' | 'danger' | 'info';
+  canSave: boolean;
+  onBack: () => void;
+  onSave: () => void;
+}) {
+  const toneCls = {
+    success: 'bg-success hover:bg-success/90',
+    danger: 'bg-danger hover:bg-danger/90',
+    info: 'bg-info hover:bg-info/90',
+  }[tone];
+  return (
+    <div className="flex items-center justify-between gap-2 pt-1">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1 px-3 h-9 rounded-lg border border-line text-xs font-semibold text-ink-muted hover:bg-surface-2 transition"
+      >
+        <ChevronLeft className="w-3.5 h-3.5" /> Back
+      </button>
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={!canSave}
+        className={cn(
+          'inline-flex items-center gap-1.5 px-4 h-9 rounded-lg text-xs font-semibold text-white transition disabled:opacity-40 disabled:cursor-not-allowed',
+          toneCls,
+        )}
+      >
+        <Save className="w-3.5 h-3.5" /> Save &amp; Next
+        <ChevronRight className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/** Dropdown reason + free-text notes (with min-length meter) — shared by the
+ * Reject and Edit panels. */
+function ReasonFields({
+  tone,
+  label,
+  options,
+  dropdown,
+  onDropdown,
+  notes,
+  onNotes,
+  notesPlaceholder,
+}: {
+  tone: 'danger' | 'info';
+  label: string;
+  options: CodeReviewReasonRow[];
+  dropdown: string;
+  onDropdown: (v: string) => void;
+  notes: string;
+  onNotes: (v: string) => void;
+  notesPlaceholder: string;
+}) {
+  const dot = tone === 'danger' ? 'bg-danger' : 'bg-info';
+  const chars = notes.trim().length;
+  const short = chars < REASON_MIN_CHARS;
+  const dropdownMissing = !dropdown.trim();
+  return (
+    <div className="rounded-xl border border-line bg-surface p-3 space-y-3">
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted inline-flex items-center gap-1.5">
+            <span className={cn('w-1.5 h-1.5 rounded-full', dot)} />
+            {label}
+            <span className="text-danger normal-case">*</span>
+          </label>
+          <span className="text-[10px] text-ink-muted/70 font-mono">
+            {options.length} option{options.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        {options.length === 0 ? (
+          <div className="text-xs px-3 py-2 rounded-lg border border-warn/30 bg-warn-soft/30 text-warn">
+            No reasons configured for this code type. Ask a Team Lead to add some in
+            Configurations → Review Reasons.
+          </div>
+        ) : (
+          <FancySelect
+            value={dropdown}
+            onChange={onDropdown}
+            options={options.map((r) => ({ value: r.text, label: r.text }))}
+            placeholder="Select a reason…"
+            className={cn(dropdownMissing && '[&>button]:border-danger/60')}
+          />
+        )}
+        {dropdownMissing && options.length > 0 && (
+          <p className="mt-1 text-[11px] text-danger">Reason is required.</p>
+        )}
+      </div>
+
+      <div>
+        <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+          Notes <span className="text-danger normal-case">*</span>
+        </label>
+        <Textarea
+          placeholder={`${notesPlaceholder} (min ${REASON_MIN_CHARS} characters)…`}
+          value={notes}
+          onChange={(e) => onNotes(e.target.value)}
+          rows={3}
+          error={short ? `Minimum ${REASON_MIN_CHARS} characters.` : undefined}
+        />
+        <div className="flex items-center justify-between mt-1">
+          <div className="flex-1 h-1 bg-surface-sunken rounded-full overflow-hidden mr-3">
+            <div
+              className={cn('h-full transition-all', short ? 'bg-danger/70' : 'bg-success')}
+              style={{ width: `${Math.min(100, (chars / REASON_MIN_CHARS) * 100)}%` }}
+            />
+          </div>
+          <span
+            className={cn('text-[11px] font-mono shrink-0', short ? 'text-danger' : 'text-success')}
+          >
+            {chars} / {REASON_MIN_CHARS}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Read-only display of a recorded dropdown reason + notes (verdict summary,
+ * QA view). */
+function RecordedReason({
+  dropdown,
+  notes,
+  hideDropdown,
+}: {
+  dropdown: string;
+  notes: string;
+  hideDropdown?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-line bg-surface p-3 space-y-2">
+      {!hideDropdown && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
+            Reason
+          </p>
+          <div className="text-sm text-ink px-3 py-2 rounded-lg border border-line bg-surface-sunken/40">
+            {dropdown || <span className="text-ink-muted">— No reason recorded —</span>}
+          </div>
+        </div>
+      )}
+      <div>
+        <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
+          Notes
+        </p>
+        <div className="text-sm text-ink px-3 py-2 rounded-lg border border-line bg-surface-sunken/40 whitespace-pre-wrap leading-relaxed">
+          {notes || <span className="text-ink-muted">— No notes recorded —</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReadOnlyVerdictRow({
+  decision,
+  className,
+}: {
+  decision: Decision;
+  className?: string;
+}) {
   const tone =
     decision === 'accepted'
       ? { label: 'Accepted by coder', cls: 'bg-success-soft/60 text-success border-success/30', icon: <Check className="w-3.5 h-3.5" /> }
@@ -2034,54 +2337,106 @@ function ReadOnlyVerdictRow({ decision }: { decision: Decision }) {
         ? { label: 'Rejected by coder', cls: 'bg-danger-soft/60 text-danger border-danger/30', icon: <X className="w-3.5 h-3.5" /> }
         : decision === 'edited'
           ? { label: 'Edited by coder', cls: 'bg-info-soft/60 text-info border-info/30', icon: <Pencil className="w-3.5 h-3.5" /> }
-          : { label: 'Pending — coder did not act on this code', cls: 'bg-surface-sunken text-ink-muted border-line', icon: null };
+          : decision === 'added'
+            ? { label: 'Added by coder', cls: 'bg-violet-100/60 text-violet-700 border-violet-400/30 dark:bg-violet-500/15 dark:text-violet-300', icon: <Plus className="w-3.5 h-3.5" /> }
+            : { label: 'Pending — coder did not act on this code', cls: 'bg-surface-sunken text-ink-muted border-line', icon: null };
   return (
-    <div className={cn(
-      'mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill border text-xs font-semibold',
-      tone.cls,
-    )}>
+    <div
+      className={cn(
+        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill border text-xs font-semibold',
+        className ?? 'mt-4',
+        tone.cls,
+      )}
+    >
       {tone.icon}
       {tone.label}
     </div>
   );
 }
 
-function DecisionButton({
-  tone,
-  active,
-  icon,
-  children,
-  onClick,
-}: {
-  tone: 'success' | 'danger' | 'info';
-  active: boolean;
-  icon: ReactNode;
-  children: ReactNode;
-  onClick: () => void;
-}) {
-  const cls = {
-    success: active
-      ? 'bg-success text-white border-success'
-      : 'bg-success-soft/50 text-success border-success/30 hover:bg-success-soft',
-    danger: active
-      ? 'bg-danger text-white border-danger'
-      : 'bg-danger-soft/50 text-danger border-danger/30 hover:bg-danger-soft',
-    info: active
-      ? 'bg-info text-white border-info'
-      : 'bg-info-soft/50 text-info border-info/30 hover:bg-info-soft',
-  }[tone];
+/** QA / read-only view of a single code: code, AI reasoning, locked verdict and
+ * the recorded reason/notes. */
+function ReadOnlyCard({ item, st }: { item: CodeItem; st: CodeState }) {
+  const hasReason =
+    st.decision === 'rejected' || st.decision === 'edited' || st.decision === 'added';
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'inline-flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg border transition',
-        cls,
+    <div className={CARD_SHELL}>
+      <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
+        {item.category}
+      </p>
+      <CodeDisplay st={st} />
+      <AiReasoning item={item} />
+      <ReadOnlyVerdictRow decision={st.decision} />
+      {hasReason && (
+        <div className="mt-3">
+          <RecordedReason
+            dropdown={st.reasonDropdown}
+            notes={st.rejectReason}
+            hideDropdown={st.decision === 'added'}
+          />
+        </div>
       )}
-    >
-      {icon}
-      {children}
-    </button>
+    </div>
+  );
+}
+
+/** A code the coder added that the AI didn't suggest. Already counts as
+ * reviewed ('added'); the coder just supplies the required note, or removes it. */
+function AddedCard({
+  item,
+  st,
+  update,
+  onRemove,
+}: {
+  item: CodeItem;
+  st: CodeState;
+  update: (patch: Partial<CodeState>) => void;
+  onRemove: () => void;
+}) {
+  const chars = st.rejectReason.trim().length;
+  const short = chars < REASON_MIN_CHARS;
+  return (
+    <div className={CARD_SHELL}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-violet-700 dark:text-violet-300">
+          <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+          {item.category} · Added by you
+        </span>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="inline-flex items-center gap-1 px-3 h-7 rounded-md border border-line text-xs font-semibold text-ink-muted hover:bg-danger-soft/40 hover:text-danger hover:border-danger/30 transition"
+        >
+          <X className="w-3 h-3" /> Remove
+        </button>
+      </div>
+      <CodeDisplay st={st} />
+      <div className="mt-4">
+        <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+          Notes <span className="text-danger normal-case">*</span>
+        </label>
+        <Textarea
+          placeholder={`Describe why you added this code (min ${REASON_MIN_CHARS} characters)…`}
+          value={st.rejectReason}
+          onChange={(e) => update({ rejectReason: e.target.value })}
+          rows={3}
+          error={short ? `Minimum ${REASON_MIN_CHARS} characters.` : undefined}
+        />
+        <div className="flex items-center justify-between mt-1">
+          <div className="flex-1 h-1 bg-surface-sunken rounded-full overflow-hidden mr-3">
+            <div
+              className={cn('h-full transition-all', short ? 'bg-danger/70' : 'bg-success')}
+              style={{ width: `${Math.min(100, (chars / REASON_MIN_CHARS) * 100)}%` }}
+            />
+          </div>
+          <span
+            className={cn('text-[11px] font-mono shrink-0', short ? 'text-danger' : 'text-success')}
+          >
+            {chars} / {REASON_MIN_CHARS}
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
