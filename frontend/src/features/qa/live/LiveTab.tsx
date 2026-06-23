@@ -96,7 +96,9 @@ export function LiveTab() {
     for (const d of data.drafts) {
       if (String(d.user.id) === String(currentUserId)) continue;
       const dk = draftKey(d);
-      ageByDraft.set(dk, serverMs - Date.parse(d.updatedAt));
+      // No draft yet (working but undecided) → no decisions to diff; skip the
+      // age too (null updatedAt would parse to NaN).
+      if (d.updatedAt) ageByDraft.set(dk, serverMs - Date.parse(d.updatedAt));
       const userName = d.user.fullName ?? `User #${d.user.id}`;
       for (const e of decodeDecisions(d.payload)) {
         const code = e.code?.trim();
@@ -233,10 +235,10 @@ export function LiveTab() {
       ) : drafts.length === 0 ? (
         <div className="py-16 text-center">
           <Radio className="w-7 h-7 text-ink-subtle mx-auto mb-2" />
-          <p className="text-sm font-semibold text-ink">No one is coding right now</p>
+          <p className="text-sm font-semibold text-ink">No one is working a chart right now</p>
           <p className="text-[11px] text-ink-muted mt-1">
-            Charts appear here the moment a coder or auditor makes a decision. New decisions pop as
-            notifications.
+            A coder or auditor appears here the moment they start a chart's timer. Their decisions
+            then stream in as notifications.
           </p>
         </div>
       ) : (

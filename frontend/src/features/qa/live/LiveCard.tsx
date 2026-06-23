@@ -1,9 +1,7 @@
 import { Avatar, PillBadge } from '@/components/ui/Primitives';
 import { cn } from '@/lib/utils';
 import type { QaLiveDraft } from '@/api/qa';
-import { decodeDecisions, draftKey, fmtAgo, summarize } from './shared';
-
-const ACTIVE_WINDOW_MS = 90_000;
+import { decodeDecisions, draftKey, fmtDur, summarize } from './shared';
 
 function VerdictCount({ label, n, tone }: { label: string; n: number; tone: string }) {
   if (n === 0) return null;
@@ -17,15 +15,14 @@ function VerdictCount({ label, n, tone }: { label: string; n: number; tone: stri
 
 function LiveCard({
   draft,
-  ageMs,
+  workingMs,
   onOpen,
 }: {
   draft: QaLiveDraft;
-  ageMs: number;
+  workingMs: number;
   onOpen: (chartId: number, userId: number) => void;
 }) {
   const s = summarize(decodeDecisions(draft.payload));
-  const live = ageMs < ACTIVE_WINDOW_MS;
   const name = draft.user.fullName ?? `User #${draft.user.id}`;
   const place = [draft.clientName, draft.locationName, draft.subSpecialityName].filter(Boolean).join(' · ');
 
@@ -34,10 +31,7 @@ function LiveCard({
       type="button"
       onClick={() => onOpen(draft.chartId, draft.user.id)}
       title="Open the chart and review this coder's decisions"
-      className={cn(
-        'w-full text-left rounded-xl border border-line bg-surface p-4 transition hover:bg-surface-2/50 hover:border-primary/40',
-        !live && 'opacity-60',
-      )}
+      className="w-full text-left rounded-xl border border-line bg-surface p-4 transition hover:bg-surface-2/50 hover:border-primary/40"
     >
       <div className="flex items-center gap-2.5">
         <Avatar name={name} src={draft.user.avatarUrl ?? undefined} size="sm" />
@@ -52,32 +46,27 @@ function LiveCard({
             {draft.chartNo || `#${draft.chartId}`}
           </span>
         </div>
-        <span
-          className={cn(
-            'inline-flex items-center gap-1.5 text-[11px] shrink-0',
-            live ? 'text-success' : 'text-ink-subtle',
-          )}
-        >
-          <span
-            className={cn(
-              'w-1.5 h-1.5 rounded-full',
-              live ? 'bg-success animate-pulse' : 'bg-ink-subtle/50',
-            )}
-          />
-          {live ? 'live' : fmtAgo(ageMs)}
+        {/* Every card is an open timer session, so it's always live. */}
+        <span className="inline-flex items-center gap-1.5 text-[11px] shrink-0 text-success">
+          <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+          live · {fmtDur(workingMs)}
         </span>
       </div>
 
       {place && <p className="mt-2 text-[11px] text-ink-muted truncate">{place}</p>}
 
       <div className="mt-2.5 flex items-center gap-3 flex-wrap">
-        <span className="text-xs font-semibold text-ink">
-          {s.total} decided
-        </span>
-        <VerdictCount label="accepted" n={s.accepted} tone="text-success" />
-        <VerdictCount label="rejected" n={s.rejected} tone="text-danger" />
-        <VerdictCount label="edited" n={s.edited} tone="text-warn" />
-        <VerdictCount label="added" n={s.added} tone="text-info" />
+        {s.total === 0 ? (
+          <span className="text-xs text-ink-muted">No decisions yet</span>
+        ) : (
+          <>
+            <span className="text-xs font-semibold text-ink">{s.total} decided</span>
+            <VerdictCount label="accepted" n={s.accepted} tone="text-success" />
+            <VerdictCount label="rejected" n={s.rejected} tone="text-danger" />
+            <VerdictCount label="edited" n={s.edited} tone="text-warn" />
+            <VerdictCount label="added" n={s.added} tone="text-info" />
+          </>
+        )}
       </div>
     </button>
   );
@@ -97,9 +86,9 @@ export function LiveCardList({
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
       {drafts.map((d) => {
-        // Skew-correct the server timestamp before comparing to the local clock.
-        const ageMs = now - skewMs - Date.parse(d.updatedAt);
-        return <LiveCard key={draftKey(d)} draft={d} ageMs={ageMs} onOpen={onOpen} />;
+        // Skew-correct the timer start before measuring how long they've worked.
+        const workingMs = now - skewMs - Date.parse(d.startedAt);
+        return <LiveCard key={draftKey(d)} draft={d} workingMs={workingMs} onOpen={onOpen} />;
       })}
     </div>
   );

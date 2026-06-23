@@ -447,25 +447,27 @@ export class QaService {
 
   /**
    * Charts being worked on RIGHT NOW, for QA to watch coders/auditors in real
-   * time. Sourced from `chart_code_decision_drafts` — the Review & Edit modal
-   * autosaves the in-progress accept/reject/edit/add board every ~800ms, one
-   * row per (chart, user). We hand the raw, versioned `payload` blob back
-   * verbatim (the frontend owns its shape) plus enough chart/worklist context
-   * to render a live card, and the row's `updated_at` so the client can tell
-   * live from idle and suppress stale toasts. `serverNow` lets the client
-   * correct clock skew when computing liveness.
+   * time. Sourced from OPEN work-timer sessions (`chart_time_logs` with
+   * `stopped_at IS NULL`) — the same "who's working this instant" signal the
+   * admin Live Activity page uses — so a coder shows up the moment they start
+   * a chart, before they've decided anything. Their in-progress decision draft
+   * is LEFT JOINed in (it may not exist yet): we hand its raw, versioned
+   * `payload` back verbatim (the frontend owns its shape) plus the draft's
+   * `updated_at` (null until the first decision) so the client can stream new
+   * decisions as toasts. `serverNow` lets the client correct clock skew.
    *
-   * Scope: drafts touched in the last 30 min, excluding the caller's own draft
-   * and soft-deleted / orphaned charts (the same exclusion applied across QA
-   * and AI stats so orphans never surface).
+   * Scope: excludes the caller's own session and soft-deleted / orphaned charts
+   * (the same exclusion applied across QA and AI stats so orphans never
+   * surface).
    */
   async live(currentUserId: number) {
     const rows = await this.run<any[]>({ currentUserId }, `
       SELECT
-        d.chart_id    AS "chartId",
+        t.chart_id    AS "chartId",
         c.chart_no    AS "chartNo",
         c.milestone   AS "milestone",
-        CASE WHEN c.milestone LIKE 'AUDIT%' THEN 'AUDIT' ELSE 'CODING' END AS "kind",
+        t.kind        AS "kind",
+        t.started_at  AS "startedAt",
         d.payload     AS "payload",
         d.updated_at  AS "updatedAt",
         u.id          AS "userId",
@@ -475,18 +477,19 @@ export class QaService {
         cl.name       AS "clientName",
         loc.name      AS "locationName",
         ss.name       AS "subSpecialityName"
-      FROM chart_code_decision_drafts d
-      JOIN charts    c ON c.id = d.chart_id
+      FROM chart_time_logs t
+      JOIN charts    c ON c.id = t.chart_id
       JOIN worklists w ON w.id = c.worklist_id
-      JOIN users     u ON u.id = d.user_id
+      JOIN users     u ON u.id = t.user_id
+      LEFT JOIN chart_code_decision_drafts d ON d.chart_id = t.chart_id AND d.user_id = t.user_id
       LEFT JOIN clients          cl  ON cl.id  = w.client_id
       LEFT JOIN locations        loc ON loc.id = w.location_id
       LEFT JOIN sub_specialities ss  ON ss.id  = w.sub_speciality_id
-      WHERE d.updated_at > now() - interval '30 minutes'
+      WHERE t.stopped_at IS NULL
         AND c.deleted_at IS NULL
         AND w.deleted_at IS NULL
-        AND d.user_id <> :currentUserId
-      ORDER BY d.updated_at DESC
+        AND t.user_id <> :currentUserId
+      ORDER BY COALESCE(d.updated_at, t.started_at) DESC
     `);
 
     const drafts = rows.map((r: any) => ({
@@ -504,7 +507,9 @@ export class QaService {
       locationName: r.locationName ?? null,
       subSpecialityName: r.subSpecialityName ?? null,
       payload: r.payload ?? null,
-      updatedAt: r.updatedAt,
+      // Null until the coder makes their first decision (no draft row yet).
+      updatedAt: r.updatedAt ?? null,
+      startedAt: r.startedAt,
     }));
 
     return { serverNow: new Date().toISOString(), drafts };

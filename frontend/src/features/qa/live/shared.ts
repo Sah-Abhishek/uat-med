@@ -58,3 +58,13 @@ export function fmtAgo(ms: number): string {
   const h = Math.floor(m / 60);
   return `${h}h ago`;
 }
+
+/** Compact elapsed duration "45s / 12m / 1h 5m" from a millisecond span. */
+export function fmtDur(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}

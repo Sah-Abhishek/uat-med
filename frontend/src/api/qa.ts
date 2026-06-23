@@ -123,23 +123,27 @@ export interface QaLiveUser {
   avatarUrl: string | null;
 }
 
-/** One coder/auditor's in-progress board on one chart, as autosaved to the
- * code-decision draft. `payload` is the same versioned blob the Review & Edit
- * modal writes — decode it via {@link CodeDecisionDraftPayload}. `updatedAt`
- * is the row's last autosave, used to tell live from idle and to gate stale
- * toasts. */
+/** One coder/auditor actively working a chart right now (open work-timer
+ * session). `payload` is their in-progress decision board — the same versioned
+ * blob the Review & Edit modal autosaves, decode via {@link
+ * CodeDecisionDraftPayload}; it's null until they make their first decision.
+ * `updatedAt` (the draft's last autosave, null when no draft) gates new-decision
+ * toasts; `startedAt` (timer start) drives the "working" indicator. */
 export interface QaLiveDraft {
   chartId: number;
   chartNo: string | null;
   milestone: string | null;
-  /** Derived server-side from milestone (AUDIT_* ⇒ AUDIT, else CODING). */
+  /** From the work-timer session kind (CODING ⇒ coder, AUDIT ⇒ auditor). */
   kind: 'CODING' | 'AUDIT';
   user: QaLiveUser;
   clientName: string | null;
   locationName: string | null;
   subSpecialityName: string | null;
   payload: CodeDecisionDraftPayload | null;
-  updatedAt: string; // ISO
+  /** Draft last-autosave (ISO), or null until the first decision. */
+  updatedAt: string | null;
+  /** Work-timer session start (ISO) — the coder is "live" while this runs. */
+  startedAt: string;
 }
 
 export interface QaLiveResponse {
