@@ -1376,9 +1376,21 @@ async update(id: number, dto: UpdateChartDto) {
    * is well under 100 KB — anything bigger is a bug or abuse, not a chart. */
   private static readonly DRAFT_MAX_BYTES = 256 * 1024;
 
-  async getCodeDecisionDraft(chartId: number, user: AuthenticatedUser) {
+  async getCodeDecisionDraft(chartId: number, user: AuthenticatedUser, targetUserId?: number) {
     await this.requireChart(chartId);
-    const row = await this.decisionDrafts.findOne({ where: { chartId, userId: user.id } });
+    // By default a user only ever reads their OWN draft. QA Live lets a Team
+    // Lead / Manager peek at a specific coder's in-progress draft, so allow an
+    // explicit other-user lookup — but only for those QA roles.
+    let ownerId = user.id;
+    if (targetUserId != null && targetUserId !== user.id) {
+      if (user.role !== Role.TEAMLEAD && user.role !== Role.MANAGER) {
+        throw new ForbiddenException({
+          error: { code: 'forbidden', message: "Not allowed to view another user's draft." },
+        });
+      }
+      ownerId = targetUserId;
+    }
+    const row = await this.decisionDrafts.findOne({ where: { chartId, userId: ownerId } });
     return { draft: row ? { payload: row.payload, updatedAt: row.updatedAt } : null };
   }
 

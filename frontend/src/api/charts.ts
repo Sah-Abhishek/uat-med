@@ -327,9 +327,13 @@ export interface CodeDecisionDraftPayload {
   addedItems: CodeDecisionDraftAddedItem[];
 }
 
-export const getCodeDecisionDraft = (chartId: string) =>
+/** Fetch a chart's in-progress draft. Omit `userId` for the caller's own
+ * draft; QA (Team Lead / Manager) passes a coder's id to watch their live
+ * draft in read-only mode. */
+export const getCodeDecisionDraft = (chartId: string, userId?: number) =>
   get<{ draft: { payload: CodeDecisionDraftPayload; updatedAt: string } | null }>(
     `/charts/${chartId}/code-decisions/draft`,
+    userId != null ? { userId } : undefined,
   );
 
 export const saveCodeDecisionDraft = (chartId: string, payload: CodeDecisionDraftPayload) =>

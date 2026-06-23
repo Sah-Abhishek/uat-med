@@ -176,11 +176,17 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
 
   const [viewerOpen, setViewerOpen] = useState(false);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
-  const [reviewOpen, setReviewOpen] = useState(false);
   // QA mode: opened from the Team Lead's QA dashboard via `?qa=1`. Renders
   // every section in read-only — no save, no review-submit, no field edits.
   const [searchParams, setSearchParams] = useSearchParams();
   const qaReadOnly = searchParams.get('qa') === '1';
+  // QA Live: `?liveUserId=<coderId>` means QA followed a live card here to
+  // watch that coder's in-progress draft — surface it by auto-opening the
+  // Review & Edit modal seeded from their draft.
+  const liveDraftRaw = qaReadOnly ? searchParams.get('liveUserId') : null;
+  const liveDraftUserId =
+    liveDraftRaw && Number.isFinite(Number(liveDraftRaw)) ? Number(liveDraftRaw) : undefined;
+  const [reviewOpen, setReviewOpen] = useState(() => liveDraftUserId != null);
 
   // Single source of truth for AI artifacts: the chart's customFields. Keeping
   // these as derived values (not local state) guarantees the sidebar always
@@ -833,6 +839,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         clientId={worklistQ.data?.clientId}
         locationId={worklistQ.data?.locationId}
         readOnly={qaReadOnly}
+        liveDraftUserId={liveDraftUserId}
         onSubmitted={() => setSaveToastOpen(true)}
       />
 

@@ -1,18 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Radio, Users } from 'lucide-react';
 import { getQaLive } from '@/api/qa';
 import { useAuth } from '@/auth/store';
 import { LiveCardList } from './LiveCard';
-import { LiveDetailPanel } from './LiveDetailPanel';
 import { LiveToastStack, type LiveToast } from './LiveToastStack';
-import {
-  DECISION_VARIANT,
-  DECISION_VERB,
-  decodeDecisions,
-  draftKey,
-  type LiveDecision,
-} from './shared';
+import { DECISION_VARIANT, DECISION_VERB, decodeDecisions, draftKey, type LiveDecision } from './shared';
 
 const POLL_MS = 4_000;
 /** A decision on a row idle longer than this never toasts (defends against a
@@ -44,6 +38,7 @@ interface DiffEvent {
 }
 
 export function LiveTab() {
+  const navigate = useNavigate();
   const currentUserId = useAuth((s) => s.user?.id ?? null);
 
   const q = useQuery({
@@ -54,8 +49,16 @@ export function LiveTab() {
   });
 
   const [toasts, setToasts] = useState<LiveToast[]>([]);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+
+  // Open the chart in read-only QA mode and auto-open its Review & Edit modal
+  // seeded from THIS coder's live draft (see ChartDetailPage `liveUserId`).
+  const openChart = (chartId: number, userId: number) =>
+    navigate(`/charts/${chartId}?qa=1&liveUserId=${userId}`);
+  const openFromKey = (key: string) => {
+    const [chartId, userId] = key.split(':');
+    openChart(Number(chartId), Number(userId));
+  };
 
   const prevByKey = useRef<Map<string, PrevEntry>>(new Map());
   const seededRef = useRef(false);
@@ -203,14 +206,6 @@ export function LiveTab() {
 
   const dismissToast = (id: number) => setToasts((p) => p.filter((t) => t.id !== id));
 
-  const selectedDraft = useMemo(
-    () => drafts.find((d) => draftKey(d) === selectedKey),
-    [drafts, selectedKey],
-  );
-  const selectedAge = selectedDraft
-    ? now - skewMsRef.current - Date.parse(selectedDraft.updatedAt)
-    : null;
-
   const distinctUsers = new Set(drafts.map((d) => d.user.id)).size;
 
   return (
@@ -245,17 +240,10 @@ export function LiveTab() {
           </p>
         </div>
       ) : (
-        <LiveCardList
-          drafts={drafts}
-          now={now}
-          skewMs={skewMsRef.current}
-          selectedKey={selectedKey}
-          onSelect={(k) => setSelectedKey(k)}
-        />
+        <LiveCardList drafts={drafts} now={now} skewMs={skewMsRef.current} onOpen={openChart} />
       )}
 
-      <LiveToastStack toasts={toasts} onDismiss={dismissToast} onSeeMore={(k) => setSelectedKey(k)} />
-      <LiveDetailPanel draft={selectedDraft} ageMs={selectedAge} onClose={() => setSelectedKey(null)} />
+      <LiveToastStack toasts={toasts} onDismiss={dismissToast} onSeeMore={openFromKey} />
     </div>
   );
 }

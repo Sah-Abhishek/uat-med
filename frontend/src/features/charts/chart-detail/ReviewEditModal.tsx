@@ -69,6 +69,10 @@ interface Props {
    * the on-screen state from them, and locks every control — no submit, no
    * decision buttons, no edits. */
   readOnly?: boolean;
+  /** QA Live: when set (read-only only), the board hydrates from THIS coder's
+   * in-progress draft so QA can watch their unsubmitted accept/reject/edit
+   * work. Without it, read-only shows only previously-submitted decisions. */
+  liveDraftUserId?: number;
 }
 
 type Decision = 'pending' | 'accepted' | 'rejected' | 'edited' | 'added';
@@ -265,7 +269,11 @@ export function ReviewEditModal({
   locationId,
   onSubmitted,
   readOnly = false,
+  liveDraftUserId,
 }: Props) {
+  // QA watching a coder's live draft (read-only). Drives the draft fetch +
+  // hydration that's otherwise skipped in read-only mode.
+  const watchingLiveDraft = readOnly && liveDraftUserId != null;
   // Prefer the orchestrator codes-with-IDs response (each item carries
   // `predictedCodeId` for the submit forward). Fall back to the AI
   // prediction blob if the fetch hasn't returned yet or fails.
@@ -483,9 +491,11 @@ export function ReviewEditModal({
   const qc = useQueryClient();
 
   const draftQ = useQuery({
-    queryKey: ['chart-code-decision-draft', chartId],
-    queryFn: () => getCodeDecisionDraft(chartId),
-    enabled: open && !!chartId && !readOnly,
+    queryKey: ['chart-code-decision-draft', chartId, liveDraftUserId ?? 'self'],
+    queryFn: () => getCodeDecisionDraft(chartId, liveDraftUserId),
+    // Editable mode loads the caller's own draft; read-only normally skips it,
+    // except in QA Live where we fetch the watched coder's draft instead.
+    enabled: open && !!chartId && (!readOnly || watchingLiveDraft),
     // No background refetches while the modal is open: the server copy is
     // ours alone (per-user) and mid-session refetches could stamp a stale
     // blob over live edits. Fresh fetch per open is handled by the cache
@@ -579,7 +589,10 @@ export function ReviewEditModal({
   // it. Declared AFTER the decisions hydration effect on purpose: same-commit
   // runs execute in order, so the draft lands on top.
   useEffect(() => {
-    if (!open || readOnly || !boardReady || draftQ.isError) return;
+    // Normally skipped in read-only — but QA Live deliberately hydrates the
+    // board from the watched coder's draft (still no autosave: that effect
+    // guards on readOnly).
+    if (!open || (readOnly && !watchingLiveDraft) || !boardReady || draftQ.isError) return;
     const inputs = [draftQ.data, decisionsQ.data, aiItems];
     const prev = appliedDraftRef.current;
     if (prev && inputs.every((v, i) => v === prev[i])) return;
@@ -659,7 +672,7 @@ export function ReviewEditModal({
         return [...prevAdds, ...draftAdds.filter((it) => !present.has(`${it.category}|${it.code}`))];
       });
     }
-  }, [open, readOnly, boardReady, draftQ.data, draftQ.isError, decisionsQ.data, aiItems]);
+  }, [open, readOnly, watchingLiveDraft, boardReady, draftQ.data, draftQ.isError, decisionsQ.data, aiItems]);
 
   const draftSaveMut = useMutation({
     mutationFn: (payload: CodeDecisionDraftPayload) => saveCodeDecisionDraft(chartId, payload),

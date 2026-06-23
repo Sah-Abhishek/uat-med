@@ -18,13 +18,11 @@ function VerdictCount({ label, n, tone }: { label: string; n: number; tone: stri
 function LiveCard({
   draft,
   ageMs,
-  selected,
-  onSelect,
+  onOpen,
 }: {
   draft: QaLiveDraft;
   ageMs: number;
-  selected: boolean;
-  onSelect: (key: string) => void;
+  onOpen: (chartId: number, userId: number) => void;
 }) {
   const s = summarize(decodeDecisions(draft.payload));
   const live = ageMs < ACTIVE_WINDOW_MS;
@@ -34,10 +32,10 @@ function LiveCard({
   return (
     <button
       type="button"
-      onClick={() => onSelect(draftKey(draft))}
+      onClick={() => onOpen(draft.chartId, draft.user.id)}
+      title="Open the chart and review this coder's decisions"
       className={cn(
-        'w-full text-left rounded-xl border bg-surface p-4 transition hover:bg-surface-2/50',
-        selected ? 'border-primary ring-1 ring-primary/40' : 'border-line',
+        'w-full text-left rounded-xl border border-line bg-surface p-4 transition hover:bg-surface-2/50 hover:border-primary/40',
         !live && 'opacity-60',
       )}
     >
@@ -89,30 +87,19 @@ export function LiveCardList({
   drafts,
   now,
   skewMs,
-  selectedKey,
-  onSelect,
+  onOpen,
 }: {
   drafts: QaLiveDraft[];
   now: number;
   skewMs: number;
-  selectedKey: string | null;
-  onSelect: (key: string) => void;
+  onOpen: (chartId: number, userId: number) => void;
 }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
       {drafts.map((d) => {
-        const key = draftKey(d);
         // Skew-correct the server timestamp before comparing to the local clock.
         const ageMs = now - skewMs - Date.parse(d.updatedAt);
-        return (
-          <LiveCard
-            key={key}
-            draft={d}
-            ageMs={ageMs}
-            selected={selectedKey === key}
-            onSelect={onSelect}
-          />
-        );
+        return <LiveCard key={draftKey(d)} draft={d} ageMs={ageMs} onOpen={onOpen} />;
       })}
     </div>
   );

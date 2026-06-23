@@ -232,13 +232,17 @@ export class ChartsController {
    * because a draft only exists on the way to a submit. */
 
   @Get(':id/code-decisions/draft')
-  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
-  @ApiOperation({ summary: "Current user's in-progress Review & Edit draft for this chart (draft: null when none)." })
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
+  @ApiOperation({
+    summary:
+      "In-progress Review & Edit draft for this chart (draft: null when none). Defaults to the current user's own draft; a Team Lead / Manager may pass ?userId= to watch a specific coder's live draft (QA Live mode).",
+  })
   getCodeDecisionDraft(
     @Param('id', ParseIntPipe) id: number,
+    @Query('userId') userId: string | undefined,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.svc.getCodeDecisionDraft(id, user);
+    return this.svc.getCodeDecisionDraft(id, user, userId ? Number(userId) : undefined);
   }
 
   @Put(':id/code-decisions/draft')
