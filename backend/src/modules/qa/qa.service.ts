@@ -39,6 +39,7 @@ export class QaService {
     if (f.clientId)        { where.push(`${wAlias}.client_id = :clientId`); params.clientId = Number(f.clientId); }
     if (f.locationId)      { where.push(`${wAlias}.location_id = :locationId`); params.locationId = Number(f.locationId); }
     if (f.specialityId)    { where.push(`${wAlias}.primary_speciality_id = :specialityId`); params.specialityId = Number(f.specialityId); }
+    if (f.subSpecialityId) { where.push(`${wAlias}.sub_speciality_id = :subSpecialityId`); params.subSpecialityId = Number(f.subSpecialityId); }
     if (f.worklistId)      { where.push(`${wAlias}.id = :worklistId`); params.worklistId = Number(f.worklistId); }
     if (f.coderId)         { where.push(`${cAlias}.allocated_coder_id = :coderId`); params.coderId = Number(f.coderId); }
     if (f.auditorId)       { where.push(`${cAlias}.allocated_auditor_id = :auditorId`); params.auditorId = Number(f.auditorId); }

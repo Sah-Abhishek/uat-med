@@ -6,6 +6,8 @@ export interface QaFilters {
   clientId?: number;
   locationId?: number;
   specialityId?: number;
+  /** Sub-speciality id (worklist.sub_speciality_id). Location-scoped. */
+  subSpecialityId?: number;
   coderId?: number;
   auditorId?: number;
   worklistId?: number;

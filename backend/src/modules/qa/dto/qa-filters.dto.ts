@@ -6,6 +6,7 @@ export class QaFiltersDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() clientId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() locationId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() specialityId?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() subSpecialityId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() coderId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() auditorId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() worklistId?: number;

@@ -35,6 +35,7 @@ import {
   listClients,
   listLocations,
   listPrimarySpecialities,
+  listSubSpecialities,
 } from '@/api/configurations';
 import {
   getQaAccuracy,
@@ -65,7 +66,10 @@ const CODE_TYPE_LABEL: Record<CodeReviewType, string> = {
 /** Page-local filters. Client / Location are NOT here — they come from the
  * global header scope (useScope), so the header filters AI Analytics in lockstep
  * with Charts / Worklists / Dashboard. */
-type AnalyticsFilters = Pick<QaFilters, 'specialityId' | 'facility' | 'from' | 'to'>;
+type AnalyticsFilters = Pick<
+  QaFilters,
+  'specialityId' | 'subSpecialityId' | 'facility' | 'from' | 'to'
+>;
 
 export function AiAnalyticsPage() {
   const [filters, setFilters] = useState<AnalyticsFilters>({});
@@ -79,10 +83,14 @@ export function AiAnalyticsPage() {
   const setClient = useScope((s) => s.setClient);
   const setLocation = useScope((s) => s.setLocation);
 
-  // A facility chosen under one client/location is meaningless under another —
-  // clear it whenever the scope changes.
+  // A facility or sub-speciality chosen under one client/location is meaningless
+  // under another (both are location-scoped) — clear them whenever scope changes.
   useEffect(() => {
-    setFilters((f) => (f.facility ? { ...f, facility: undefined } : f));
+    setFilters((f) =>
+      f.facility || f.subSpecialityId
+        ? { ...f, facility: undefined, subSpecialityId: undefined }
+        : f,
+    );
   }, [scopeClientId, scopeLocationId]);
 
   const scopedFilters: QaFilters = useMemo(
@@ -290,16 +298,25 @@ function FilterBar({
     queryKey: ['qa', 'facilities', clientId, locationId],
     queryFn: () => listQaFacilities({ clientId: clientId ?? undefined, locationId: locationId ?? undefined }),
   });
+  // Sub-specialities belong to a location, so the list only loads once a
+  // location is in scope (mirrors how Charts / Worklists gate it).
+  const subSpecialitiesQ = useQuery({
+    queryKey: ['configurations', 'sub-specialities', locationId],
+    queryFn: () => listSubSpecialities(locationId!),
+    enabled: locationId != null,
+  });
 
   // The Reset button only clears the page-local filters; the global Client /
   // Location scope is left alone (it's shared with the rest of the app).
   const hasAny =
     !!filters.specialityId ||
+    !!filters.subSpecialityId ||
     !!filters.facility ||
     !!filters.from ||
     !!filters.to;
 
   const facilityOptions = facilitiesQ.data?.items ?? [];
+  const subSpecialityOptions = subSpecialitiesQ.data?.items ?? [];
 
   return (
     <div className="rounded-xl border border-line bg-surface-sunken/30 p-4">
@@ -312,14 +329,14 @@ function FilterBar({
           />
         </div>
 
-        <div className="md:col-span-2">
+        <div className="md:col-span-3">
           <FancySelect
             value={clientId ? String(clientId) : ''}
             onChange={(v) => {
               // Changing the client resets the location scope + the facility.
               onClientChange(v ? Number(v) : null);
               onLocationChange(null);
-              onChange({ facility: undefined });
+              onChange({ facility: undefined, subSpecialityId: undefined });
             }}
             options={[
               { value: '', label: 'All clients' },
@@ -329,12 +346,12 @@ function FilterBar({
           />
         </div>
 
-        <div className="md:col-span-2">
+        <div className="md:col-span-3">
           <FancySelect
             value={locationId ? String(locationId) : ''}
             onChange={(v) => {
               onLocationChange(v ? Number(v) : null);
-              onChange({ facility: undefined });
+              onChange({ facility: undefined, subSpecialityId: undefined });
             }}
             options={[
               { value: '', label: 'All locations' },
@@ -345,7 +362,7 @@ function FilterBar({
           />
         </div>
 
-        <div className="md:col-span-2">
+        <div className="md:col-span-3">
           <FancySelect
             value={filters.facility ?? ''}
             onChange={(v) => onChange({ facility: v || undefined })}
@@ -358,7 +375,7 @@ function FilterBar({
           />
         </div>
 
-        <div className="md:col-span-2">
+        <div className="md:col-span-3">
           <FancySelect
             value={filters.specialityId ? String(filters.specialityId) : ''}
             onChange={(v) => onChange({ specialityId: v ? Number(v) : undefined })}
@@ -370,7 +387,20 @@ function FilterBar({
           />
         </div>
 
-        <div className="md:col-span-1 flex justify-end">
+        <div className="md:col-span-3">
+          <FancySelect
+            value={filters.subSpecialityId ? String(filters.subSpecialityId) : ''}
+            onChange={(v) => onChange({ subSpecialityId: v ? Number(v) : undefined })}
+            options={[
+              { value: '', label: 'All sub-specialities' },
+              ...subSpecialityOptions.map((s) => ({ value: String(s.id), label: s.name })),
+            ]}
+            placeholder="All sub-specialities"
+            disabled={locationId == null || subSpecialityOptions.length === 0}
+          />
+        </div>
+
+        <div className="md:col-span-6 flex justify-end">
           <Button
             type="button"
             variant="ghost"
