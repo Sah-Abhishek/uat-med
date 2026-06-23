@@ -1886,11 +1886,35 @@ function DecisionCard({
   const [draftDropdown, setDraftDropdown] = useState(st.reasonDropdown);
   const [draftNotes, setDraftNotes] = useState(st.rejectReason);
 
+  // Mirror of AddCodeModal: tracks whether the description currently shown was
+  // machine-filled (from a picked suggestion / exact-code match) rather than
+  // the coder's own wording. Starts false in edit mode because the seeded
+  // description is the real existing one — so a same-code exact match never
+  // clobbers it. Picking a new code from the dropdown flips it true again.
+  const descAutoFilledRef = useRef(false);
+  const descRef = useRef(draftDesc);
+  useEffect(() => {
+    descRef.current = draftDesc;
+  }, [draftDesc]);
+
+  // Stable identity (empty deps) so the autocomplete's exact-match effect isn't
+  // re-subscribed every render. Auto-fills the description only when it's empty
+  // or was itself auto-filled — never over the coder's manual wording.
+  const applyAutoDescription = useCallback((_code: string, desc: string) => {
+    if (!desc) return;
+    if (descRef.current.trim() === '' || descAutoFilledRef.current) {
+      setDraftDesc(desc);
+      descAutoFilledRef.current = true;
+    }
+  }, []);
+
   const enter = (m: 'accept' | 'reject' | 'edit') => {
     setDraftCode(st.editedCode);
     setDraftDesc(st.editedDescription);
     setDraftDropdown(st.reasonDropdown);
     setDraftNotes(st.rejectReason);
+    // Re-seeded description is the existing one, not auto-filled.
+    descAutoFilledRef.current = false;
     setMode(m);
   };
 
@@ -1975,10 +1999,23 @@ function DecisionCard({
               <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
                 Code
               </label>
-              <Input
+              <IcdCodeAutocomplete
                 value={draftCode}
-                onChange={(e) => setDraftCode(e.target.value)}
-                className="font-mono"
+                onChange={setDraftCode}
+                onPick={(picked, desc) => {
+                  setDraftCode(picked);
+                  // Auto-fill the description from the reference data; the coder
+                  // can still edit it before saving.
+                  setDraftDesc(desc);
+                  descAutoFilledRef.current = true;
+                }}
+                // Auto-fill the description as soon as a full, valid code is
+                // typed — not only when picked from the dropdown.
+                onExactMatch={applyAutoDescription}
+                // CPT/Procedure codes aren't in the ICD-10-CM reference DB.
+                enabled={item.category !== 'PROCEDURE'}
+                placeholder={item.category === 'PROCEDURE' ? 'e.g. 99213' : 'e.g. E11.9'}
+                autoFocus
               />
             </div>
             <div>
@@ -1987,7 +2024,11 @@ function DecisionCard({
               </label>
               <Input
                 value={draftDesc}
-                onChange={(e) => setDraftDesc(e.target.value)}
+                onChange={(e) => {
+                  setDraftDesc(e.target.value);
+                  // The coder is writing their own wording — stop auto-filling.
+                  descAutoFilledRef.current = false;
+                }}
               />
             </div>
           </div>

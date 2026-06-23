@@ -5,14 +5,17 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Eye,
   PanelRightClose,
   PanelRightOpen,
   Save,
+  UserPlus,
 } from 'lucide-react';
 import {
   getChart,
   listCodeDecisions,
   getCodeDecisionDraft,
+  selfAllocateCharts,
   updateChart,
   getActiveTimer,
   type CodeDecisionRecord,
@@ -26,7 +29,7 @@ import { AUDIT_ROWS } from './chart-detail/shared';
 import type { AiEncounterResult, Chart, ChartStatus, Priority, UploadedDocument } from '@/api/types';
 import { useAuth } from '@/auth/store';
 import { Button } from '@/components/ui/Button';
-import { Toast } from '@/components/ui/Primitives';
+import { ConfirmModal, Toast } from '@/components/ui/Primitives';
 import { IcdBotWidget } from '@/components/IcdBotWidget';
 import { HeaderCard } from './chart-detail/HeaderCard';
 import { UploadSection } from './chart-detail/UploadSection';
@@ -176,7 +179,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   // QA mode: opened from the Team Lead's QA dashboard via `?qa=1`. Renders
   // every section in read-only — no save, no review-submit, no field edits.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const qaReadOnly = searchParams.get('qa') === '1';
 
   // Single source of truth for AI artifacts: the chart's customFields. Keeping
@@ -333,6 +336,43 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   });
   const timerRunning = activeTimer.data?.chartId === chart.id;
   const timerStopped = !timerRunning;
+
+  // QA takeover: a viewer (Team Lead / Coder / Auditor — not Manager, who can't
+  // self-allocate) looking at a chart in read-only QA view that isn't theirs can
+  // self-allocate to take it over. Doing so assigns it to them, drops ?qa=1 so
+  // the page leaves read-only QA and reopens in editing mode.
+  const allocatedToMe =
+    !!user &&
+    (String(chart.allocatedCoderId ?? '') === user.id ||
+      String(chart.allocatedAuditorId ?? '') === user.id);
+  const canTakeOver = qaReadOnly && canTime && !allocatedToMe;
+  const [takeoverOpen, setTakeoverOpen] = useState(false);
+  const [takeoverError, setTakeoverError] = useState<string | null>(null);
+  const takeoverMut = useMutation({
+    mutationFn: () => selfAllocateCharts([Number(chart.id)]),
+    onSuccess: (res) => {
+      setTakeoverOpen(false);
+      if (res.allocated > 0) {
+        setTakeoverError(null);
+        // Leave QA view: drop ?qa=1 so the page reopens in normal editable mode,
+        // now that the chart is allocated to this user.
+        const next = new URLSearchParams(searchParams);
+        next.delete('qa');
+        setSearchParams(next, { replace: true });
+        // Refetch so allocation (and any milestone change) reflect the takeover.
+        qc.invalidateQueries({ queryKey: ['chart', String(chart.id)] });
+        qc.invalidateQueries({ queryKey: ['charts'] });
+        qc.invalidateQueries({ queryKey: ['active-timer'] });
+      } else {
+        // Skipped — e.g. someone else is already actively working on it.
+        setTakeoverError(res.skipped?.[0]?.reason ?? 'Could not allocate this chart.');
+      }
+    },
+    onError: (err) => {
+      setTakeoverOpen(false);
+      setTakeoverError((err as { message?: string })?.message ?? 'Could not allocate this chart.');
+    },
+  });
   // Team leads can audit in addition to coding; only block the audit section
   // when the viewer is neither role and the timer is off.
   const auditDisabled = !(isAuditor || isTeamLead) || !timerRunning;
@@ -603,7 +643,38 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
 
       {/* LEFT — main content */}
       <div className="space-y-5 min-w-0">
-        <HeaderCard chart={chart} canStop={!isDirty} />
+        <HeaderCard chart={chart} canStop={!isDirty} qaReadOnly={qaReadOnly} />
+
+        {/* QA takeover: this chart isn't yours and you're viewing it read-only.
+            Self-allocate to assign it to yourself, leave QA view and edit it. */}
+        {canTakeOver && (
+          <div className="rounded-lg border border-warn/40 bg-warn-soft/40 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="flex items-start gap-2 min-w-0">
+              <Eye className="w-4 h-4 text-warn mt-0.5 shrink-0" />
+              <p className="text-xs text-ink-muted leading-snug">
+                You're viewing this chart in read-only QA mode. Self-allocate to assign it to
+                yourself, exit QA view, and start working on it.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              leftIcon={<UserPlus className="w-3.5 h-3.5" />}
+              loading={takeoverMut.isPending}
+              onClick={() => {
+                setTakeoverError(null);
+                setTakeoverOpen(true);
+              }}
+              className="shrink-0"
+            >
+              Self-allocate to work on this
+            </Button>
+          </div>
+        )}
+        {qaReadOnly && takeoverError && (
+          <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-2 text-xs text-danger">
+            {takeoverError}
+          </div>
+        )}
 
         <UploadSection
           chartId={chart.id}
@@ -763,6 +834,17 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         locationId={worklistQ.data?.locationId}
         readOnly={qaReadOnly}
         onSubmitted={() => setSaveToastOpen(true)}
+      />
+
+      <ConfirmModal
+        open={takeoverOpen}
+        onClose={() => setTakeoverOpen(false)}
+        onConfirm={() => takeoverMut.mutate()}
+        message="This chart isn't allocated to you. Self-allocating assigns it to you, closes the read-only QA view, and reopens it in editing mode so you can start the timer and work on it."
+        confirmLabel="Self-allocate & open"
+        cancelLabel="Cancel"
+        variant="primary"
+        loading={takeoverMut.isPending}
       />
 
       <Toast

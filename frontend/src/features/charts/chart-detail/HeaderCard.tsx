@@ -37,9 +37,13 @@ interface HeaderCardProps {
   chart: Chart;
   /** When false, the Stop button is gated until the user saves. Defaults to true. */
   canStop?: boolean;
+  /** QA read-only view (?qa=1). Renders the timer panel non-interactive — the
+   * page's QA banner is where a viewer self-allocates to take the chart over,
+   * so we suppress the timer's own (QA-unaware) self-allocate prompt here. */
+  qaReadOnly?: boolean;
 }
 
-export function HeaderCard({ chart, canStop = true }: HeaderCardProps) {
+export function HeaderCard({ chart, canStop = true, qaReadOnly = false }: HeaderCardProps) {
   // Cache shared with useFieldConfig — same query key, dedupes the network call.
   const { data: worklist } = useQuery({
     queryKey: ['worklist', chart.worklistId],
@@ -113,7 +117,7 @@ export function HeaderCard({ chart, canStop = true }: HeaderCardProps) {
         </div>
       </div>
 
-      <TimerPanel chart={chart} canStop={canStop} />
+      <TimerPanel chart={chart} canStop={canStop} qaReadOnly={qaReadOnly} />
     </div>
   );
 }
@@ -165,7 +169,7 @@ function EncounterId({ encounterId }: { encounterId: string }) {
   );
 }
 
-function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
+function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boolean; qaReadOnly: boolean }) {
   const qc = useQueryClient();
   const user = useAuth((s) => s.user);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -308,6 +312,25 @@ function TimerPanel({ chart, canStop }: { chart: Chart; canStop: boolean }) {
   const restoringTimer =
     !!active.data && active.data.chartId === chart.id && !running;
   const isResolving = canTime && (active.isPending || restoringTimer);
+
+  // QA read-only view: the timer isn't usable here (you're reviewing someone
+  // else's submitted work). Render a non-interactive readout and point at the
+  // page's QA banner, which is where a viewer self-allocates to take over.
+  if (qaReadOnly) {
+    return (
+      <div className="rounded-card border border-line bg-gradient-to-br from-primary-soft/40 to-warn-soft/40 p-5 min-w-[260px]">
+        <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-2">
+          Timer
+        </p>
+        <p className="text-3xl font-bold font-mono tabular-nums text-ink-subtle mb-1">
+          {formatTime(Math.floor((chart.coderTimeMs ?? 0) / 1000))}
+        </p>
+        <p className="text-[11px] text-ink-subtle leading-snug">
+          Read-only QA view — self-allocate this chart to work on it.
+        </p>
+      </div>
+    );
+  }
 
   // Not allocated to this user → no timer. Show a self-allocate prompt instead
   // (this is what an admin sees when opening a chart they haven't taken).
