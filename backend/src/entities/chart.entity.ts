@@ -51,7 +51,7 @@ export class Chart {
   @Column({ name: 'primary_diagnosis', type: 'varchar', length: 16, nullable: true }) primaryDiagnosis?: string;
   @Column({ name: 'secondary_diagnoses', type: 'jsonb', nullable: true }) secondaryDiagnoses?: string[];
   @Column({ type: 'jsonb', nullable: true }) procedures?: Array<{ code: string; modifier?: string }>;
-  @Column({ name: 'em_level', type: 'varchar', length: 8, nullable: true }) emLevel?: string;
+  @Column({ name: 'em_level', type: 'text', nullable: true }) emLevel?: string;
   @Column({ name: 'drg_value', type: 'numeric', precision: 12, scale: 2, nullable: true }) drgValue?: number;
 
   // Service line chosen at document upload (global lookup). Nullable: it's an

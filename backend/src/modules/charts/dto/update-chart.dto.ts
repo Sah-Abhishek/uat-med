@@ -44,7 +44,7 @@ export class UpdateChartDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(16) primaryDiagnosis?: string;
   @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() secondaryDiagnoses?: string[];
   @ApiPropertyOptional({ type: [ProcedureDto] }) @IsOptional() @IsArray() procedures?: ProcedureDto[];
-  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(8) emLevel?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() emLevel?: string;
 
   @ApiPropertyOptional({ description: 'DRG value — persisted as numeric(12,2).' })
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) drgValue?: number;
