@@ -45,6 +45,11 @@ export function LiveTab() {
     queryKey: ['qa', 'live'],
     queryFn: getQaLive,
     refetchInterval: POLL_MS,
+    // Keep polling even when the QA window isn't focused (e.g. watching on a
+    // second monitor next to the coder's window) — otherwise the interval
+    // pauses, decisions don't stream in, and no toasts fire until a manual
+    // refresh re-runs the query.
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
   });
 
