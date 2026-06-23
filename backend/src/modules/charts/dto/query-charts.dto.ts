@@ -57,6 +57,10 @@ export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() clientId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() locationId?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() chartNo?: string;
+  /** AI encounter id (stored on custom_fields.aiPrediction.encounterId). Matched
+   * with a case-insensitive partial ILIKE so a fragment of the UUID still finds
+   * the chart. */
+  @ApiPropertyOptional() @IsOptional() @IsString() encounterId?: string;
   @ApiPropertyOptional({ enum: ChartStatus, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(ChartStatus, { each: true }) chartStatus?: ChartStatus[];
   @ApiPropertyOptional({ enum: ChartMilestone, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(ChartMilestone, { each: true }) milestone?: ChartMilestone[];
   @ApiPropertyOptional({ enum: AiStatusFilter, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(AiStatusFilter, { each: true }) aiStatus?: AiStatusFilter[];

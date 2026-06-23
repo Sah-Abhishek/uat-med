@@ -700,12 +700,22 @@ export function ChartsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 px-6 py-4 border-b border-line">
-          <div className="flex-1 max-w-sm">
+          <div className="flex-1 min-w-[180px] max-w-xs">
             <SearchInput
               placeholder="Search chart #..."
               value={filters.chartNo ?? ''}
               onChange={(e) => {
                 setFilters({ ...filters, chartNo: e.target.value || undefined });
+                setPage(1);
+              }}
+            />
+          </div>
+          <div className="flex-1 min-w-[180px] max-w-xs">
+            <SearchInput
+              placeholder="Search encounter ID..."
+              value={filters.encounterId ?? ''}
+              onChange={(e) => {
+                setFilters({ ...filters, encounterId: e.target.value || undefined });
                 setPage(1);
               }}
             />
@@ -994,6 +1004,10 @@ function FilterModal({
           <div>
             <Label>Chart #</Label>
             <Input {...register('chartNo')} />
+          </div>
+          <div>
+            <Label>Encounter ID</Label>
+            <Input {...register('encounterId')} />
           </div>
           <div>
             <Label>Serial from</Label>

@@ -20,7 +20,7 @@ function LiveCard({
 }: {
   draft: QaLiveDraft;
   workingMs: number;
-  onOpen: (chartId: number, userId: number) => void;
+  onOpen: (chartId: number, userId: number, name: string) => void;
 }) {
   const s = summarize(decodeDecisions(draft.payload));
   const name = draft.user.fullName ?? `User #${draft.user.id}`;
@@ -29,7 +29,7 @@ function LiveCard({
   return (
     <button
       type="button"
-      onClick={() => onOpen(draft.chartId, draft.user.id)}
+      onClick={() => onOpen(draft.chartId, draft.user.id, name)}
       title="Open the chart and review this coder's decisions"
       className="w-full text-left rounded-xl border border-line bg-surface p-4 transition hover:bg-surface-2/50 hover:border-primary/40"
     >
@@ -81,7 +81,7 @@ export function LiveCardList({
   drafts: QaLiveDraft[];
   now: number;
   skewMs: number;
-  onOpen: (chartId: number, userId: number) => void;
+  onOpen: (chartId: number, userId: number, name: string) => void;
 }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">

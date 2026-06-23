@@ -38,6 +38,7 @@ import { ProcessingInfoSection } from './chart-detail/ProcessingInfoSection';
 import { AuditInfoSection } from './chart-detail/AuditInfoSection';
 import { DocumentViewerModal } from './chart-detail/DocumentViewerModal';
 import { ReviewEditModal } from './chart-detail/ReviewEditModal';
+import { ChartLiveDecisionToasts } from '../qa/live/ChartLiveDecisionToasts';
 import { useFormDraft, useAuditDraft, useCustomFieldValues, EMPTY_FORM_DRAFT, type FormDraft } from './chart-detail/formState';
 import { useFieldConfig, STANDARD_FIELD_MAP, isFieldDisabledByStatus } from './chart-detail/useFieldConfig';
 import { ChartDetailSkeleton } from './chart-detail/ChartDetailSkeleton';
@@ -186,6 +187,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   const liveDraftRaw = qaReadOnly ? searchParams.get('liveUserId') : null;
   const liveDraftUserId =
     liveDraftRaw && Number.isFinite(Number(liveDraftRaw)) ? Number(liveDraftRaw) : undefined;
+  // Coder/auditor name carried over from the Live tab for the decision toasts.
+  const liveName = searchParams.get('liveName') || 'Coder';
   const [reviewOpen, setReviewOpen] = useState(() => liveDraftUserId != null);
 
   // Single source of truth for AI artifacts: the chart's customFields. Keeping
@@ -842,6 +845,17 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         liveDraftUserId={liveDraftUserId}
         onSubmitted={() => setSaveToastOpen(true)}
       />
+
+      {/* QA Live: while watching a coder's chart, pop a toast for each new
+          decision they make on THIS chart. */}
+      {qaReadOnly && liveDraftUserId != null && (
+        <ChartLiveDecisionToasts
+          chartId={String(chart.id)}
+          coderUserId={liveDraftUserId}
+          coderName={liveName}
+          onSeeMore={() => setReviewOpen(true)}
+        />
+      )}
 
       <ConfirmModal
         open={takeoverOpen}

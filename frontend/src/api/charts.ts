@@ -36,6 +36,9 @@ export interface ChartListParams {
   clientId?: number;
   locationId?: number;
   chartNo?: string;
+  /** AI encounter id (matched against custom_fields.aiPrediction.encounterId on
+   * the server, partial + case-insensitive). */
+  encounterId?: string;
   chartStatus?: ChartStatus | ChartStatus[];
   milestone?: ChartMilestone | ChartMilestone[];
   /** AI-pipeline state, derived server-side from custom_fields. Use 'ERRORED'

@@ -172,6 +172,12 @@ export class ChartsService {
     if (q.serialFrom) qb.andWhere('c.serial_no >= :sf', { sf: q.serialFrom });
     if (q.serialTo) qb.andWhere('c.serial_no <= :st', { st: q.serialTo });
     if (q.chartNo) qb.andWhere('c.chart_no ILIKE :cn', { cn: `%${q.chartNo}%` });
+    // Encounter id lives on the JSONB custom_fields (aiPrediction.encounterId);
+    // match a fragment of it case-insensitively, same as the chart # search.
+    if (q.encounterId?.trim())
+      qb.andWhere(`c.custom_fields->'aiPrediction'->>'encounterId' ILIKE :eid`, {
+        eid: `%${q.encounterId.trim()}%`,
+      });
     if (q.chartStatus?.length) qb.andWhere('c.chart_status IN (:...cs)', { cs: q.chartStatus });
     if (q.milestone?.length) qb.andWhere('c.milestone IN (:...m)', { m: q.milestone });
     if (q.allocatedUserId?.length) qb.andWhere('(c.allocated_coder_id IN (:...au) OR c.allocated_auditor_id IN (:...au))', { au: q.allocatedUserId });
