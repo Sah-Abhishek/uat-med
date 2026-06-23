@@ -26,7 +26,7 @@ import { getWorklist } from '@/api/worklists';
 import { listUsers } from '@/api/users';
 import { getFeedbackCategories } from '@/api/configurations';
 import { AUDIT_ROWS } from './chart-detail/shared';
-import type { AiEncounterResult, Chart, ChartStatus, Priority, UploadedDocument } from '@/api/types';
+import type { AiEncounterResult, ApiErrorShape, Chart, ChartStatus, Priority, UploadedDocument } from '@/api/types';
 import { useAuth } from '@/auth/store';
 import { Button } from '@/components/ui/Button';
 import { ConfirmModal, Toast } from '@/components/ui/Primitives';
@@ -315,6 +315,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [saveToastOpen, setSaveToastOpen] = useState(false);
+  // Surfaces a server-side save failure (e.g. validation errors) to the user —
+  // without it the Save button would just stop spinning with no feedback.
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Track unsaved edits so we can block "Stop timer" until the user saves.
   const [isDirty, setIsDirty] = useState(false);
 
@@ -603,10 +606,17 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     },
     onSuccess: () => {
       setIsDirty(false);
+      setSaveError(null);
       setSaveToastOpen(true);
       qc.invalidateQueries({ queryKey: ['chart', chart.id] });
       qc.invalidateQueries({ queryKey: ['charts'] });
       qc.invalidateQueries({ queryKey: ['active-timer'] });
+    },
+    // Surface the server's error message (validation, conflicts, etc.) instead
+    // of swallowing it — the client interceptor normalises every failure to an
+    // ApiErrorShape with a human-readable `message`.
+    onError: (err) => {
+      setSaveError((err as unknown as ApiErrorShape)?.message ?? 'Failed to save chart. Please try again.');
     },
   });
 
@@ -873,6 +883,13 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         message="Successfully saved"
         variant="success"
         onClose={() => setSaveToastOpen(false)}
+      />
+
+      <Toast
+        open={!!saveError}
+        message={saveError ?? ''}
+        variant="danger"
+        onClose={() => setSaveError(null)}
       />
 
       <IcdBotWidget />
