@@ -442,15 +442,47 @@ export function ReviewEditModal({
       })
       .filter((v): v is CodeItem => v !== null);
 
+    // Attach each previously-submitted decision to an AI item. The persisted
+    // decisions are the source of truth for a code's category, so the board must
+    // reconstruct category MOVES from them — not just verdicts. A code the coder
+    // moved to another category was saved under its NEW codeType, so matching
+    // purely on (codeType, code) against the AI item's ORIGINAL category would
+    // miss it and the move would be lost on reopen (the draft that used to carry
+    // the move is deleted on submit). So: collapse to the newest decision per
+    // code (a move can leave a stale row under the old category), then prefer the
+    // AI item already in that category (stayed put), else the same code under a
+    // different category (an in-place move) — recording the override. This
+    // mirrors the draft-restore move logic below, so submitted and drafted
+    // decisions resolve a code's category identically.
+    const latestByCode = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) {
+      if (r.decision === 'ADDED') continue;
+      const k = normalizeCode(r.codeValue);
+      const cur = latestByCode.get(k);
+      if (!cur || r.decidedAt >= cur.decidedAt) latestByCode.set(k, r);
+    }
+    const decisionByKey = new Map<string, (typeof rows)[number]>();
+    const moveOverrides: Record<string, Category> = {};
+    const claimed = new Set<string>();
+    for (const r of latestByCode.values()) {
+      const cat = codeTypeToCategory(r.codeType);
+      if (!cat) continue;
+      const target =
+        aiItems.find((it) => it.category === cat && it.code === r.codeValue && !claimed.has(it.key)) ??
+        aiItems.find(
+          (it) => normalizeCode(it.code) === normalizeCode(r.codeValue) && !claimed.has(it.key),
+        );
+      if (!target) continue;
+      claimed.add(target.key);
+      decisionByKey.set(target.key, r);
+      if (target.category !== cat) moveOverrides[target.key] = cat;
+    }
+
     setState((prev) => {
       const next = { ...prev };
-      // AI-predicted items: match by (codeType, codeValue) and stamp the verdict.
+      // AI-predicted items: stamp the verdict from the decision attached above.
       for (const it of aiItems) {
-        const codeType = categoryToCodeType(it.category);
-        if (!codeType) continue;
-        const match = rows.find(
-          (r) => r.decision !== 'ADDED' && r.codeType === codeType && r.codeValue === it.code,
-        );
+        const match = decisionByKey.get(it.key);
         if (!match) continue;
         next[it.key] = {
           decision: verdictToDecision(match.decision),
@@ -477,6 +509,11 @@ export function ReviewEditModal({
       }
       return next;
     });
+    // Re-apply category moves reconstructed above. Merged (not replaced) so a
+    // move the user makes between this hydration and the commit isn't clobbered.
+    if (Object.keys(moveOverrides).length > 0) {
+      setCategoryOverrides((prev) => ({ ...prev, ...moveOverrides }));
+    }
     setAddedItems((prev) => (prev.length > 0 ? prev : seededAdds));
   }, [open, decisionsQ.data, aiItems]);
 

@@ -1627,6 +1627,26 @@ async update(id: number, dto: UpdateChartDto) {
           rows.push(created);
         }
       }
+      // Drop stale "moved-from" rows. Changing a code's category saves it under
+      // a NEW code_type, leaving the old (code_type, code) row behind — a phantom
+      // decision under the category the coder moved it OUT of. Now that this
+      // submission is written, delete any other row for the SAME codes whose
+      // code_type wasn't part of this submission, so each code carries exactly
+      // the decisions the coder just made and the table stays the single source
+      // of truth. (A code legitimately submitted under two categories keeps both,
+      // since both keys are present; codes absent from this submission are left
+      // untouched.)
+      const submittedValues = [...new Set(dto.decisions.map((d) => d.codeValue))];
+      if (submittedValues.length) {
+        const keepKeys = new Set(dto.decisions.map((d) => `${d.codeType}|${d.codeValue}`));
+        const existingForCodes = await decisionsRepo.find({
+          where: { chartId, codeValue: In(submittedValues) },
+        });
+        const staleIds = existingForCodes
+          .filter((row) => !keepKeys.has(`${row.codeType}|${row.codeValue}`))
+          .map((row) => row.id);
+        if (staleIds.length) await decisionsRepo.delete(staleIds);
+      }
       // The submit supersedes any autosaved working state — clear the
       // submitter's draft in the same transaction so a refresh right after
       // submit can't resurrect stale pre-submit decisions.
