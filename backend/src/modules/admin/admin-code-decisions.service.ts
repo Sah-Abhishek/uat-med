@@ -352,7 +352,90 @@ export class AdminCodeDecisionsService {
       });
     }
 
+    // ── Sheet 2: "Decision details" — one row per individual decision behind
+    // the charts above, carrying the exact verdict plus the rejection / edit
+    // reasons and edited values the coder actually entered. The summary sheet
+    // only has per-chart counts, so this is where a reviewer sees *why* a code
+    // was rejected or *what* an edit changed.
+    const detail = await this.decisionsForCharts(rows.map((r) => r.chartId));
+    const ds = wb.addWorksheet('Decision details', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    });
+    const wrap = { alignment: { wrapText: true, vertical: 'top' as const } };
+    ds.columns = [
+      { header: 'Chart', key: 'chartNo', width: 18 },
+      { header: 'Code type', key: 'codeType', width: 12 },
+      { header: 'Code', key: 'codeValue', width: 14 },
+      { header: 'Decision', key: 'decision', width: 12 },
+      { header: 'Edited code', key: 'editedCode', width: 14 },
+      { header: 'Original description', key: 'originalDescription', width: 42, style: wrap },
+      { header: 'Edited description', key: 'editedDescription', width: 42, style: wrap },
+      { header: 'Reason (category)', key: 'reasonDropdown', width: 28, style: wrap },
+      { header: 'Reason (detail)', key: 'reasonText', width: 50, style: wrap },
+      { header: 'Reviewer', key: 'decidedByName', width: 24 },
+      { header: 'Synced', key: 'synced', width: 9 },
+      { header: 'Date of coding', key: 'decidedAt', width: 20, style: { numFmt: 'yyyy-mm-dd hh:mm' } },
+    ];
+    const dHeader = ds.getRow(1);
+    dHeader.font = { bold: true };
+    dHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
+    dHeader.alignment = { vertical: 'middle' };
+
+    for (const r of detail) {
+      ds.addRow({
+        chartNo: r.chartNo ?? null,
+        codeType: r.codeType ?? null,
+        codeValue: r.codeValue ?? null,
+        decision: r.decision ?? null,
+        editedCode: r.editedCode ?? null,
+        originalDescription: r.originalDescription ?? null,
+        editedDescription: r.editedDescription ?? null,
+        reasonDropdown: r.reasonDropdown ?? null,
+        reasonText: r.reasonText ?? null,
+        decidedByName: r.decidedByName ?? r.decidedByEmail ?? null,
+        synced: r.gatewayCorrectionId || r.gatewaySyncedAt ? 'Yes' : 'No',
+        decidedAt: r.decidedAt ? new Date(r.decidedAt) : null,
+      });
+    }
+
     return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
+  }
+
+  /**
+   * Flat per-decision rows for the export's "Decision details" sheet — every
+   * decision on the given charts, joined with the deciding user, including the
+   * reason + edited-value fields the summary aggregates away. Ordered by chart
+   * then time so a chart's decisions read top-to-bottom; capped like the
+   * summary so a huge filter can't pull an unbounded result set.
+   */
+  private async decisionsForCharts(chartIds: number[]) {
+    if (!chartIds.length) return [] as any[];
+    return this.decisions
+      .createQueryBuilder('d')
+      .leftJoin(Chart, 'c', 'c.id = d.chart_id')
+      .leftJoin(User, 'u', 'u.id = d.decided_by_user_id')
+      .select([
+        'c.chart_no AS "chartNo"',
+        'd.code_type AS "codeType"',
+        'd.code_value AS "codeValue"',
+        'd.decision AS decision',
+        'd.edited_code AS "editedCode"',
+        'd.original_description AS "originalDescription"',
+        'd.edited_description AS "editedDescription"',
+        'd.reason_dropdown AS "reasonDropdown"',
+        'd.reason_text AS "reasonText"',
+        'u.full_name AS "decidedByName"',
+        'u.email AS "decidedByEmail"',
+        'd.gateway_correction_id AS "gatewayCorrectionId"',
+        'd.gateway_synced_at AS "gatewaySyncedAt"',
+        'd.decided_at AS "decidedAt"',
+      ])
+      .where('d.chart_id IN (:...chartIds)', { chartIds })
+      .orderBy('c.chart_no', 'ASC')
+      .addOrderBy('d.code_type', 'ASC')
+      .addOrderBy('d.decided_at', 'ASC')
+      .limit(EXPORT_ROW_LIMIT)
+      .getRawMany();
   }
 
   /**
