@@ -38,8 +38,8 @@ export class QaService {
 
     if (f.clientId)        { where.push(`${wAlias}.client_id = :clientId`); params.clientId = Number(f.clientId); }
     if (f.locationId)      { where.push(`${wAlias}.location_id = :locationId`); params.locationId = Number(f.locationId); }
-    if (f.specialityId)    { where.push(`${wAlias}.primary_speciality_id = :specialityId`); params.specialityId = Number(f.specialityId); }
-    if (f.subSpecialityId) { where.push(`${wAlias}.sub_speciality_id = :subSpecialityId`); params.subSpecialityId = Number(f.subSpecialityId); }
+    if (f.specialityId?.length)    { where.push(`${wAlias}.primary_speciality_id = ANY(:specialityIds)`); params.specialityIds = f.specialityId; }
+    if (f.subSpecialityId?.length) { where.push(`${wAlias}.sub_speciality_id = ANY(:subSpecialityIds)`); params.subSpecialityIds = f.subSpecialityId; }
     if (f.worklistId)      { where.push(`${wAlias}.id = :worklistId`); params.worklistId = Number(f.worklistId); }
     if (f.coderId)         { where.push(`${cAlias}.allocated_coder_id = :coderId`); params.coderId = Number(f.coderId); }
     if (f.auditorId)       { where.push(`${cAlias}.allocated_auditor_id = :auditorId`); params.auditorId = Number(f.auditorId); }
@@ -50,7 +50,7 @@ export class QaService {
         params.milestones = list;
       }
     }
-    if (f.facility)        { where.push(`${cAlias}.custom_fields->>'facility' = :facility`); params.facility = f.facility; }
+    if (f.facility?.length) { where.push(`${cAlias}.custom_fields->>'facility' = ANY(:facilities)`); params.facilities = f.facility; }
     if (f.from)            { where.push(`${alias}.decided_at >= :fromTs`); params.fromTs = `${f.from} 00:00:00`; }
     if (f.to)              { where.push(`${alias}.decided_at <= :toTs`); params.toTs = `${f.to} 23:59:59`; }
     if (f.q?.trim()) {

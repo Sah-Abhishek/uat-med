@@ -22,6 +22,7 @@ import {
   CheckCircle2,
   Clock,
   FileStack,
+  Filter,
   Loader2,
   Sparkles,
   TrendingUp,
@@ -30,10 +31,9 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { FancySelect, RangeDatePicker } from '@/components/ui/Field';
+import { FancyMultiSelect, Label, RangeDatePicker } from '@/components/ui/Field';
+import { Modal, ModalFooter } from '@/components/ui/Primitives';
 import {
-  listClients,
-  listLocations,
   listPrimarySpecialities,
   listSubSpecialities,
 } from '@/api/configurations';
@@ -71,27 +71,38 @@ type AnalyticsFilters = Pick<
   'specialityId' | 'subSpecialityId' | 'facility' | 'from' | 'to'
 >;
 
+/** True when a single-or-array filter value is actually set (non-empty). */
+function hasValue(v: unknown): boolean {
+  return Array.isArray(v) ? v.length > 0 : v != null && v !== '';
+}
+
 export function AiAnalyticsPage() {
   const [filters, setFilters] = useState<AnalyticsFilters>({});
-  const patch = (p: Partial<AnalyticsFilters>) => setFilters((f) => ({ ...f, ...p }));
   const reset = () => setFilters({});
+  const [filterOpen, setFilterOpen] = useState(false);
 
   // Client / Location come from the global header scope (same as Charts /
   // Worklists), so the header dropdowns filter this page.
   const scopeClientId = useScope((s) => s.clientId);
   const scopeLocationId = useScope((s) => s.locationId);
-  const setClient = useScope((s) => s.setClient);
-  const setLocation = useScope((s) => s.setLocation);
 
   // A facility or sub-speciality chosen under one client/location is meaningless
   // under another (both are location-scoped) — clear them whenever scope changes.
   useEffect(() => {
     setFilters((f) =>
-      f.facility || f.subSpecialityId
+      hasValue(f.facility) || hasValue(f.subSpecialityId)
         ? { ...f, facility: undefined, subSpecialityId: undefined }
         : f,
     );
   }, [scopeClientId, scopeLocationId]);
+
+  // Count of active page-local filters (the date range counts once) — drives
+  // the badge on the Filter button.
+  const activeFilterCount =
+    (filters.from || filters.to ? 1 : 0) +
+    (hasValue(filters.specialityId) ? 1 : 0) +
+    (hasValue(filters.subSpecialityId) ? 1 : 0) +
+    (hasValue(filters.facility) ? 1 : 0);
 
   const scopedFilters: QaFilters = useMemo(
     () => ({
@@ -132,16 +143,42 @@ export function AiAnalyticsPage() {
       <PageHeader
         title="AI Analytics"
         subtitle="How accurate the AI coding suggestions are — overall, by code type, and over time"
+        actions={
+          <>
+            <Button
+              variant="soft"
+              leftIcon={<Filter className="w-3.5 h-3.5" />}
+              onClick={() => setFilterOpen(true)}
+              className={cn(activeFilterCount > 0 && 'ring-1 ring-primary/50 text-primary')}
+            >
+              Filter
+              {activeFilterCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-white text-[11px] font-bold leading-none">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+            {activeFilterCount > 0 && (
+              <Button
+                variant="ghost"
+                leftIcon={<X className="w-3.5 h-3.5" />}
+                onClick={reset}
+                title="Clear all filters"
+              >
+                Clear filters
+              </Button>
+            )}
+          </>
+        }
       />
 
-      <FilterBar
-        filters={filters}
-        onChange={patch}
-        onReset={reset}
+      <FilterModal
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        value={filters}
+        onApply={setFilters}
         clientId={scopeClientId}
         locationId={scopeLocationId}
-        onClientChange={setClient}
-        onLocationChange={setLocation}
       />
 
       {q.isError && !data ? (
@@ -263,157 +300,147 @@ export function AiAnalyticsPage() {
   );
 }
 
-/* ── Filter bar ──────────────────────────────────────────── */
+/* ── Filter modal ────────────────────────────────────────── */
 
-function FilterBar({
-  filters,
-  onChange,
-  onReset,
+/** Normalise a single-or-array filter value to string[] for the multi-selects. */
+const toStrArr = (v: unknown): string[] =>
+  v === undefined || v === null || v === ''
+    ? []
+    : Array.isArray(v)
+    ? v.map(String)
+    : [String(v)];
+
+function FilterModal({
+  open,
+  onClose,
+  value,
+  onApply,
   clientId,
   locationId,
-  onClientChange,
-  onLocationChange,
 }: {
-  filters: AnalyticsFilters;
-  onChange: (p: Partial<AnalyticsFilters>) => void;
-  onReset: () => void;
-  // Client / Location are the global header scope, bound here so picking in
-  // either place stays in sync (mirrors the Worklists filter bar).
+  open: boolean;
+  onClose: () => void;
+  value: AnalyticsFilters;
+  onApply: (v: AnalyticsFilters) => void;
+  // Client / Location are the global header scope — they scope the option lists
+  // but aren't edited here (the header picker owns them, like on Charts).
   clientId: number | null;
   locationId: number | null;
-  onClientChange: (id: number | null) => void;
-  onLocationChange: (id: number | null) => void;
 }) {
-  const clientsQ = useQuery({ queryKey: ['configurations', 'clients'], queryFn: () => listClients() });
-  const locationsQ = useQuery({
-    queryKey: ['configurations', 'locations', clientId],
-    queryFn: () => listLocations(clientId!),
-    enabled: clientId != null,
-  });
+  // Draft filters — re-seeded from the applied value each time the modal opens,
+  // so closing without "Apply" discards any in-progress edits.
+  const [draft, setDraft] = useState<AnalyticsFilters>(value);
+  useEffect(() => {
+    if (open) setDraft(value);
+  }, [open, value]);
+  const patch = (p: Partial<AnalyticsFilters>) => setDraft((d) => ({ ...d, ...p }));
+
+  // Option sources — only fetched while the modal is open. Speciality is
+  // client-scoped; facilities + sub-specialities follow the global Client /
+  // Location scope from the header.
   const specialitiesQ = useQuery({
     queryKey: ['configurations', 'primary-specialities', clientId],
     queryFn: () => listPrimarySpecialities(clientId ?? undefined),
+    enabled: open,
   });
   const facilitiesQ = useQuery({
     queryKey: ['qa', 'facilities', clientId, locationId],
     queryFn: () => listQaFacilities({ clientId: clientId ?? undefined, locationId: locationId ?? undefined }),
+    enabled: open,
   });
   // Sub-specialities belong to a location, so the list only loads once a
   // location is in scope (mirrors how Charts / Worklists gate it).
   const subSpecialitiesQ = useQuery({
     queryKey: ['configurations', 'sub-specialities', locationId],
     queryFn: () => listSubSpecialities(locationId!),
-    enabled: locationId != null,
+    enabled: open && locationId != null,
   });
-
-  // The Reset button only clears the page-local filters; the global Client /
-  // Location scope is left alone (it's shared with the rest of the app).
-  const hasAny =
-    !!filters.specialityId ||
-    !!filters.subSpecialityId ||
-    !!filters.facility ||
-    !!filters.from ||
-    !!filters.to;
 
   const facilityOptions = facilitiesQ.data?.items ?? [];
   const subSpecialityOptions = subSpecialitiesQ.data?.items ?? [];
 
   return (
-    <div className="rounded-xl border border-line bg-surface-sunken/30 p-4">
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <div className="md:col-span-3">
-          <RangeDatePicker
-            value={{ from: filters.from ?? null, to: filters.to ?? null }}
-            onChange={(v) => onChange({ from: v.from ?? undefined, to: v.to ?? undefined })}
-            placeholder="Date range"
-          />
+    <Modal open={open} onClose={onClose} title="Filter AI Analytics" size="lg">
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
+            <Label>Date range</Label>
+            <RangeDatePicker
+              value={{ from: draft.from ?? null, to: draft.to ?? null }}
+              onChange={(v) => patch({ from: v.from ?? undefined, to: v.to ?? undefined })}
+              placeholder="Any dates"
+            />
+          </div>
+
+          <div>
+            <Label>Specialties</Label>
+            <FancyMultiSelect
+              searchable
+              searchPlaceholder="Search specialties…"
+              placeholder={specialitiesQ.isPending ? 'Loading…' : 'All specialties'}
+              value={toStrArr(draft.specialityId)}
+              onChange={(v) => patch({ specialityId: v.length ? v.map(Number) : undefined })}
+              options={(specialitiesQ.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name }))}
+            />
+          </div>
+
+          <div>
+            <Label>Sub-specialties</Label>
+            <FancyMultiSelect
+              searchable
+              searchPlaceholder="Search sub-specialties…"
+              placeholder={
+                locationId == null
+                  ? 'Pick a location first'
+                  : subSpecialitiesQ.isPending
+                  ? 'Loading…'
+                  : 'All sub-specialties'
+              }
+              disabled={locationId == null || subSpecialityOptions.length === 0}
+              value={toStrArr(draft.subSpecialityId)}
+              onChange={(v) => patch({ subSpecialityId: v.length ? v.map(Number) : undefined })}
+              options={subSpecialityOptions.map((s) => ({ value: String(s.id), label: s.name }))}
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <Label>Facilities</Label>
+            <FancyMultiSelect
+              searchable
+              searchPlaceholder="Search facilities…"
+              placeholder={facilityOptions.length === 0 ? 'No facilities in scope' : 'All facilities'}
+              disabled={facilityOptions.length === 0}
+              value={toStrArr(draft.facility)}
+              onChange={(v) => patch({ facility: v.length ? v : undefined })}
+              options={facilityOptions.map((f) => ({ value: f, label: f }))}
+            />
+          </div>
         </div>
 
-        <div className="md:col-span-3">
-          <FancySelect
-            value={clientId ? String(clientId) : ''}
-            onChange={(v) => {
-              // Changing the client resets the location scope + the facility.
-              onClientChange(v ? Number(v) : null);
-              onLocationChange(null);
-              onChange({ facility: undefined, subSpecialityId: undefined });
+        <ModalFooter>
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={() => {
+              setDraft({});
+              onApply({});
+              onClose();
             }}
-            options={[
-              { value: '', label: 'All clients' },
-              ...(clientsQ.data?.items ?? []).map((c) => ({ value: String(c.id), label: c.name })),
-            ]}
-            placeholder="All clients"
-          />
-        </div>
-
-        <div className="md:col-span-3">
-          <FancySelect
-            value={locationId ? String(locationId) : ''}
-            onChange={(v) => {
-              onLocationChange(v ? Number(v) : null);
-              onChange({ facility: undefined, subSpecialityId: undefined });
-            }}
-            options={[
-              { value: '', label: 'All locations' },
-              ...(locationsQ.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name })),
-            ]}
-            placeholder="All locations"
-            disabled={clientId == null}
-          />
-        </div>
-
-        <div className="md:col-span-3">
-          <FancySelect
-            value={filters.facility ?? ''}
-            onChange={(v) => onChange({ facility: v || undefined })}
-            options={[
-              { value: '', label: 'All facilities' },
-              ...facilityOptions.map((f) => ({ value: f, label: f })),
-            ]}
-            placeholder="All facilities"
-            disabled={facilityOptions.length === 0}
-          />
-        </div>
-
-        <div className="md:col-span-3">
-          <FancySelect
-            value={filters.specialityId ? String(filters.specialityId) : ''}
-            onChange={(v) => onChange({ specialityId: v ? Number(v) : undefined })}
-            options={[
-              { value: '', label: 'All specialties' },
-              ...(specialitiesQ.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name })),
-            ]}
-            placeholder="All specialties"
-          />
-        </div>
-
-        <div className="md:col-span-3">
-          <FancySelect
-            value={filters.subSpecialityId ? String(filters.subSpecialityId) : ''}
-            onChange={(v) => onChange({ subSpecialityId: v ? Number(v) : undefined })}
-            options={[
-              { value: '', label: 'All sub-specialities' },
-              ...subSpecialityOptions.map((s) => ({ value: String(s.id), label: s.name })),
-            ]}
-            placeholder="All sub-specialities"
-            disabled={locationId == null || subSpecialityOptions.length === 0}
-          />
-        </div>
-
-        <div className="md:col-span-6 flex justify-end">
+          >
+            Clear all
+          </Button>
           <Button
             type="button"
-            variant="ghost"
-            onClick={onReset}
-            disabled={!hasAny}
-            leftIcon={<X className="w-3 h-3" />}
-            title="Reset all filters"
+            onClick={() => {
+              onApply(draft);
+              onClose();
+            }}
           >
-            Reset
+            Apply filters
           </Button>
-        </div>
+        </ModalFooter>
       </div>
-    </div>
+    </Modal>
   );
 }
 

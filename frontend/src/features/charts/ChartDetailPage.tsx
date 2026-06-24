@@ -231,26 +231,45 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     if (decisions.length === 0 && draftDecisions.length === 0 && draftAdded.length === 0) {
       return aiPrediction; // nothing reviewed yet — show the raw prediction
     }
-    const recordByKey = new Map<string, CodeDecisionRecord>();
-    for (const d of decisions) recordByKey.set(`${d.codeType}|${d.codeValue}`, d);
-    const draftByKey = new Map<string, (typeof draftDecisions)[number]>();
-    for (const d of draftDecisions) draftByKey.set(`${d.category}|${d.code}`, d);
+    // Index decisions by CODE VALUE (not category|code). A coder can MOVE a
+    // code to a different category in Review & Edit; the decision then carries
+    // the code's new category, so a category|code lookup keyed off the AI's
+    // ORIGINAL bucket would miss it and the move would never show here. Matching
+    // on the code lets us re-bucket it under the category the coder chose —
+    // the same identity the modal itself uses to restore moves.
+    const norm = (s: string) => s.trim().toUpperCase();
+    const draftByCode = new Map<string, (typeof draftDecisions)[number]>();
+    for (const d of draftDecisions) draftByCode.set(norm(d.code), d);
+    // Prefer the most recently decided row when a code has more than one —
+    // moving a code to a new category leaves the old-category row behind, so a
+    // code can briefly have two submitted decisions.
+    const recordByCode = new Map<string, CodeDecisionRecord>();
+    for (const d of decisions) {
+      const k = norm(d.codeValue);
+      const cur = recordByCode.get(k);
+      if (!cur || d.decidedAt >= cur.decidedAt) recordByCode.set(k, d);
+    }
     const dedup = (arr: AnnotatedCode[]) => {
       const seen = new Set<string>();
       return arr.filter((c) => (seen.has(c.code) ? false : (seen.add(c.code), true)));
     };
-    // Annotate every AI code with what the coder did. A draft (not-yet-submitted)
-    // decision is the coder's current intent, so it wins over the last submitted
-    // record and is flagged notSubmitted.
-    const apply = (codes: AiPredictedCode[], codeType: string): AnnotatedCode[] => {
-      const out: AnnotatedCode[] = [];
-      for (const c of codes) {
-        const key = `${codeType}|${c.code}`;
-        const dr = draftByKey.get(key);
-        if (dr) {
-          if (dr.decision === 'rejected') out.push({ ...c, decisionState: 'rejected', notSubmitted: true });
-          else if (dr.decision === 'edited')
-            out.push({
+    // Annotate one AI code with what the coder did, and report the category it
+    // now belongs to (its move target, or its original bucket if untouched). A
+    // draft (not-yet-submitted) decision is the coder's current intent, so it
+    // wins over the last submitted record and is flagged notSubmitted.
+    const annotate = (
+      c: AiPredictedCode,
+      origType: string,
+    ): { type: string; code: AnnotatedCode } => {
+      const dr = draftByCode.get(norm(c.code));
+      if (dr) {
+        // dr.category is always a board bucket (PRIMARY/SECONDARY/PROCEDURE).
+        if (dr.decision === 'rejected')
+          return { type: dr.category, code: { ...c, decisionState: 'rejected', notSubmitted: true } };
+        if (dr.decision === 'edited')
+          return {
+            type: dr.category,
+            code: {
               ...c,
               code: dr.editedCode || c.code,
               description: dr.editedDescription || c.description,
@@ -258,28 +277,42 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
               originalCode: c.code,
               originalDescription: c.description,
               notSubmitted: true,
-            });
-          else out.push({ ...c, decisionState: 'accepted', notSubmitted: true });
-          continue;
-        }
-        const d = recordByKey.get(key);
-        if (!d) { out.push({ ...c, decisionState: 'untouched' }); continue; }
-        if (d.decision === 'REJECTED') { out.push({ ...c, decisionState: 'rejected' }); continue; }
-        if (d.decision === 'EDITED') {
-          out.push({
+            },
+          };
+        return { type: dr.category, code: { ...c, decisionState: 'accepted', notSubmitted: true } };
+      }
+      const d = recordByCode.get(norm(c.code));
+      if (!d) return { type: origType, code: { ...c, decisionState: 'untouched' } };
+      // Bucket by the moved-to category, but guard against a non-ICD codeType
+      // (EM_LEVEL/MODIFIER) so an AI code can never silently vanish from the card.
+      const t =
+        d.codeType === 'PRIMARY' || d.codeType === 'SECONDARY' || d.codeType === 'PROCEDURE'
+          ? d.codeType
+          : origType;
+      if (d.decision === 'REJECTED') return { type: t, code: { ...c, decisionState: 'rejected' } };
+      if (d.decision === 'EDITED')
+        return {
+          type: t,
+          code: {
             ...c,
             code: d.editedCode ?? c.code,
             description: d.editedDescription ?? c.description,
             decisionState: 'edited',
             originalCode: c.code,
             originalDescription: c.description,
-          });
-          continue;
-        }
-        out.push({ ...c, decisionState: 'accepted' }); // ACCEPTED
-      }
-      return out;
+          },
+        };
+      return { type: t, code: { ...c, decisionState: 'accepted' } }; // ACCEPTED
     };
+    // Annotate every AI code once, then bucket by its EFFECTIVE category so a
+    // moved code leaves its original section and appears under the new one.
+    const annotated = [
+      ...aiPrediction.primary.map((c) => annotate(c, 'PRIMARY')),
+      ...aiPrediction.secondary.map((c) => annotate(c, 'SECONDARY')),
+      ...aiPrediction.procedures.map((c) => annotate(c, 'PROCEDURE')),
+    ];
+    const aiFor = (codeType: string) =>
+      annotated.filter((a) => a.type === codeType).map((a) => a.code);
     // Coder-added codes (not in the AI prediction): draft-added (not submitted)
     // first, then submitted-added that a draft hasn't superseded.
     const addedFor = (codeType: string): AnnotatedCode[] => {
@@ -293,17 +326,14 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       for (const d of decisions) {
         if (d.decision !== 'ADDED' || d.codeType !== codeType) continue;
         const code = d.editedCode ?? d.codeValue;
-        if (seen.has(code) || draftByKey.has(`${codeType}|${code}`)) continue;
+        if (seen.has(code) || draftByCode.has(norm(code))) continue;
         out.push({ code, description: d.editedDescription ?? '', decisionState: 'added' });
       }
       return out;
     };
-    const primary = dedup([...apply(aiPrediction.primary, 'PRIMARY'), ...addedFor('PRIMARY')]);
-    const secondary = dedup([...apply(aiPrediction.secondary, 'SECONDARY'), ...addedFor('SECONDARY')]);
-    const procedures = dedup([
-      ...apply(aiPrediction.procedures, 'PROCEDURE'),
-      ...addedFor('PROCEDURE'),
-    ]);
+    const primary = dedup([...aiFor('PRIMARY'), ...addedFor('PRIMARY')]);
+    const secondary = dedup([...aiFor('SECONDARY'), ...addedFor('SECONDARY')]);
+    const procedures = dedup([...aiFor('PROCEDURE'), ...addedFor('PROCEDURE')]);
     return {
       ...aiPrediction,
       primary,

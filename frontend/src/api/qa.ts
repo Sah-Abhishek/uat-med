@@ -6,16 +6,17 @@ export type CodeReviewType = 'PRIMARY' | 'SECONDARY' | 'PROCEDURE' | 'EM_LEVEL' 
 export interface QaFilters {
   clientId?: number;
   locationId?: number;
-  specialityId?: number;
-  /** Sub-speciality id (worklist.sub_speciality_id). Location-scoped. */
-  subSpecialityId?: number;
+  /** One or more primary speciality ids — multi-select sends an array. */
+  specialityId?: number | number[];
+  /** Sub-speciality id(s) (worklist.sub_speciality_id). Location-scoped. */
+  subSpecialityId?: number | number[];
   coderId?: number;
   auditorId?: number;
   worklistId?: number;
   /** Comma-separated list of milestone enum values, e.g. "CODING_DONE,AUDIT_DONE". */
   milestone?: string;
-  /** Facility name (matches chart.customFields.facility). */
-  facility?: string;
+  /** Facility name(s) (matches chart.customFields.facility). Multi-select sends an array. */
+  facility?: string | string[];
   from?: string; // YYYY-MM-DD
   to?: string;   // YYYY-MM-DD
   q?: string;
