@@ -320,6 +320,7 @@ export class AdminCodeDecisionsService {
     });
 
     ws.columns = [
+      { header: 'Chart ID', key: 'chartId', width: 10, style: { numFmt: '0' } },
       { header: 'Chart', key: 'chartNo', width: 18 },
       { header: 'Client', key: 'clientName', width: 24 },
       { header: 'Location', key: 'locationName', width: 24 },
@@ -363,6 +364,7 @@ export class AdminCodeDecisionsService {
     });
     const wrap = { alignment: { wrapText: true, vertical: 'top' as const } };
     ds.columns = [
+      { header: 'Chart ID', key: 'chartId', width: 10, style: { numFmt: '0' } },
       { header: 'Chart', key: 'chartNo', width: 18 },
       { header: 'Code type', key: 'codeType', width: 12 },
       { header: 'Code', key: 'codeValue', width: 14 },
@@ -383,6 +385,7 @@ export class AdminCodeDecisionsService {
 
     for (const r of detail) {
       ds.addRow({
+        chartId: r.chartId != null ? Number(r.chartId) : null,
         chartNo: r.chartNo ?? null,
         codeType: r.codeType ?? null,
         codeValue: r.codeValue ?? null,
@@ -415,6 +418,7 @@ export class AdminCodeDecisionsService {
       .leftJoin(Chart, 'c', 'c.id = d.chart_id')
       .leftJoin(User, 'u', 'u.id = d.decided_by_user_id')
       .select([
+        'd.chart_id AS "chartId"',
         'c.chart_no AS "chartNo"',
         'd.code_type AS "codeType"',
         'd.code_value AS "codeValue"',
