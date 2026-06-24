@@ -18,7 +18,6 @@ import {
   selfAllocateCharts,
   updateChart,
   getActiveTimer,
-  type CodeDecisionRecord,
   type UpdateChartDto,
 } from '@/api/charts';
 import type { AiPredictedCode } from '@/api/types';
@@ -231,88 +230,103 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     if (decisions.length === 0 && draftDecisions.length === 0 && draftAdded.length === 0) {
       return aiPrediction; // nothing reviewed yet — show the raw prediction
     }
-    // Index decisions by CODE VALUE (not category|code). A coder can MOVE a
-    // code to a different category in Review & Edit; the decision then carries
-    // the code's new category, so a category|code lookup keyed off the AI's
-    // ORIGINAL bucket would miss it and the move would never show here. Matching
-    // on the code lets us re-bucket it under the category the coder chose —
-    // the same identity the modal itself uses to restore moves.
-    const norm = (s: string) => s.trim().toUpperCase();
-    const draftByCode = new Map<string, (typeof draftDecisions)[number]>();
-    for (const d of draftDecisions) draftByCode.set(norm(d.code), d);
-    // Prefer the most recently decided row when a code has more than one —
-    // moving a code to a new category leaves the old-category row behind, so a
-    // code can briefly have two submitted decisions.
-    const recordByCode = new Map<string, CodeDecisionRecord>();
+    const norm = (s: string) => s.replace(/\./g, '').trim().toUpperCase();
+    // Effective NON-added decisions, keyed by the EXACT `${category}|${code}`
+    // identity the board uses. The submitted record is the baseline; a draft
+    // (unsubmitted) entry for the same key is the coder's newer intent and wins.
+    // Keeping the category in the key is essential: the AI can place the SAME
+    // code in two categories (e.g. a diagnosis that's both primary and
+    // secondary), and those are two distinct decisions that must not collapse.
+    type Eff = {
+      code: string;
+      category: string;
+      decision: 'accepted' | 'rejected' | 'edited';
+      editedCode?: string;
+      editedDescription?: string;
+      notSubmitted: boolean;
+    };
+    const effByKey = new Map<string, Eff>();
     for (const d of decisions) {
-      const k = norm(d.codeValue);
-      const cur = recordByCode.get(k);
-      if (!cur || d.decidedAt >= cur.decidedAt) recordByCode.set(k, d);
+      if (d.decision === 'ADDED') continue;
+      effByKey.set(`${d.codeType}|${d.codeValue}`, {
+        code: d.codeValue,
+        category: d.codeType,
+        decision: d.decision === 'REJECTED' ? 'rejected' : d.decision === 'EDITED' ? 'edited' : 'accepted',
+        editedCode: d.editedCode ?? undefined,
+        editedDescription: d.editedDescription ?? undefined,
+        notSubmitted: false,
+      });
+    }
+    for (const d of draftDecisions) {
+      if (d.decision === 'added') continue;
+      effByKey.set(`${d.category}|${d.code}`, {
+        code: d.code,
+        category: d.category,
+        decision: d.decision,
+        editedCode: d.editedCode || undefined,
+        editedDescription: d.editedDescription || undefined,
+        notSubmitted: true,
+      });
     }
     const dedup = (arr: AnnotatedCode[]) => {
       const seen = new Set<string>();
       return arr.filter((c) => (seen.has(c.code) ? false : (seen.add(c.code), true)));
     };
-    // Annotate one AI code with what the coder did, and report the category it
-    // now belongs to (its move target, or its original bucket if untouched). A
-    // draft (not-yet-submitted) decision is the coder's current intent, so it
-    // wins over the last submitted record and is flagged notSubmitted.
-    const annotate = (
-      c: AiPredictedCode,
-      origType: string,
-    ): { type: string; code: AnnotatedCode } => {
-      const dr = draftByCode.get(norm(c.code));
-      if (dr) {
-        // dr.category is always a board bucket (PRIMARY/SECONDARY/PROCEDURE).
-        if (dr.decision === 'rejected')
-          return { type: dr.category, code: { ...c, decisionState: 'rejected', notSubmitted: true } };
-        if (dr.decision === 'edited')
-          return {
-            type: dr.category,
-            code: {
-              ...c,
-              code: dr.editedCode || c.code,
-              description: dr.editedDescription || c.description,
-              decisionState: 'edited',
-              originalCode: c.code,
-              originalDescription: c.description,
-              notSubmitted: true,
-            },
-          };
-        return { type: dr.category, code: { ...c, decisionState: 'accepted', notSubmitted: true } };
-      }
-      const d = recordByCode.get(norm(c.code));
-      if (!d) return { type: origType, code: { ...c, decisionState: 'untouched' } };
-      // Bucket by the moved-to category, but guard against a non-ICD codeType
-      // (EM_LEVEL/MODIFIER) so an AI code can never silently vanish from the card.
-      const t =
-        d.codeType === 'PRIMARY' || d.codeType === 'SECONDARY' || d.codeType === 'PROCEDURE'
-          ? d.codeType
-          : origType;
-      if (d.decision === 'REJECTED') return { type: t, code: { ...c, decisionState: 'rejected' } };
-      if (d.decision === 'EDITED')
+    // Annotate an AI code with an effective decision (or null → untouched).
+    const annotateWith = (c: AiPredictedCode, eff: Eff | null): AnnotatedCode => {
+      if (!eff) return { ...c, decisionState: 'untouched' };
+      const flag = eff.notSubmitted ? { notSubmitted: true as const } : {};
+      if (eff.decision === 'rejected') return { ...c, decisionState: 'rejected', ...flag };
+      if (eff.decision === 'edited')
         return {
-          type: t,
-          code: {
-            ...c,
-            code: d.editedCode ?? c.code,
-            description: d.editedDescription ?? c.description,
-            decisionState: 'edited',
-            originalCode: c.code,
-            originalDescription: c.description,
-          },
+          ...c,
+          code: eff.editedCode || c.code,
+          description: eff.editedDescription || c.description,
+          decisionState: 'edited',
+          originalCode: c.code,
+          originalDescription: c.description,
+          ...flag,
         };
-      return { type: t, code: { ...c, decisionState: 'accepted' } }; // ACCEPTED
+      return { ...c, decisionState: 'accepted', ...flag };
     };
-    // Annotate every AI code once, then bucket by its EFFECTIVE category so a
-    // moved code leaves its original section and appears under the new one.
-    const annotated = [
-      ...aiPrediction.primary.map((c) => annotate(c, 'PRIMARY')),
-      ...aiPrediction.secondary.map((c) => annotate(c, 'SECONDARY')),
-      ...aiPrediction.procedures.map((c) => annotate(c, 'PROCEDURE')),
+    const buckets: Record<string, AnnotatedCode[]> = { PRIMARY: [], SECONDARY: [], PROCEDURE: [] };
+    const aiAll = [
+      ...aiPrediction.primary.map((c) => ({ c, orig: 'PRIMARY' })),
+      ...aiPrediction.secondary.map((c) => ({ c, orig: 'SECONDARY' })),
+      ...aiPrediction.procedures.map((c) => ({ c, orig: 'PROCEDURE' })),
     ];
-    const aiFor = (codeType: string) =>
-      annotated.filter((a) => a.type === codeType).map((a) => a.code);
+    // Pass 1 — exact (category|code): codes that stayed in their AI category
+    // (a dual-category code matches in BOTH its buckets). Mark each consumed.
+    const consumed = new Set<string>();
+    const pending: { c: AiPredictedCode; orig: string }[] = [];
+    for (const { c, orig } of aiAll) {
+      const key = `${orig}|${c.code}`;
+      const eff = effByKey.get(key);
+      if (eff) {
+        consumed.add(key);
+        buckets[orig].push(annotateWith(c, eff));
+      } else {
+        pending.push({ c, orig });
+      }
+    }
+    // Leftover decisions (no exact AI match) are in-place MOVES: the same code,
+    // decided under a different category. Index them by code so an AI code with
+    // no decision in its own bucket can follow its move into the new one.
+    const movedByCode = new Map<string, Eff>();
+    for (const [key, eff] of effByKey) {
+      if (!consumed.has(key)) movedByCode.set(norm(eff.code), eff);
+    }
+    // Pass 2 — place the AI codes that had no exact decision: follow a move if
+    // one references this code under a real bucket, else show as untouched.
+    for (const { c, orig } of pending) {
+      const moved = movedByCode.get(norm(c.code));
+      if (moved && moved.category !== orig && buckets[moved.category]) {
+        buckets[moved.category].push(annotateWith(c, moved));
+        movedByCode.delete(norm(c.code));
+      } else {
+        buckets[orig].push(annotateWith(c, null));
+      }
+    }
     // Coder-added codes (not in the AI prediction): draft-added (not submitted)
     // first, then submitted-added that a draft hasn't superseded.
     const addedFor = (codeType: string): AnnotatedCode[] => {
@@ -321,19 +335,19 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       for (const a of draftAdded) {
         if (a.category !== codeType) continue;
         out.push({ code: a.code, description: a.description, decisionState: 'added', notSubmitted: true });
-        seen.add(a.code);
+        seen.add(norm(a.code));
       }
       for (const d of decisions) {
         if (d.decision !== 'ADDED' || d.codeType !== codeType) continue;
         const code = d.editedCode ?? d.codeValue;
-        if (seen.has(code) || draftByCode.has(norm(code))) continue;
+        if (seen.has(norm(code))) continue;
         out.push({ code, description: d.editedDescription ?? '', decisionState: 'added' });
       }
       return out;
     };
-    const primary = dedup([...aiFor('PRIMARY'), ...addedFor('PRIMARY')]);
-    const secondary = dedup([...aiFor('SECONDARY'), ...addedFor('SECONDARY')]);
-    const procedures = dedup([...aiFor('PROCEDURE'), ...addedFor('PROCEDURE')]);
+    const primary = dedup([...buckets.PRIMARY, ...addedFor('PRIMARY')]);
+    const secondary = dedup([...buckets.SECONDARY, ...addedFor('SECONDARY')]);
+    const procedures = dedup([...buckets.PROCEDURE, ...addedFor('PROCEDURE')]);
     return {
       ...aiPrediction,
       primary,

@@ -445,37 +445,46 @@ export function ReviewEditModal({
     // Attach each previously-submitted decision to an AI item. The persisted
     // decisions are the source of truth for a code's category, so the board must
     // reconstruct category MOVES from them — not just verdicts. A code the coder
-    // moved to another category was saved under its NEW codeType, so matching
-    // purely on (codeType, code) against the AI item's ORIGINAL category would
-    // miss it and the move would be lost on reopen (the draft that used to carry
-    // the move is deleted on submit). So: collapse to the newest decision per
-    // code (a move can leave a stale row under the old category), then prefer the
-    // AI item already in that category (stayed put), else the same code under a
-    // different category (an in-place move) — recording the override. This
-    // mirrors the draft-restore move logic below, so submitted and drafted
-    // decisions resolve a code's category identically.
-    const latestByCode = new Map<string, (typeof rows)[number]>();
+    // moved to another category was saved under its NEW codeType, so a match on
+    // the AI item's ORIGINAL category would miss it and the move would be lost on
+    // reopen (the draft that used to carry it is deleted on submit). So: match
+    // exact (category, code) FIRST — a code that stayed put, INCLUDING a code the
+    // AI placed in two categories (two distinct decisions that must stay
+    // separate) — then re-attach any leftover decision to the same code under a
+    // different category as an in-place move, recording the override. Mirrors the
+    // draft-restore move logic below so submitted and drafted decisions resolve a
+    // code's category identically.
+    const byIdentity = new Map<string, (typeof rows)[number]>();
     for (const r of rows) {
       if (r.decision === 'ADDED') continue;
-      const k = normalizeCode(r.codeValue);
-      const cur = latestByCode.get(k);
-      if (!cur || r.decidedAt >= cur.decidedAt) latestByCode.set(k, r);
+      const cat = codeTypeToCategory(r.codeType);
+      if (cat) byIdentity.set(`${cat}|${r.codeValue}`, r);
     }
+    const aiKeys = new Set(aiItems.map((it) => `${it.category}|${it.code}`));
     const decisionByKey = new Map<string, (typeof rows)[number]>();
     const moveOverrides: Record<string, Category> = {};
     const claimed = new Set<string>();
-    for (const r of latestByCode.values()) {
+    // Pass 1 — exact (category, code).
+    for (const it of aiItems) {
+      const r = byIdentity.get(`${it.category}|${it.code}`);
+      if (r && !claimed.has(it.key)) {
+        decisionByKey.set(it.key, r);
+        claimed.add(it.key);
+      }
+    }
+    // Pass 2 — leftover decisions whose (category, code) is no AI item: an
+    // in-place move of the same code from a different category.
+    for (const [key, r] of byIdentity) {
+      if (aiKeys.has(key)) continue;
       const cat = codeTypeToCategory(r.codeType);
       if (!cat) continue;
-      const target =
-        aiItems.find((it) => it.category === cat && it.code === r.codeValue && !claimed.has(it.key)) ??
-        aiItems.find(
-          (it) => normalizeCode(it.code) === normalizeCode(r.codeValue) && !claimed.has(it.key),
-        );
+      const target = aiItems.find(
+        (it) => normalizeCode(it.code) === normalizeCode(r.codeValue) && !claimed.has(it.key),
+      );
       if (!target) continue;
       claimed.add(target.key);
       decisionByKey.set(target.key, r);
-      if (target.category !== cat) moveOverrides[target.key] = cat;
+      moveOverrides[target.key] = cat;
     }
 
     setState((prev) => {
