@@ -79,7 +79,7 @@ export class UsersService {
     const u = await this.users.findOne({ where: { id } });
     if (!u) throw new NotFoundException();
     const isSelf = caller.id === id;
-    const isAdmin = caller.role === Role.TEAMLEAD;
+    const isAdmin = caller.role === Role.TEAMLEAD || caller.role === Role.MANAGER;
     if (!isSelf && !isAdmin) throw new ForbiddenException();
     if (isSelf && !isAdmin) {
       ['role', 'status', 'clientId', 'locationId', 'primarySpecialityId', 'designation'].forEach(k => delete (dto as any)[k]);
@@ -135,7 +135,7 @@ export class UsersService {
   async markAttendance(userId: number, dto: MarkAttendanceDto, caller: AuthenticatedUser) {
     const today = new Date().toISOString().slice(0, 10);
     const isSelf = caller.id === userId;
-    if (isSelf && caller.role !== Role.TEAMLEAD && dto.date !== today) {
+    if (isSelf && caller.role !== Role.TEAMLEAD && caller.role !== Role.MANAGER && dto.date !== today) {
       throw new ForbiddenException({ error: { code: 'forbidden', message: 'Self-mark restricted to today.' } });
     }
     const existing = await this.attendanceRepo.findOne({ where: { userId, date: dto.date } });

@@ -16,8 +16,8 @@ export class RolesGuard implements CanActivate {
 
     const { user } = context.switchToHttp().getRequest();
     if (!user) return false;
-    // TEAMLEAD always passes.
-    if (user.role === Role.TEAMLEAD) return true;
+    // TEAMLEAD and MANAGER are super-roles: they pass every role check.
+    if (user.role === Role.TEAMLEAD || user.role === Role.MANAGER) return true;
 
     if (!required.includes(user.role)) {
       // Surface the mismatch so a stale JWT (e.g. token issued before a role

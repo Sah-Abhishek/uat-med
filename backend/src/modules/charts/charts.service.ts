@@ -693,8 +693,8 @@ async update(id: number, dto: UpdateChartDto) {
 
     // Team leads can act in either capacity; the chart's current milestone
     // determines which transition fires.
-    const canCode = user.role === Role.CODER || user.role === Role.TEAMLEAD;
-    const canAudit = user.role === Role.AUDITOR || user.role === Role.TEAMLEAD;
+    const canCode = user.role === Role.CODER || user.role === Role.TEAMLEAD || user.role === Role.MANAGER;
+    const canAudit = user.role === Role.AUDITOR || user.role === Role.TEAMLEAD || user.role === Role.MANAGER;
     if (c.milestone === ChartMilestone.READY_TO_CODE && canCode) {
       c.setMilestone(ChartMilestone.CODING_IN_PROGRESS);
       await this.charts.save(c);
@@ -843,8 +843,8 @@ async update(id: number, dto: UpdateChartDto) {
         c.allocatedCoderId = user.id;
       } else if (user.role === Role.AUDITOR) {
         c.allocatedAuditorId = user.id;
-      } else if (user.role === Role.TEAMLEAD) {
-        // Admin/team lead takes BOTH slots so they can code and audit the chart.
+      } else if (user.role === Role.TEAMLEAD || user.role === Role.MANAGER) {
+        // Team lead / manager take BOTH slots so they can code and audit the chart.
         c.allocatedCoderId = user.id;
         c.allocatedAuditorId = user.id;
       }

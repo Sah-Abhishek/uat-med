@@ -384,7 +384,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   // CODING_IN_PROGRESS after Stop, so we can't infer "is the timer running"
   // from it). Shares the cache key used by HeaderCard's TimerPanel.
   const isTeamLead = user?.role === 'TEAMLEAD';
-  const canTime = user?.role === 'CODER' || user?.role === 'AUDITOR' || isTeamLead;
+  // Managers have full team-lead parity — they can self-allocate, time, code and audit.
+  const isManager = user?.role === 'MANAGER';
+  const canTime = user?.role === 'CODER' || user?.role === 'AUDITOR' || isTeamLead || isManager;
   const activeTimer = useQuery({
     queryKey: ['active-timer'],
     queryFn: getActiveTimer,
@@ -431,7 +433,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   });
   // Team leads can audit in addition to coding; only block the audit section
   // when the viewer is neither role and the timer is off.
-  const auditDisabled = !(isAuditor || isTeamLead) || !timerRunning;
+  const auditDisabled = !(isAuditor || isTeamLead || isManager) || !timerRunning;
 
   // While the timer is running, treat the chart as needing a save before the
   // user can stop. Without this, a coder/auditor who starts the timer and

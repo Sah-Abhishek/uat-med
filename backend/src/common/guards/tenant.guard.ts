@@ -3,7 +3,8 @@ import { Role } from '../enums/roles.enum';
 
 /**
  * Ensures the caller's clientId / locationId scope matches the requested resource
- * (admins bypass). Controllers opt-in by applying this guard explicitly.
+ * (team leads and managers bypass). Controllers opt-in by applying this guard
+ * explicitly.
  */
 @Injectable()
 export class TenantGuard implements CanActivate {
@@ -11,7 +12,8 @@ export class TenantGuard implements CanActivate {
     const req = context.switchToHttp().getRequest();
     const user = req.user;
     if (!user) return false;
-    if (user.role === Role.TEAMLEAD) return true;
+    // Team leads and managers are super-roles — exempt from tenant scoping.
+    if (user.role === Role.TEAMLEAD || user.role === Role.MANAGER) return true;
 
     const requestedClientId = Number(req.query?.clientId ?? req.body?.clientId ?? user.clientId);
     const requestedLocationId = Number(req.query?.locationId ?? req.body?.locationId ?? user.locationId);
