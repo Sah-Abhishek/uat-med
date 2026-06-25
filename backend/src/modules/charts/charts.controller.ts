@@ -170,7 +170,7 @@ export class ChartsController {
    * version held the connection open for 2+ minutes and 504'd at the edge).
    */
   @Post(':id/process-documents')
-  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
   @HttpCode(202)
   @UseInterceptors(
     FilesInterceptor('files', MAX_FILES, {
@@ -202,7 +202,7 @@ export class ChartsController {
 
   /** Phase 2 — pass-through to the gateway's task-status endpoint. */
   @Get(':id/process-documents/:encounterId/status')
-  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
   @ApiOperation({ summary: 'Poll the AI pipeline status for an in-flight encounter.' })
   getProcessDocumentsStatus(
     @Param('id', ParseIntPipe) id: number,
@@ -280,7 +280,7 @@ export class ChartsController {
 
   /** Phase 3 — fetch the final codes once the FE has seen status=SUCCESS. */
   @Post(':id/process-documents/:encounterId/finalize')
-  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
   @HttpCode(200)
   @ApiOperation({ summary: 'Pull final ICD codes from gateway and persist them on the chart.' })
   finalizeProcessDocuments(
@@ -296,7 +296,7 @@ export class ChartsController {
    * remove and POST :id/reprocess to run over the whole set.
    */
   @Post(':id/documents')
-  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
   @HttpCode(200)
   @UseInterceptors(
     FilesInterceptor('files', MAX_FILES, {
@@ -328,7 +328,7 @@ export class ChartsController {
 
   /** Remove one uploaded document (drops it from the chart + deletes the S3 object). */
   @Delete(':id/documents/:docId')
-  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
   @ApiOperation({ summary: 'Remove an uploaded document from a chart. Returns the updated uploadedDocs list.' })
   removeDocument(
     @Param('id', ParseIntPipe) id: number,
@@ -343,7 +343,7 @@ export class ChartsController {
    * poll → finalize flow as the initial run.
    */
   @Post(':id/reprocess')
-  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
   @HttpCode(202)
   @ApiOperation({ summary: 'Retry AI processing over the chart\'s current documents; returns encounterId + taskId.' })
   reprocess(@Param('id', ParseIntPipe) id: number) {
