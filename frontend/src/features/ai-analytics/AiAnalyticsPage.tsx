@@ -18,8 +18,12 @@ import {
 } from 'recharts';
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
   BarChart3,
+  Building2,
   CheckCircle2,
+  ChevronsUpDown,
   Clock,
   FileStack,
   Filter,
@@ -28,6 +32,7 @@ import {
   TrendingUp,
   X,
 } from 'lucide-react';
+import { format, startOfMonth, subDays } from 'date-fns';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -39,8 +44,10 @@ import {
 } from '@/api/configurations';
 import {
   getQaAccuracy,
+  getQaActivityBreakdown,
   listQaFacilities,
   type CodeReviewType,
+  type QaActivityBreakdownRow,
   type QaFilters,
 } from '@/api/qa';
 import { useScope } from '@/scope/store';
@@ -122,6 +129,27 @@ export function AiAnalyticsPage() {
   const loading = !data;
 
   const acceptancePct = data ? data.kpis.acceptanceRate * 100 : 0;
+
+  // ── Activity breakdown (client × location × sub-speciality) ──
+  // Has its OWN date window (Today / last 7d / this month), independent of the
+  // page date filter, so the headline accuracy can stay as-is while you see
+  // today's activity. Still respects the global header Client/Location scope.
+  const [breakdownRange, setBreakdownRange] = useState<BreakdownRange>('today');
+  const breakdownFilters: QaFilters = useMemo(() => {
+    const { from, to } = rangeWindow(breakdownRange);
+    return {
+      ...(scopeClientId != null ? { clientId: scopeClientId } : {}),
+      ...(scopeLocationId != null ? { locationId: scopeLocationId } : {}),
+      from,
+      to,
+    };
+  }, [breakdownRange, scopeClientId, scopeLocationId]);
+
+  const breakdownQ = useQuery({
+    queryKey: ['qa', 'activity-breakdown', breakdownFilters],
+    queryFn: () => getQaActivityBreakdown(breakdownFilters),
+    placeholderData: (prev) => prev,
+  });
 
   // Acceptance trend granularity (weekly / daily).
   const [trendMode, setTrendMode] = useState<'weekly' | 'daily'>('weekly');
@@ -217,6 +245,15 @@ export function AiAnalyticsPage() {
               tone="warn"
             />
           </div>
+
+          {/* ── Activity breakdown: which client / location / sub-speciality ── */}
+          <ActivityBreakdownCard
+            rows={breakdownQ.data?.items ?? []}
+            loading={!breakdownQ.data && breakdownQ.isPending}
+            fetching={breakdownQ.isFetching}
+            range={breakdownRange}
+            onRangeChange={setBreakdownRange}
+          />
 
           {/* ── Row 1: accuracy by code type + verdict mix ── */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -927,4 +964,258 @@ function formatDuration(ms: number): string {
   const hr = Math.floor(min / 60);
   const remMin = min % 60;
   return remMin > 0 ? `${hr}h ${remMin}m` : `${hr}h`;
+}
+
+/* ── Activity breakdown (client × location × sub-speciality) ──────── */
+
+type BreakdownRange = 'today' | '7d' | 'month';
+
+const RANGE_LABEL: Record<BreakdownRange, string> = {
+  today: 'Today',
+  '7d': 'Last 7 days',
+  month: 'This month',
+};
+
+/** Inclusive [from,to] YYYY-MM-DD window for a range, relative to today. */
+function rangeWindow(range: BreakdownRange): { from: string; to: string } {
+  const now = new Date();
+  const to = format(now, 'yyyy-MM-dd');
+  const from =
+    range === 'today'
+      ? to
+      : range === '7d'
+      ? format(subDays(now, 6), 'yyyy-MM-dd')
+      : format(startOfMonth(now), 'yyyy-MM-dd');
+  return { from, to };
+}
+
+type BreakdownSortKey = 'client' | 'location' | 'subSpeciality' | 'charts' | 'decisions' | 'acceptance';
+
+/** AI acceptance rate (%) for one breakdown row. */
+function acceptancePctOf(r: QaActivityBreakdownRow): number {
+  return r.decisions ? (r.accepted / r.decisions) * 100 : 0;
+}
+
+function ActivityBreakdownCard({
+  rows,
+  loading,
+  fetching,
+  range,
+  onRangeChange,
+}: {
+  rows: QaActivityBreakdownRow[];
+  loading: boolean;
+  fetching: boolean;
+  range: BreakdownRange;
+  onRangeChange: (r: BreakdownRange) => void;
+}) {
+  const [sortBy, setSortBy] = useState<BreakdownSortKey>('decisions');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const toggleSort = (key: BreakdownSortKey) => {
+    if (key === sortBy) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(key);
+      // Text columns read best A→Z; numeric columns most-first.
+      setSortDir(key === 'client' || key === 'location' || key === 'subSpeciality' ? 'asc' : 'desc');
+    }
+  };
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const val = (r: QaActivityBreakdownRow): string | number => {
+      switch (sortBy) {
+        case 'client': return (r.clientName ?? '').toLowerCase();
+        case 'location': return (r.locationName ?? '').toLowerCase();
+        case 'subSpeciality': return (r.subSpecialityName ?? '').toLowerCase();
+        case 'charts': return r.charts;
+        case 'decisions': return r.decisions;
+        case 'acceptance': return acceptancePctOf(r);
+      }
+    };
+    return [...rows].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (av < bv) return -dir;
+      if (av > bv) return dir;
+      return 0;
+    });
+  }, [rows, sortBy, sortDir]);
+
+  const totals = useMemo(
+    () =>
+      rows.reduce(
+        (acc, r) => {
+          acc.charts += r.charts;
+          acc.decisions += r.decisions;
+          acc.accepted += r.accepted;
+          return acc;
+        },
+        { charts: 0, decisions: 0, accepted: 0 },
+      ),
+    [rows],
+  );
+
+  return (
+    <Card padding="default">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h4 className="text-sm font-bold text-ink inline-flex items-center gap-1.5">
+            <span className="text-ink-muted"><Building2 className="w-3.5 h-3.5" /></span>
+            Activity by client / location / sub-speciality
+          </h4>
+          <p className="text-[11px] text-ink-muted mt-0.5">
+            Where AI suggestions are being worked, and the AI's acceptance rate in each — {RANGE_LABEL[range].toLowerCase()}
+          </p>
+        </div>
+        <BreakdownRangeToggle value={range} onChange={onRangeChange} />
+      </div>
+
+      {loading ? (
+        <div className="h-[200px] flex items-center justify-center text-ink-muted">
+          <Loader2 className="w-5 h-5 animate-spin" />
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="h-[200px] flex flex-col items-center justify-center text-center text-ink-muted">
+          <p className="text-sm font-semibold text-ink">No activity {RANGE_LABEL[range].toLowerCase()}</p>
+          <p className="text-[11px] mt-1">Nothing was coded in this period for the current Client / Location scope.</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-line">
+          <div className="overflow-x-auto max-h-[440px]">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-sunken/40 sticky top-0 z-10">
+                <tr className="text-left text-[10px] uppercase tracking-wide text-ink-muted">
+                  <BreakdownTh label="Client" col="client" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+                  <BreakdownTh label="Location" col="location" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+                  <BreakdownTh label="Sub-speciality" col="subSpeciality" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+                  <BreakdownTh label="Charts" col="charts" align="right" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+                  <BreakdownTh label="Decisions" col="decisions" align="right" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+                  <BreakdownTh label="Acceptance" col="acceptance" align="right" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((r, i) => {
+                  const pct = acceptancePctOf(r);
+                  return (
+                    <tr
+                      key={`${r.clientId}-${r.locationId}-${r.subSpecialityId}-${i}`}
+                      className="border-t border-line hover:bg-surface-sunken/40 transition"
+                    >
+                      <td className="px-3 py-2.5 text-ink font-medium whitespace-nowrap">
+                        {r.clientName ?? <span className="text-ink-muted">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-ink whitespace-nowrap">
+                        {r.locationName ?? <span className="text-ink-muted">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-ink whitespace-nowrap">
+                        {r.subSpecialityName ?? <span className="text-ink-muted italic">Unassigned</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-ink">{r.charts.toLocaleString()}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-ink">{r.decisions.toLocaleString()}</td>
+                      <td className="px-3 py-2.5 text-right">
+                        <AcceptancePill pct={pct} accepted={r.accepted} decisions={r.decisions} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-line bg-surface-sunken/30 text-[11px] font-bold text-ink">
+                  <td className="px-3 py-2" colSpan={3}>
+                    {rows.length} group{rows.length === 1 ? '' : 's'}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{totals.charts.toLocaleString()}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{totals.decisions.toLocaleString()}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {totals.decisions ? ((totals.accepted / totals.decisions) * 100).toFixed(1) : '0.0'}%
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {fetching && !loading && (
+        <p className="text-[11px] text-ink-muted mt-2 inline-flex items-center gap-1">
+          <Loader2 className="w-3 h-3 animate-spin" /> Updating…
+        </p>
+      )}
+    </Card>
+  );
+}
+
+function BreakdownTh({
+  label,
+  col,
+  align = 'left',
+  sortBy,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  col: BreakdownSortKey;
+  align?: 'left' | 'right';
+  sortBy: BreakdownSortKey;
+  sortDir: 'asc' | 'desc';
+  onSort: (c: BreakdownSortKey) => void;
+}) {
+  const active = sortBy === col;
+  return (
+    <th className={cn('px-3 py-2.5 font-semibold', align === 'right' && 'text-right')}>
+      <button
+        type="button"
+        onClick={() => onSort(col)}
+        className={cn(
+          'inline-flex items-center gap-1 select-none transition hover:text-ink uppercase',
+          align === 'right' && 'flex-row-reverse',
+          active && 'text-ink',
+        )}
+      >
+        {label}
+        {active ? (
+          sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+        ) : (
+          <ChevronsUpDown className="w-3 h-3 opacity-40" />
+        )}
+      </button>
+    </th>
+  );
+}
+
+/** Acceptance-rate pill, tinted by how well the AI did in this group. */
+function AcceptancePill({ pct, accepted, decisions }: { pct: number; accepted: number; decisions: number }) {
+  const tone = pct >= 70 ? COLOR_ACCEPT : pct >= 40 ? COLOR_EDIT : COLOR_REJECT;
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold tabular-nums"
+      style={{ backgroundColor: `${tone}1A`, color: tone }}
+      title={`${accepted.toLocaleString()} of ${decisions.toLocaleString()} AI suggestions accepted`}
+    >
+      {pct.toFixed(1)}%
+    </span>
+  );
+}
+
+function BreakdownRangeToggle({ value, onChange }: { value: BreakdownRange; onChange: (v: BreakdownRange) => void }) {
+  return (
+    <div className="inline-flex rounded-lg border border-line bg-surface-sunken/40 p-0.5 text-[11px] font-semibold shrink-0">
+      {(['today', '7d', 'month'] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          aria-pressed={value === m}
+          className={cn(
+            'px-2.5 py-1 rounded-md transition whitespace-nowrap',
+            value === m ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
+          )}
+        >
+          {RANGE_LABEL[m]}
+        </button>
+      ))}
+    </div>
+  );
 }

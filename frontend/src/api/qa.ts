@@ -100,6 +100,37 @@ export interface QaAccuracyResponse {
 export const getQaAccuracy = (params: QaFilters) =>
   get<QaAccuracyResponse>('/qa/ai-accuracy', params);
 
+/** One client × location × sub-speciality group's AI activity + verdict mix. */
+export interface QaActivityBreakdownRow {
+  clientId: number | null;
+  clientName: string | null;
+  locationId: number | null;
+  locationName: string | null;
+  subSpecialityId: number | null;
+  subSpecialityName: string | null;
+  /** Distinct charts that received a decision in this group. */
+  charts: number;
+  /** Total AI decision rows in this group. */
+  decisions: number;
+  accepted: number;
+  rejected: number;
+  edited: number;
+  added: number;
+}
+
+export interface QaActivityBreakdownResponse {
+  items: QaActivityBreakdownRow[];
+}
+
+/**
+ * AI activity grouped by client × location × sub-speciality. Same filter shape
+ * as {@link getQaAccuracy}; the AI Analytics page passes its own date window
+ * (today / last 7d / this month) so the breakdown can scope to "today"
+ * independent of the page's date filter.
+ */
+export const getQaActivityBreakdown = (params: QaFilters) =>
+  get<QaActivityBreakdownResponse>('/qa/ai-accuracy/breakdown', params);
+
 export const listQaCoders = () =>
   get<{ items: Array<{ id: number; name: string }> }>('/qa/coders');
 

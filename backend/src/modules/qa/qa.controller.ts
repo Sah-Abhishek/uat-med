@@ -33,6 +33,15 @@ export class QaController {
     return this.svc.aiAccuracy(q);
   }
 
+  @Get('ai-accuracy/breakdown')
+  @ApiOperation({
+    summary:
+      'AI activity broken down by client × location × sub-speciality, each with its own decision/chart counts and verdict mix (acceptance rate). Same filter shape as /qa/ai-accuracy; the AI Analytics page drives it with its own date window. Ordered by volume, capped at 200 groups.',
+  })
+  aiActivityBreakdown(@Query() q: QaFiltersDto) {
+    return this.svc.aiActivityBreakdown(q);
+  }
+
   @Get('live')
   @ApiOperation({
     summary:

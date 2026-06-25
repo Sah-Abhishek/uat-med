@@ -1,0 +1,23 @@
+# Rebuilt inside the image — never copy the host's versions in.
+node_modules
+dist
+coverage
+.nyc_output
+
+# Secrets / local env — config is injected via docker-compose `environment:`.
+env/.env*
+!env/.env.example
+
+# Tests & tooling not needed to build or run the API.
+test
+*.spec.ts
+.git
+.gitignore
+.vscode
+.idea
+*.log
+Dockerfile
+.dockerignore
+README.md
+INSTALL.md
+RUN.md

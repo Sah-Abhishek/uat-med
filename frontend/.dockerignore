@@ -1,0 +1,16 @@
+# Rebuilt inside the image.
+node_modules
+dist
+dist-ssr
+
+# Config is injected via build args -> a generated .env.production.
+.env*
+
+.git
+.gitignore
+.vscode
+.idea
+*.log
+Dockerfile
+.dockerignore
+README.md

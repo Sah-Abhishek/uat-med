@@ -350,6 +350,68 @@ export class QaService {
     };
   }
 
+  /* ── Activity breakdown (client / location / sub-speciality) ── */
+
+  /**
+   * Decisions grouped by client × location × sub-speciality for the given
+   * filters — answers "which client/location/sub-speciality is being worked,
+   * and how accurate is the AI there". Each row carries its own verdict mix so
+   * the client can show a per-group acceptance rate alongside the headline KPI.
+   *
+   * Shares buildFilters() with aiAccuracy(), so it honours the same scope and
+   * the orphan-exclusion rule; the AI Analytics page drives it with its own
+   * date window (Today / last 7d / month) independent of the page date filter.
+   * Capped at 200 groups, ordered by volume.
+   */
+  async aiActivityBreakdown(f: QaFiltersDto) {
+    const { sql: whereSql, params } = this.buildFilters(f);
+
+    const sql = `
+      SELECT
+        w.client_id          AS "clientId",
+        cl.name              AS "clientName",
+        w.location_id        AS "locationId",
+        loc.name             AS "locationName",
+        w.sub_speciality_id  AS "subSpecialityId",
+        ss.name              AS "subSpecialityName",
+        COUNT(DISTINCT d.chart_id)::int                              AS "charts",
+        COUNT(*)::int                                                AS "decisions",
+        SUM(CASE WHEN d.decision = 'ACCEPTED' THEN 1 ELSE 0 END)::int AS "accepted",
+        SUM(CASE WHEN d.decision = 'REJECTED' THEN 1 ELSE 0 END)::int AS "rejected",
+        SUM(CASE WHEN d.decision = 'EDITED'   THEN 1 ELSE 0 END)::int AS "edited",
+        SUM(CASE WHEN d.decision = 'ADDED'    THEN 1 ELSE 0 END)::int AS "added"
+      FROM chart_code_decisions d
+      JOIN charts    c ON c.id = d.chart_id
+      JOIN worklists w ON w.id = c.worklist_id
+      LEFT JOIN clients          cl  ON cl.id  = w.client_id
+      LEFT JOIN locations        loc ON loc.id = w.location_id
+      LEFT JOIN sub_specialities ss  ON ss.id  = w.sub_speciality_id
+      ${whereSql}
+      GROUP BY w.client_id, cl.name, w.location_id, loc.name, w.sub_speciality_id, ss.name
+      ORDER BY "decisions" DESC, "charts" DESC
+      LIMIT 200
+    `;
+
+    const rows = await this.run<any[]>(params, sql);
+
+    return {
+      items: rows.map((r: any) => ({
+        clientId: r.clientId ?? null,
+        clientName: r.clientName ?? null,
+        locationId: r.locationId ?? null,
+        locationName: r.locationName ?? null,
+        subSpecialityId: r.subSpecialityId ?? null,
+        subSpecialityName: r.subSpecialityName ?? null,
+        charts: Number(r.charts),
+        decisions: Number(r.decisions),
+        accepted: Number(r.accepted),
+        rejected: Number(r.rejected),
+        edited: Number(r.edited),
+        added: Number(r.added),
+      })),
+    };
+  }
+
   /* ── Filter dropdown helpers ─────────────────────────────── */
 
   /** Distinct coders that have at least one decision row — drives the filter dropdown. */

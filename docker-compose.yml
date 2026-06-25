@@ -1,0 +1,112 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Valerion — full local stack in one command:  docker compose up --build
+#
+#   postgres  bundled DB (main + empty icd10cm), internal-only
+#   redis     bundled cache, internal-only
+#   backend   NestJS API (dist/src/main.js), schema auto-created on first boot
+#   frontend  built SPA on nginx, reverse-proxies /api/v1 -> backend
+#
+# Host ports 5432/6379/2500/8080/80 are already used by the existing UAT/prod
+# stack on this box, so Postgres/Redis are NOT published, and the app uses
+# free host ports (override with FRONTEND_PORT / BACKEND_PORT in a .env file).
+#
+# Open the app at  http://localhost:${FRONTEND_PORT:-8090}
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: valerion
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-valerion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-valerion}
+      POSTGRES_DB: ${POSTGRES_DB:-valerion}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates the empty icd10cm reference DB on first init.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-valerion} -d ${POSTGRES_DB:-valerion}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # ── Runtime ──
+      # NODE_ENV=uat keeps TypeORM `synchronize` ON so the schema auto-creates
+      # on the fresh bundled DB. DEPLOYMENT=uat blocks AI-gateway forwarding so
+      # local test data never reaches the golden training set.
+      NODE_ENV: uat
+      DEPLOYMENT: uat
+      APP_HOST: 0.0.0.0
+      APP_PORT: "2500"
+      APP_GLOBAL_PREFIX: api/v1
+      APP_PUBLIC_URL: http://localhost:${BACKEND_PORT:-2600}
+      # ── Database (bundled postgres service) ──
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USERNAME: ${POSTGRES_USER:-valerion}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-valerion}
+      DB_NAME: ${POSTGRES_DB:-valerion}
+      DB_SSL: "false"
+      DB_POOL_SIZE: "10"
+      # ICD reference DB: same instance, only the name differs (host/user/pass
+      # fall back to the main DB values in configuration.ts).
+      ICD_REF_DB_NAME: icd10cm
+      # ── Redis (bundled) ──
+      REDIS_URL: redis://redis:6379/0
+      # ── Auth ──
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-please-0123456789abcdef0123456789}
+      # ── Bootstrap admin (local login until SSO is wired up) ──
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@valerionhealth.com}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-Admin12345!}
+      BOOTSTRAP_ADMIN_FULL_NAME: Platform Admin
+      # ── Misc ──
+      ENABLE_SWAGGER_UI: "true"
+      CORS_ORIGINS: ""
+      LOG_LEVEL: info
+    ports:
+      # Optional direct access to the API + Swagger at http://localhost:2600/api/v1/docs
+      - "${BACKEND_PORT:-2600}:2500"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: /api/v1
+        VITE_ICD_BOT_API: /icd-bot
+        VITE_DEPLOYMENT: uat
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8090}:80"
+
+volumes:
+  pgdata:
+  redisdata:

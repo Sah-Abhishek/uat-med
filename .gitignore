@@ -1,2 +1,6 @@
 videos/
 docs/
+
+# Local docker-compose overrides (may hold secrets) — keep the example only.
+.env
+!.env.docker.example
