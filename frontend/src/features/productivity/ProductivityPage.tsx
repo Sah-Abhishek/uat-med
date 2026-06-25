@@ -18,12 +18,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Activity, CalendarRange, Gauge, Loader2, Sparkles, UserPlus, X } from 'lucide-react';
+import { Activity, Building2, CalendarRange, Filter, Gauge, Loader2, Sparkles, UserPlus, X } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { FancySelect } from '@/components/ui/Field';
-import { Pagination } from '@/components/ui/Primitives';
+import { FancySelect, Label } from '@/components/ui/Field';
+import { Modal, ModalFooter, Pagination } from '@/components/ui/Primitives';
 import {
   listClients,
   listLocations,
@@ -33,10 +33,12 @@ import { listQaFacilities } from '@/api/qa';
 import { listUsers } from '@/api/users';
 import type { ChartListParams } from '@/api/charts';
 import { useChartsView } from '@/features/charts/chartsViewStore';
+import { useProductivityView } from './productivityViewStore';
 import {
   getAiProcessingStatus,
   getAiProcessingStatusSeries,
   getThroughput,
+  getThroughputByClientLocation,
   getThroughputCharts,
   type ThroughputFilters,
 } from '@/api/dashboard';
@@ -86,9 +88,21 @@ function encodeWindow(filters: ThroughputFilters): string {
 }
 
 export function ProductivityPage() {
-  const [filters, setFilters] = useState<ThroughputFilters>({ days: 30 });
-  const patch = (p: Partial<ThroughputFilters>) => setFilters((f) => ({ ...f, ...p }));
-  const reset = () => setFilters({ days: 30 });
+  // Filters persist across navigation (sessionStorage) — see productivityViewStore.
+  const filters = useProductivityView((s) => s.filters);
+  const setFilters = useProductivityView((s) => s.setFilters);
+  const reset = useProductivityView((s) => s.reset);
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  // Active non-default filters → badge on the Filter button. The window counts
+  // only when it's not the default "Last 30 days".
+  const activeFilterCount =
+    (filters.clientId ? 1 : 0) +
+    (filters.locationId ? 1 : 0) +
+    (filters.facility ? 1 : 0) +
+    (filters.specialityId ? 1 : 0) +
+    (filters.userId ? 1 : 0) +
+    (encodeWindow(filters) !== '30' ? 1 : 0);
 
   const q = useQuery({
     queryKey: ['dashboard', 'throughput', filters],
@@ -117,9 +131,41 @@ export function ProductivityPage() {
       <PageHeader
         title="Productivity"
         subtitle="Charts allocated and worked on — today and day by day"
+        actions={
+          <>
+            <Button
+              variant="soft"
+              leftIcon={<Filter className="w-3.5 h-3.5" />}
+              onClick={() => setFilterOpen(true)}
+              className={cn(activeFilterCount > 0 && 'ring-1 ring-primary/50 text-primary')}
+            >
+              Filter
+              {activeFilterCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-white text-[11px] font-bold leading-none">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+            {activeFilterCount > 0 && (
+              <Button
+                variant="ghost"
+                leftIcon={<X className="w-3.5 h-3.5" />}
+                onClick={reset}
+                title="Clear all filters"
+              >
+                Clear filters
+              </Button>
+            )}
+          </>
+        }
       />
 
-      <FilterBar filters={filters} onChange={patch} onReset={reset} />
+      <FilterModal
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        value={filters}
+        onApply={setFilters}
+      />
 
       {q.isError && !data ? (
         <div className="rounded-xl border border-danger/30 bg-danger-soft/30 px-4 py-3 text-sm text-danger">
@@ -192,6 +238,9 @@ export function ProductivityPage() {
           >
             <ComparisonChart rows={combined} />
           </ChartCard>
+
+          {/* ── Most worked-on clients & locations ────────── */}
+          <TopClientLocationChart filters={filters} />
 
           {/* ── AI processing status (live) ───────────────── */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -334,30 +383,46 @@ function noData(rows?: Array<{ count: number }>) {
   return !rows || rows.every((r) => r.count === 0);
 }
 
-/* ── Filter bar ──────────────────────────────────────────── */
+/* ── Filter modal ────────────────────────────────────────── */
 
-function FilterBar({
-  filters,
-  onChange,
-  onReset,
+function FilterModal({
+  open,
+  onClose,
+  value,
+  onApply,
 }: {
-  filters: ThroughputFilters;
-  onChange: (p: Partial<ThroughputFilters>) => void;
-  onReset: () => void;
+  open: boolean;
+  onClose: () => void;
+  value: ThroughputFilters;
+  onApply: (v: ThroughputFilters) => void;
 }) {
-  const clientsQ = useQuery({ queryKey: ['configurations', 'clients'], queryFn: () => listClients() });
+  // Draft filters — re-seeded from the applied value each time the modal opens,
+  // so closing without "Apply" discards in-progress edits.
+  const [draft, setDraft] = useState<ThroughputFilters>(value);
+  useEffect(() => {
+    if (open) setDraft(value);
+  }, [open, value]);
+  const patch = (p: Partial<ThroughputFilters>) => setDraft((d) => ({ ...d, ...p }));
+
+  const clientsQ = useQuery({
+    queryKey: ['configurations', 'clients'],
+    queryFn: () => listClients(),
+    enabled: open,
+  });
   const locationsQ = useQuery({
-    queryKey: ['configurations', 'locations', filters.clientId],
-    queryFn: () => listLocations(filters.clientId!),
-    enabled: !!filters.clientId,
+    queryKey: ['configurations', 'locations', draft.clientId],
+    queryFn: () => listLocations(draft.clientId!),
+    enabled: open && !!draft.clientId,
   });
   const specialitiesQ = useQuery({
-    queryKey: ['configurations', 'primary-specialities', filters.clientId],
-    queryFn: () => listPrimarySpecialities(filters.clientId),
+    queryKey: ['configurations', 'primary-specialities', draft.clientId],
+    queryFn: () => listPrimarySpecialities(draft.clientId),
+    enabled: open,
   });
   const facilitiesQ = useQuery({
-    queryKey: ['qa', 'facilities', filters.clientId, filters.locationId],
-    queryFn: () => listQaFacilities({ clientId: filters.clientId, locationId: filters.locationId }),
+    queryKey: ['qa', 'facilities', draft.clientId, draft.locationId],
+    queryFn: () => listQaFacilities({ clientId: draft.clientId, locationId: draft.locationId }),
+    enabled: open,
   });
   const facilityOptions = facilitiesQ.data?.items ?? [];
 
@@ -366,97 +431,176 @@ function FilterBar({
   const usersQ = useQuery({
     queryKey: ['users', 'productivity-filter', userSearch],
     queryFn: () => listUsers({ pageSize: 50, search: userSearch || undefined }),
+    enabled: open,
   });
 
-  const hasAny =
-    !!filters.clientId ||
-    !!filters.locationId ||
-    !!filters.specialityId ||
-    !!filters.facility ||
-    !!filters.userId;
+  return (
+    <Modal open={open} onClose={onClose} title="Filter productivity" size="lg">
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <Label>Window</Label>
+            <FancySelect
+              value={encodeWindow(draft)}
+              onChange={(v) => patch(decodeWindow(v))}
+              options={WINDOW_OPTIONS}
+              placeholder="Window"
+            />
+          </div>
+          <div>
+            <Label>Client</Label>
+            <FancySelect
+              value={draft.clientId ? String(draft.clientId) : ''}
+              onChange={(v) => patch({ clientId: v ? Number(v) : undefined, locationId: undefined, facility: undefined })}
+              options={[
+                { value: '', label: 'All clients' },
+                ...(clientsQ.data?.items ?? []).map((c) => ({ value: String(c.id), label: c.name })),
+              ]}
+              placeholder="All clients"
+            />
+          </div>
+          <div>
+            <Label>Location</Label>
+            <FancySelect
+              value={draft.locationId ? String(draft.locationId) : ''}
+              onChange={(v) => patch({ locationId: v ? Number(v) : undefined, facility: undefined })}
+              options={[
+                { value: '', label: 'All locations' },
+                ...(locationsQ.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name })),
+              ]}
+              placeholder="All locations"
+              disabled={!draft.clientId}
+            />
+          </div>
+          <div>
+            <Label>Facility</Label>
+            <FancySelect
+              value={draft.facility ?? ''}
+              onChange={(v) => patch({ facility: v || undefined })}
+              options={[
+                { value: '', label: 'All facilities' },
+                ...facilityOptions.map((f) => ({ value: f, label: f })),
+              ]}
+              placeholder="All facilities"
+              disabled={facilityOptions.length === 0}
+            />
+          </div>
+          <div>
+            <Label>Speciality</Label>
+            <FancySelect
+              value={draft.specialityId ? String(draft.specialityId) : ''}
+              onChange={(v) => patch({ specialityId: v ? Number(v) : undefined })}
+              options={[
+                { value: '', label: 'All specialties' },
+                ...(specialitiesQ.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name })),
+              ]}
+              placeholder="All specialties"
+            />
+          </div>
+          <div>
+            <Label>User</Label>
+            <FancySelect
+              searchable
+              onSearch={setUserSearch}
+              loading={usersQ.isFetching}
+              searchPlaceholder="Search users…"
+              value={draft.userId ? String(draft.userId) : ''}
+              onChange={(v) => patch({ userId: v ? Number(v) : undefined })}
+              options={[
+                { value: '', label: 'All users' },
+                ...(usersQ.data?.items ?? []).map((u) => ({ value: String(u.id), label: u.fullName })),
+              ]}
+              placeholder="All users"
+            />
+          </div>
+        </div>
+
+        <ModalFooter>
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={() => {
+              const cleared: ThroughputFilters = { days: 30 };
+              setDraft(cleared);
+              onApply(cleared);
+              onClose();
+            }}
+          >
+            Clear all
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              onApply(draft);
+              onClose();
+            }}
+          >
+            Apply filters
+          </Button>
+        </ModalFooter>
+      </div>
+    </Modal>
+  );
+}
+
+/** Human label for the active window (mirrors the WINDOW_OPTIONS dropdown). */
+function windowLabel(filters: ThroughputFilters): string {
+  const v = encodeWindow(filters);
+  return WINDOW_OPTIONS.find((o) => o.value === v)?.label ?? `Last ${filters.days ?? 30} days`;
+}
+
+/* ── Most worked-on clients & locations ──────────────────── */
+
+function TopClientLocationChart({ filters }: { filters: ThroughputFilters }) {
+  const q = useQuery({
+    queryKey: ['dashboard', 'throughput', 'by-client-location', filters],
+    queryFn: () => getThroughputByClientLocation(filters),
+    placeholderData: (prev) => prev,
+  });
+  const data = q.data;
+  const loading = !data;
+  // Top 12 busiest pairs — enough to be useful without crowding the axis.
+  const rows = (data?.items ?? []).slice(0, 12).map((r) => ({
+    label: `${r.clientName ?? '—'} · ${r.locationName ?? '—'}`,
+    charts: r.charts,
+    decisions: r.decisions,
+  }));
 
   return (
-    <div className="rounded-xl border border-line bg-surface-sunken/30 p-4">
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <div className="md:col-span-2">
-          <FancySelect
-            value={encodeWindow(filters)}
-            onChange={(v) => onChange(decodeWindow(v))}
-            options={WINDOW_OPTIONS}
-            placeholder="Window"
+    <ChartCard
+      title="Most worked-on clients & locations"
+      subtitle={`Distinct charts worked on, by client + location · ${windowLabel(filters)}`}
+      icon={<Building2 className="w-3.5 h-3.5" />}
+      loading={loading}
+      empty={!loading && rows.length === 0}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={rows} layout="vertical" barCategoryGap="22%" margin={{ top: 5, right: 28, bottom: 5, left: 8 }}>
+          <defs>
+            <linearGradient id="topCL" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#818CF8" />
+              <stop offset="100%" stopColor={COLOR_ALLOCATED} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid horizontal={false} stroke={COLOR_GRID} strokeDasharray="4 4" strokeOpacity={0.6} />
+          <XAxis type="number" allowDecimals={false} stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <YAxis type="category" dataKey="label" width={190} stroke={COLOR_AXIS} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <Tooltip
+            cursor={{ fill: 'rgba(148,163,184,0.08)' }}
+            content={
+              <ChartTooltip
+                formatItem={(e) => ({
+                  label: 'Charts',
+                  value: `${e.value} (${e.payload.decisions} decision${e.payload.decisions === 1 ? '' : 's'})`,
+                  color: COLOR_ALLOCATED,
+                })}
+              />
+            }
           />
-        </div>
-        <div className="md:col-span-2">
-          <FancySelect
-            value={filters.clientId ? String(filters.clientId) : ''}
-            onChange={(v) => onChange({ clientId: v ? Number(v) : undefined, locationId: undefined, facility: undefined })}
-            options={[
-              { value: '', label: 'All clients' },
-              ...(clientsQ.data?.items ?? []).map((c) => ({ value: String(c.id), label: c.name })),
-            ]}
-            placeholder="All clients"
-          />
-        </div>
-        <div className="md:col-span-2">
-          <FancySelect
-            value={filters.locationId ? String(filters.locationId) : ''}
-            onChange={(v) => onChange({ locationId: v ? Number(v) : undefined, facility: undefined })}
-            options={[
-              { value: '', label: 'All locations' },
-              ...(locationsQ.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name })),
-            ]}
-            placeholder="All locations"
-            disabled={!filters.clientId}
-          />
-        </div>
-        <div className="md:col-span-2">
-          <FancySelect
-            value={filters.facility ?? ''}
-            onChange={(v) => onChange({ facility: v || undefined })}
-            options={[
-              { value: '', label: 'All facilities' },
-              ...facilityOptions.map((f) => ({ value: f, label: f })),
-            ]}
-            placeholder="All facilities"
-            disabled={facilityOptions.length === 0}
-          />
-        </div>
-        <div className="md:col-span-2">
-          <FancySelect
-            value={filters.specialityId ? String(filters.specialityId) : ''}
-            onChange={(v) => onChange({ specialityId: v ? Number(v) : undefined })}
-            options={[
-              { value: '', label: 'All specialties' },
-              ...(specialitiesQ.data?.items ?? []).map((s) => ({ value: String(s.id), label: s.name })),
-            ]}
-            placeholder="All specialties"
-          />
-        </div>
-        <div className="md:col-span-2">
-          <FancySelect
-            searchable
-            onSearch={setUserSearch}
-            loading={usersQ.isFetching}
-            searchPlaceholder="Search users…"
-            value={filters.userId ? String(filters.userId) : ''}
-            onChange={(v) => onChange({ userId: v ? Number(v) : undefined })}
-            options={[
-              { value: '', label: 'All users' },
-              ...(usersQ.data?.items ?? []).map((u) => ({
-                value: String(u.id),
-                label: u.fullName,
-              })),
-            ]}
-            placeholder="All users"
-          />
-        </div>
-      </div>
-      <div className="flex justify-end mt-3">
-        <Button type="button" variant="ghost" onClick={onReset} disabled={!hasAny} leftIcon={<X className="w-3 h-3" />} title="Reset filters">
-          Reset
-        </Button>
-      </div>
-    </div>
+          <Bar dataKey="charts" fill="url(#topCL)" radius={[0, 6, 6, 0]} maxBarSize={22} animationDuration={700} animationEasing="ease-out" />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
   );
 }
 

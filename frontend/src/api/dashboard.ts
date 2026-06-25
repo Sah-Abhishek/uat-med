@@ -109,3 +109,23 @@ export const getThroughputCharts = (
   params: ThroughputFilters & { kind?: 'allocated' | 'worked'; page?: number; pageSize?: number },
 ) => get<ThroughputChartsResponse>('/dashboard/throughput/charts', params);
 
+/** Busiest client + location pairs by charts worked on in the window. */
+export interface WorkedByClientLocationRow {
+  clientId: number | null;
+  clientName: string | null;
+  locationId: number | null;
+  locationName: string | null;
+  /** Distinct charts worked on (≥1 coding/audit decision) for this pair. */
+  charts: number;
+  /** Total coding/audit decisions across those charts. */
+  decisions: number;
+}
+
+export interface WorkedByClientLocation {
+  days: number;
+  items: WorkedByClientLocationRow[];
+}
+
+export const getThroughputByClientLocation = (params: ThroughputFilters = {}) =>
+  get<WorkedByClientLocation>('/dashboard/throughput/by-client-location', params);
+

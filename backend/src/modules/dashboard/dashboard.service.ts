@@ -691,6 +691,73 @@ export class DashboardService {
     };
   }
 
+  /* ── Worked-on volume by client + location ──────────────
+   * Which client / location pairs were worked on the most in the window —
+   * "worked on" = distinct charts with ≥1 coding/audit decision (same source
+   * as throughput's worked series). Grouped by client + location, ordered by
+   * charts desc, so the page can chart the busiest client/location combos.
+   * Same client/location/speciality/facility/user scoping and orphan/soft-
+   * delete exclusion as throughput(). */
+  async throughputByClientLocation(q: {
+    clientId?: number;
+    locationId?: number;
+    specialityId?: number;
+    facility?: string;
+    userId?: number;
+    days?: number;
+    endsAt?: string;
+  }) {
+    const days = Math.min(180, Math.max(1, Number(q.days) || 30));
+    const endDate = endAnchor(q.endsAt);
+    const since = new Date(endDate);
+    since.setDate(endDate.getDate() - (days - 1));
+
+    // $1 = since, $2 = endDate; scope params start at $3.
+    const params: unknown[] = [since, endDate];
+    const scope: string[] = [];
+    if (q.clientId) { params.push(Number(q.clientId)); scope.push(`w.client_id = $${params.length}`); }
+    if (q.locationId) { params.push(Number(q.locationId)); scope.push(`w.location_id = $${params.length}`); }
+    if (q.specialityId) { params.push(Number(q.specialityId)); scope.push(`w.primary_speciality_id = $${params.length}`); }
+    if (q.facility) { params.push(q.facility); scope.push(`c.custom_fields->>'facility' = $${params.length}`); }
+    const scopeSql = scope.length ? ` AND ${scope.join(' AND ')}` : '';
+    let userSql = '';
+    if (q.userId) { params.push(Number(q.userId)); userSql = ` AND d.decided_by_user_id = $${params.length}`; }
+
+    const em = this.charts.manager;
+    const rows: any[] = await em.query(
+      `SELECT
+         w.client_id   AS client_id,   cl.name  AS client_name,
+         w.location_id AS location_id, loc.name AS location_name,
+         COUNT(DISTINCT d.chart_id)::int AS charts,
+         COUNT(*)::int                   AS decisions
+       FROM chart_code_decisions d
+       JOIN charts c     ON c.id = d.chart_id
+       JOIN worklists w  ON w.id = c.worklist_id
+       LEFT JOIN clients   cl  ON cl.id  = w.client_id
+       LEFT JOIN locations loc ON loc.id = w.location_id
+       WHERE d.decided_at >= $1
+         AND d.decided_at < ($2::date + INTERVAL '1 day')
+         AND c.deleted_at IS NULL
+         AND w.deleted_at IS NULL${scopeSql}${userSql}
+       GROUP BY w.client_id, cl.name, w.location_id, loc.name
+       ORDER BY charts DESC, decisions DESC
+       LIMIT 25`,
+      params,
+    );
+
+    return {
+      days,
+      items: rows.map((r) => ({
+        clientId: r.client_id != null ? Number(r.client_id) : null,
+        clientName: (r.client_name as string | null) ?? null,
+        locationId: r.location_id != null ? Number(r.location_id) : null,
+        locationName: (r.location_name as string | null) ?? null,
+        charts: Number(r.charts ?? 0),
+        decisions: Number(r.decisions ?? 0),
+      })),
+    };
+  }
+
   /* ── Internals ────────────────────────────────────────── */
 
   private scopeCharts<T>(qb: SelectQueryBuilder<T>, q: FilterQuery): SelectQueryBuilder<T> {

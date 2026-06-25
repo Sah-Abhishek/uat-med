@@ -69,6 +69,13 @@ export class DashboardController {
     return this.svc.throughputCharts(q);
   }
 
+  @Get('throughput/by-client-location')
+  @Roles(Role.MANAGER, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Charts worked on grouped by client + location within the window — the busiest client/location pairs.' })
+  throughputByClientLocation(@Query() q: { clientId?: number; locationId?: number; specialityId?: number; facility?: string; userId?: number; days?: number; endsAt?: string }) {
+    return this.svc.throughputByClientLocation(q);
+  }
+
   @Get('self')
   @Roles(Role.CODER, Role.AUDITOR)
   @ApiOperation({ summary: 'Self view for coders / auditors.' })
