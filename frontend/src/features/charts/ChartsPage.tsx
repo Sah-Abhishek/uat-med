@@ -67,6 +67,7 @@ import {
   Columns3,
   Sparkles,
   UserPlus,
+  UserCheck,
   Clock,
   ChevronRight,
   RotateCcw,
@@ -169,7 +170,15 @@ function fmtAiProcessing(ms: number): string {
 /** Column catalog. Order here is the on-screen column order; the popover
  * also renders rows in this order. Render functions depend on `canOpenWorklist`
  * so coders see Worklist # as plain text (no link to the worklist detail page). */
-function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): ColumnDef[] {
+function buildChartColumns({
+  canOpenWorklist,
+  currentUserId,
+}: {
+  canOpenWorklist: boolean;
+  /** Viewer's user id — drives the "Assignment" column's "Assigned to me"
+   *  badge. Optional so the static key-set builders below can omit it. */
+  currentUserId?: string;
+}): ColumnDef[] {
   return [
     {
       key: 'worklistNo',
@@ -275,6 +284,27 @@ function buildChartColumns({ canOpenWorklist }: { canOpenWorklist: boolean }): C
             <Avatar name={name} src={avatarUrl ?? undefined} size="sm" />
             <span className="text-xs truncate">{name}</span>
           </span>
+        );
+      },
+    },
+    {
+      key: 'assignment',
+      label: 'Assignment',
+      // Off by default in the catalog; the page force-defaults it ON for
+      // auditors (see loadVisibleColumns), who now see every chart and need to
+      // tell their own apart. Other roles can still enable it from the popover.
+      defaultVisible: false,
+      render: (c) => {
+        const mine =
+          currentUserId != null &&
+          (c.allocatedAuditorId === currentUserId || c.allocatedCoderId === currentUserId);
+        return mine ? (
+          <PillBadge tone="mint" className="gap-1">
+            <UserCheck className="w-3 h-3" />
+            Assigned to me
+          </PillBadge>
+        ) : (
+          <span className="text-ink-subtle text-xs">Not mine</span>
         );
       },
     },
@@ -398,8 +428,12 @@ const DEFAULT_VISIBLE_KEYS: ReadonlySet<string> = new Set(
 // Resetting to defaults keeps the new column visible for everyone.
 const COLUMN_PREFS_KEY = 'charts.columns.visible.v3';
 
-function loadVisibleColumns(): Set<string> {
+function loadVisibleColumns(isAuditor: boolean): Set<string> {
   const fallback = new Set<string>([...DEFAULT_VISIBLE_KEYS, ...LOCKED_KEYS]);
+  // Auditors now see every chart, so default the Assignment column ON for them
+  // so they can tell their own charts from the rest. Still hideable afterwards;
+  // once they save any column prefs, their choice (including hiding it) sticks.
+  if (isAuditor) fallback.add('assignment');
   try {
     const raw = localStorage.getItem(COLUMN_PREFS_KEY);
     if (!raw) return fallback;
@@ -466,7 +500,9 @@ export function ChartsPage() {
   const [modifyOpen, setModifyOpen] = useState(false);
   const [selfAllocateOpen, setSelfAllocateOpen] = useState(false);
   const [retryOpen, setRetryOpen] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => loadVisibleColumns());
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
+    loadVisibleColumns(user.role === 'AUDITOR'),
+  );
   const columnsBtnRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -490,8 +526,8 @@ export function ChartsPage() {
   // Coders aren't allowed into the worklist detail page, so the Worklist #
   // cell renders as plain text for them and as a link for everyone else.
   const chartColumns = useMemo(
-    () => buildChartColumns({ canOpenWorklist: user.role !== 'CODER' }),
-    [user.role],
+    () => buildChartColumns({ canOpenWorklist: user.role !== 'CODER', currentUserId: user.id }),
+    [user.role, user.id],
   );
   const activeColumns = useMemo(
     () => chartColumns.filter((c) => visibleColumns.has(c.key)),
