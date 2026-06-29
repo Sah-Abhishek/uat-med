@@ -88,7 +88,7 @@ export function WorklistDetailPage() {
   if (!data) return <div className="p-8 text-ink-muted">Not found.</div>;
 
   const s = data.chartSummary;
-  const progressPct = s.total ? (s.closed / s.total) * 100 : 0;
+  const progressPct = s.total ? ((s.completed ?? 0) / s.total) * 100 : 0;
 
   return (
     <div className="p-8 max-w-[1600px] space-y-6">
@@ -214,14 +214,14 @@ export function WorklistDetailPage() {
                 { value: s.unallocated, color: '#9CA3AF' },
                 { value: s.notStarted, color: '#F87171' },
                 { value: s.inProgress, color: '#FFC72C' },
-                { value: s.closed, color: '#22C55E' },
+                { value: s.completed ?? 0, color: '#22C55E' },
               ]}
             />
             <div className="text-sm space-y-1.5">
               <LegendRow color="#9CA3AF" label="Unallocated" value={s.unallocated} />
               <LegendRow color="#F87171" label="Not Started" value={s.notStarted} />
               <LegendRow color="#FFC72C" label="In Progress" value={s.inProgress} />
-              <LegendRow color="#22C55E" label="Closed" value={s.closed} />
+              <LegendRow color="#22C55E" label="Completed" value={s.completed ?? 0} />
             </div>
           </div>
         </Card>

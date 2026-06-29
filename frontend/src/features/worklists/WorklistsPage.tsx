@@ -88,7 +88,7 @@ const WL_COLUMNS: WlColumn[] = [
   { key: 'allocation', label: 'Allocation %', defaultVisible: true,
     render: (wl) => <DualProgressBar percent={wl.totalCharts > 0 ? (wl.allocatedCharts / wl.totalCharts) * 100 : 0} /> },
   { key: 'progress', label: 'Progress %', defaultVisible: true,
-    render: (wl) => <DualProgressBar percent={wl.totalCharts > 0 ? (wl.closedCharts / wl.totalCharts) * 100 : 0} tone="success" /> },
+    render: (wl) => <DualProgressBar percent={wl.totalCharts > 0 ? ((wl.completedCharts ?? 0) / wl.totalCharts) * 100 : 0} tone="success" /> },
   { key: 'changedBy', label: 'Changed by', defaultVisible: false,
     render: () => <Avatar name="—" size="sm" /> },
   { key: 'dateOfService', label: 'Date of service', sortKey: 'dateOfService', defaultVisible: true, className: 'text-ink-muted',

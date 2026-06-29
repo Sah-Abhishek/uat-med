@@ -98,6 +98,8 @@ export interface Worklist {
   totalCharts: number;
   allocatedCharts: number;
   closedCharts: number;
+  /** Charts that finished coding/audit or are fully closed — drives Progress %. */
+  completedCharts: number;
   importTaskId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -119,6 +121,8 @@ export interface WorklistDetail extends Worklist {
     notStarted: number;
     inProgress: number;
     closed: number;
+    /** Coding done + audit done + closed — drives the progress % / donut. */
+    completed: number;
   };
   /**
    * AI pipeline counts. Optional to tolerate deployment version skew: an older

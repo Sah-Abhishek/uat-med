@@ -58,21 +58,29 @@ export class WorklistsService {
         'allocated',
       )
       .addSelect(`SUM(CASE WHEN c.milestone = 'CLOSED' THEN 1 ELSE 0 END)`, 'closed')
+      // "Completed" for the Progress % bar = coding finished, audit finished, or
+      // fully closed. Broader than `closed` (which stays the literal CLOSED count
+      // used by the detail donut/legend).
+      .addSelect(
+        `SUM(CASE WHEN c.milestone IN ('CODING_DONE','AUDIT_DONE','CLOSED') THEN 1 ELSE 0 END)`,
+        'completed',
+      )
       .where('c.worklist_id IN (:...ids)', { ids })
       .groupBy('c.worklist_id')
       .getRawMany();
 
-    const countMap = new Map<string, { rowCount: number; allocated: number; closed: number }>();
+    const countMap = new Map<string, { rowCount: number; allocated: number; closed: number; completed: number }>();
     for (const r of counts) {
       countMap.set(String(r.worklistId), {
         rowCount: Number(r.rowCount ?? 0),
         allocated: Number(r.allocated ?? 0),
         closed: Number(r.closed ?? 0),
+        completed: Number(r.completed ?? 0),
       });
     }
 
     const augmented = items.map((w) => {
-      const c = countMap.get(String(w.id)) ?? { rowCount: 0, allocated: 0, closed: 0 };
+      const c = countMap.get(String(w.id)) ?? { rowCount: 0, allocated: 0, closed: 0, completed: 0 };
       const declared = Number(w.totalCharts ?? 0);
       const total = Math.max(declared, c.rowCount);
       // Strip the joined relation objects and surface flat *Name fields
@@ -88,6 +96,7 @@ export class WorklistsService {
         totalCharts: total,
         allocatedCharts: c.allocated,
         closedCharts: c.closed,
+        completedCharts: c.completed,
       };
     });
 
@@ -167,6 +176,8 @@ export class WorklistsService {
       .addSelect(`SUM(CASE WHEN c.milestone = 'READY_TO_CODE' THEN 1 ELSE 0 END)`, 'notStarted')
       .addSelect(`SUM(CASE WHEN c.milestone IN ('CODING_IN_PROGRESS','AUDIT_IN_PROGRESS') THEN 1 ELSE 0 END)`, 'inProgress')
       .addSelect(`SUM(CASE WHEN c.milestone = 'CLOSED' THEN 1 ELSE 0 END)`, 'closed')
+      // Progress = coding done + audit done + closed (see list() for rationale).
+      .addSelect(`SUM(CASE WHEN c.milestone IN ('CODING_DONE','AUDIT_DONE','CLOSED') THEN 1 ELSE 0 END)`, 'completed')
       // Total documents uploaded across this worklist's charts. Each chart keeps
       // its files in custom_fields.uploadedDocs (a JSONB array); sum the lengths.
       .addSelect(
@@ -239,6 +250,7 @@ export class WorklistsService {
         notStarted: Number(counts.notStarted ?? 0),
         inProgress: Number(counts.inProgress ?? 0),
         closed: Number(counts.closed ?? 0),
+        completed: Number(counts.completed ?? 0),
       },
       aiStatusCounts: {
         queued: aiQueued,
