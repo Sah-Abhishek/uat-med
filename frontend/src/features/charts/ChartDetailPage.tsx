@@ -144,8 +144,15 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     coderComments: chart.coderCommentsToClient ?? '',
     rejectionComments: chart.rejectionDenialComments ?? '',
     deficiencyComments: chart.deficiencyComments ?? '',
-    allocateCoder: chart.allocatedCoderId ?? '',
-    allocateAuditor: chart.allocatedAuditorId ?? '',
+    // "Allocate to coder/auditor" are explicit *handoff* fields — they start
+    // empty rather than pre-loaded with the current allocation. The backend
+    // treats an allocation id in a save as a handoff and pins the chart in
+    // CODING_IN_PROGRESS / AUDIT_IN_PROGRESS; re-sending the current coder's own
+    // id therefore meant a coder's own save never advanced to CODING_DONE.
+    // Empty lets the save advance the milestone — the allocation FK is untouched
+    // (an omitted id is dropped from the payload, not cleared).
+    allocateCoder: '',
+    allocateAuditor: '',
     priority: chart.priority,
     // Map persisted enum back to the form's display label. OPEN is treated as
     // a "no choice yet" state — represented by an empty string so the select
@@ -481,8 +488,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       coderComments: chart.coderCommentsToClient ?? '',
       rejectionComments: chart.rejectionDenialComments ?? '',
       deficiencyComments: chart.deficiencyComments ?? '',
-      allocateCoder: chart.allocatedCoderId ?? '',
-      allocateAuditor: chart.allocatedAuditorId ?? '',
+      // Handoff fields start empty — see the initial draft builder above.
+      allocateCoder: '',
+      allocateAuditor: '',
       priority: chart.priority,
       chartStatus:
         chart.chartStatus === 'COMPLETE' ? 'Complete' :
