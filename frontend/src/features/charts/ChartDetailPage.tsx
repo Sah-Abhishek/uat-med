@@ -39,6 +39,7 @@ import { DocumentViewerModal } from './chart-detail/DocumentViewerModal';
 import { ReviewEditModal } from './chart-detail/ReviewEditModal';
 import { ChartLiveDecisionToasts } from '../qa/live/ChartLiveDecisionToasts';
 import { useFormDraft, useAuditDraft, useCustomFieldValues, EMPTY_FORM_DRAFT, type FormDraft } from './chart-detail/formState';
+import { useChartAiCodes } from './chart-detail/useChartAiCodes';
 import { useFieldConfig, STANDARD_FIELD_MAP, isFieldDisabledByStatus } from './chart-detail/useFieldConfig';
 import { ChartDetailSkeleton } from './chart-detail/ChartDetailSkeleton';
 import { UsersPanel } from './chart-detail/sidebar/UsersPanel';
@@ -201,6 +202,15 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   const aiPrediction: AiEncounterResult | null = persisted?.aiPrediction ?? null;
   const uploadedDocs: UploadedDocument[] = persisted?.uploadedDocs ?? [];
 
+  // Single source of truth for the AI codes: one shared query (deduped with the
+  // Review & Edit modal) that prefers the LIVE gateway codes — carrying each
+  // code's predictedCodeId — and falls back to the persisted snapshot when the
+  // gateway is unreachable. Both the sidebar AI ICD card and the modal derive
+  // from `aiCodes`, so the two surfaces can never disagree.
+  // See docs/AI_CODES_SINGLE_SOURCE_FIX.md.
+  const unifiedAi = useChartAiCodes(String(chart.id), aiPrediction);
+  const aiCodes = unifiedAi.prediction;
+
   // Apply the chart's persisted decisions on top of the AI's original
   // prediction so the sidebar AI ICD card reflects what the coder actually
   // submitted (edited codes show new values, rejected codes disappear,
@@ -222,13 +232,15 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     enabled: !!chart.id,
   });
   const liveAiPrediction: AnnotatedPrediction | null = useMemo(() => {
-    if (!aiPrediction) return null;
+    // Annotate the UNIFIED base (live gateway codes when available, snapshot
+    // otherwise) — the exact same data the modal builds its board from.
+    if (!aiCodes) return null;
     const decisions = decisionsQ.data?.items ?? [];
     const draft = draftQ.data?.draft?.payload;
     const draftDecisions = draft?.decisions ?? [];
     const draftAdded = draft?.addedItems ?? [];
     if (decisions.length === 0 && draftDecisions.length === 0 && draftAdded.length === 0) {
-      return aiPrediction; // nothing reviewed yet — show the raw prediction
+      return aiCodes; // nothing reviewed yet — show the raw prediction
     }
     const norm = (s: string) => s.replace(/\./g, '').trim().toUpperCase();
     // Effective NON-added decisions, keyed by the EXACT `${category}|${code}`
@@ -291,9 +303,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     };
     const buckets: Record<string, AnnotatedCode[]> = { PRIMARY: [], SECONDARY: [], PROCEDURE: [] };
     const aiAll = [
-      ...aiPrediction.primary.map((c) => ({ c, orig: 'PRIMARY' })),
-      ...aiPrediction.secondary.map((c) => ({ c, orig: 'SECONDARY' })),
-      ...aiPrediction.procedures.map((c) => ({ c, orig: 'PROCEDURE' })),
+      ...aiCodes.primary.map((c) => ({ c, orig: 'PRIMARY' })),
+      ...aiCodes.secondary.map((c) => ({ c, orig: 'SECONDARY' })),
+      ...aiCodes.procedures.map((c) => ({ c, orig: 'PROCEDURE' })),
     ];
     // Pass 1 — exact (category|code): codes that stayed in their AI category
     // (a dual-category code matches in BOTH its buckets). Mark each consumed.
@@ -349,13 +361,13 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     const secondary = dedup([...buckets.SECONDARY, ...addedFor('SECONDARY')]);
     const procedures = dedup([...buckets.PROCEDURE, ...addedFor('PROCEDURE')]);
     return {
-      ...aiPrediction,
+      ...aiCodes,
       primary,
       secondary,
       procedures,
       codes: [...primary, ...secondary, ...procedures],
     };
-  }, [aiPrediction, decisionsQ.data, draftQ.data]);
+  }, [aiCodes, decisionsQ.data, draftQ.data]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [saveToastOpen, setSaveToastOpen] = useState(false);
@@ -892,7 +904,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
           qc.invalidateQueries({ queryKey: ['chart-code-decision-draft', String(chart.id)] });
           qc.invalidateQueries({ queryKey: ['chart-code-decisions', String(chart.id)] });
         }}
-        prediction={aiPrediction}
+        prediction={aiCodes}
+        aiCodesSettled={unifiedAi.isSettled}
         docs={uploadedDocs}
         chartId={String(chart.id)}
         clientId={worklistQ.data?.clientId}

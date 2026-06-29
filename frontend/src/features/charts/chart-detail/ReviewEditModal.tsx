@@ -28,7 +28,6 @@ import { IS_PRODUCTION_DEPLOYMENT, DEPLOYMENT } from '@/config/deployment';
 import {
   getActiveTimer,
   getCodeDecisionDraft,
-  getPredictedCodes,
   listCodeDecisions,
   saveCodeDecisionDraft,
   submitCodeDecisions,
@@ -38,7 +37,6 @@ import {
   type CodeDecisionType,
   type CodeDecisionVerdict,
   type CodeDraftCategory,
-  type PredictedCodeWithId,
 } from '@/api/charts';
 import { useAuth } from '@/auth/store';
 import {
@@ -60,6 +58,13 @@ interface Props {
   open: boolean;
   onClose: () => void;
   prediction: AiEncounterResult | null;
+  /** Whether the parent's shared predicted-codes query has settled (or wasn't
+   * needed). The modal builds its board from the `prediction` prop now — the
+   * SAME unified source the sidebar uses — so it gates draft restore/autosave
+   * on this to avoid stamping decisions onto a board that's about to swap from
+   * snapshot codes to live ones. Defaults to true so the modal still works if
+   * rendered without the parent hook. */
+  aiCodesSettled?: boolean;
   docs?: UploadedDocument[];
   chartId: string;
   clientId?: number;
@@ -183,6 +188,10 @@ function buildItems(prediction: AiEncounterResult | null): CodeItem[] {
     description: c.description,
     confidence: c.confidence,
     reasoning: c.justification,
+    // Carried through from the unified source so submit can forward it. Present
+    // on live gateway codes; undefined on the snapshot fallback (gateway down),
+    // where submit is already impossible.
+    predictedCodeId: c.predictedCodeId,
   });
   // const admit = prediction.primary[0]
   //   ? [mk(prediction.primary[0], 'ADMIT CODE', 0)]
@@ -212,44 +221,6 @@ function dedupeByCategoryCode(items: CodeItem[]): CodeItem[] {
   return out;
 }
 
-/** Builds items from the orchestrator's codes-with-IDs response — the
- * preferred source because each item carries `predictedCodeId` (the UUID
- * the orchestrator needs back on submit). Falls back to buildItems() when
- * this fetch fails. */
-function buildItemsFromPredictedCodes(rows: PredictedCodeWithId[]): CodeItem[] {
-  const categoryFor = (codeType: string): Category | null => {
-    const t = codeType?.toLowerCase();
-    if (t === 'primary')   return 'PRIMARY';
-    if (t === 'secondary') return 'SECONDARY';
-    if (t === 'procedure' || t === 'cpt') return 'PROCEDURE';
-    return null;
-  };
-  const out: CodeItem[] = [];
-  // Sort so the modal's category order is stable: Primary → Secondary → Procedure.
-  const order: Record<Category, number> = {
-    'ADMIT CODE': 0, PRIMARY: 1, SECONDARY: 2, PROCEDURE: 3,
-  };
-  const tagged = rows
-    .map((r, i) => ({ r, i, cat: categoryFor(r.code_type) }))
-    .filter((x): x is { r: PredictedCodeWithId; i: number; cat: Category } => x.cat !== null)
-    .sort((a, b) =>
-      order[a.cat] - order[b.cat] ||
-      (a.r.sequence_pos ?? a.i) - (b.r.sequence_pos ?? b.i),
-    );
-  for (const { r, i, cat } of tagged) {
-    out.push({
-      key: `${cat}-${i}-${r.icd_code}-${r.id}`,
-      category: cat,
-      code: r.icd_code,
-      description: r.description,
-      confidence: r.confidence,
-      reasoning: (r.evidence_json as any)?.justification,
-      predictedCodeId: r.id,
-    });
-  }
-  return dedupeByCategoryCode(out);
-}
-
 function fmtTimer(secs: number) {
   const total = Math.max(0, Math.floor(secs));
   const mm = Math.floor(total / 60);
@@ -263,6 +234,7 @@ export function ReviewEditModal({
   open,
   onClose,
   prediction,
+  aiCodesSettled = true,
   docs = [],
   chartId,
   clientId,
@@ -274,19 +246,13 @@ export function ReviewEditModal({
   // QA watching a coder's live draft (read-only). Drives the draft fetch +
   // hydration that's otherwise skipped in read-only mode.
   const watchingLiveDraft = readOnly && liveDraftUserId != null;
-  // Prefer the orchestrator codes-with-IDs response (each item carries
-  // `predictedCodeId` for the submit forward). Fall back to the AI
-  // prediction blob if the fetch hasn't returned yet or fails.
-  const predictedCodesQ = useQuery({
-    queryKey: ['chart-predicted-codes', chartId],
-    queryFn: () => getPredictedCodes(chartId),
-    enabled: open && !!chartId,
-  });
-  const aiItems = useMemo(() => {
-    const rows = predictedCodesQ.data?.codes;
-    if (rows && rows.length > 0) return buildItemsFromPredictedCodes(rows);
-    return buildItems(prediction);
-  }, [predictedCodesQ.data, prediction]);
+  // Codes come straight from the `prediction` prop — the parent feeds us the
+  // SAME unified source the sidebar's AI ICD card uses (live gateway codes
+  // preferred, each carrying `predictedCodeId` for the submit forward; the
+  // persisted snapshot as fallback when the gateway is down). Deriving both
+  // surfaces from one query is what keeps them from ever diverging.
+  // See docs/AI_CODES_SINGLE_SOURCE_FIX.md.
+  const aiItems = useMemo(() => buildItems(prediction), [prediction]);
   const [state, setState] = useState<Record<string, CodeState>>({});
   const [selectedIdx, setSelectedIdx] = useState(0);
   // Two-level left pane: top picks Documents vs AI Summary, sub picks
@@ -584,11 +550,14 @@ export function ReviewEditModal({
     }
   }, [open, qc, chartId]);
 
-  // All three sources settled (success or error) — the board is in its final
-  // shape, so restoring/saving against it is safe.
+  // All sources settled — the board is in its final shape, so restoring/saving
+  // against it is safe. The predicted-codes query is now owned by the parent
+  // hook (deduped, shared with the sidebar); `aiCodesSettled` reports when it
+  // has resolved so we don't restore a draft onto snapshot codes that are about
+  // to be replaced by live ones.
   const boardReady =
     open &&
-    (predictedCodesQ.isSuccess || predictedCodesQ.isError) &&
+    aiCodesSettled &&
     (decisionsQ.isSuccess || decisionsQ.isError) &&
     (readOnly || draftQ.isSuccess || draftQ.isError);
 

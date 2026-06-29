@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, In, IsNull, QueryFailedError, Repository, SelectQueryBuilder } from 'typeorm';
@@ -13,7 +13,7 @@ import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
-import { AiGatewayClient, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
+import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
@@ -70,6 +70,8 @@ export function aiProcessingMs(startedAtIso: string | undefined | null, complete
 
 @Injectable()
 export class ChartsService {
+  private readonly log = new Logger(ChartsService.name);
+
   /**
    * Whitelist of client-facing sort keys → TypeORM property paths (alias.prop,
    * resolved to real columns at SQL build time). Keys mirror the `sortKey`s the
@@ -160,9 +162,10 @@ export class ChartsService {
       .leftJoinAndSelect('worklist.process', 'process')
       .leftJoinAndSelect('c.serviceLine', 'serviceLine');
 
-    // Role-scoped visibility: coders / auditors see only their own queue.
+    // Role-scoped visibility: coders see only their own queue. Auditors — like
+    // team-leads / managers — see every chart and self-allocate one to work on
+    // it (the startTimer guard still enforces allocation before timing).
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
-    if (user.role === Role.AUDITOR) qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
 
     // Hide charts orphaned by a soft-deleted worklist (see helper).
     this.excludeOrphanedCharts(qb);
@@ -286,7 +289,8 @@ export class ChartsService {
   async summary(user: AuthenticatedUser, q: { clientId?: number; locationId?: number } = {}) {
     const qb = this.charts.createQueryBuilder('c');
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
-    if (user.role === Role.AUDITOR) qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
+    // Auditors see all charts (mirrors list()), so no auditor-scoped filter here —
+    // the tiles / tab counts stay in step with the full list they now see.
     // Keep the tiles / tab counts in step with list(): exclude orphaned charts.
     // Applied to the base qb before any clone so every count below inherits it.
     this.excludeOrphanedCharts(qb);
@@ -1884,7 +1888,123 @@ async update(id: number, dto: UpdateChartDto) {
       return { codes: [], encounterId: null };
     }
     const codes = await this.aiGateway.getEncounterCodes(encounterId);
+    // Self-heal the persisted snapshot so the offline fallback and every other
+    // reader of customFields.aiPrediction (the sidebar's snapshot path, list
+    // filters, analytics) converge on the gateway's CURRENT codes — the write-
+    // once snapshot is what let the two surfaces drift in the first place.
+    // Best-effort: a sync failure must never break this read. (A gateway error
+    // already threw above, so we never sync stale codes — the old snapshot
+    // stands.) See docs/AI_CODES_SINGLE_SOURCE_FIX.md.
+    try {
+      await this.syncAiPredictionSnapshot(chartId, encounterId, codes, chart);
+    } catch (err) {
+      this.log.warn(`chart=${chartId} aiPrediction snapshot sync skipped: ${(err as Error).message}`);
+    }
     return { codes, encounterId };
+  }
+
+  /** Re-shape the gateway's review codes into the snapshot's
+   * `customFields.aiPrediction` layout: bucketed into primary/secondary/
+   * procedures (cpt folds into procedures), deduped by (bucket, code), and
+   * ordered deterministically by sequence position so repeated syncs of the
+   * same codes produce an identical array (no write churn). Each code keeps its
+   * gateway UUID as `predictedCodeId`. Mirrors the frontend `useChartAiCodes`
+   * mapping so the snapshot fallback is byte-identical to the live source. */
+  private bucketGatewayCodes(rows: PredictedCodeReviewItem[]) {
+    const toCode = (r: PredictedCodeReviewItem) => ({
+      code: r.icd_code,
+      description: r.description,
+      confidence: r.confidence,
+      codeType: r.code_type,
+      sequencePos: r.sequence_pos ?? null,
+      justification: (r.evidence_json as { justification?: string } | null)?.justification,
+      predictedCodeId: r.id,
+    });
+    const primary: ReturnType<typeof toCode>[] = [];
+    const secondary: ReturnType<typeof toCode>[] = [];
+    const procedures: ReturnType<typeof toCode>[] = [];
+    const sorted = [...rows].sort(
+      (a, b) =>
+        (a.sequence_pos ?? Number.MAX_SAFE_INTEGER) - (b.sequence_pos ?? Number.MAX_SAFE_INTEGER) ||
+        (a.icd_code ?? '').localeCompare(b.icd_code ?? ''),
+    );
+    const seen = new Set<string>();
+    for (const r of sorted) {
+      const t = (r.code_type ?? '').toLowerCase();
+      const bucket =
+        t === 'primary' ? primary :
+        t === 'secondary' ? secondary :
+        t === 'procedure' || t === 'cpt' ? procedures :
+        null;
+      if (!bucket) continue;
+      const key = `${t}|${(r.icd_code ?? '').replace(/\./g, '').trim().toUpperCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      bucket.push(toCode(r));
+    }
+    return { primary, secondary, procedures, codes: [...primary, ...secondary, ...procedures] };
+  }
+
+  /** Order-sensitive deep-equal over the snapshot's code identity fields. Used
+   * to skip the write when the gateway codes haven't actually changed. */
+  private codesEqual(a: unknown[] | undefined, b: unknown[] | undefined): boolean {
+    const canon = (arr: unknown[] | undefined) =>
+      JSON.stringify(
+        (arr ?? []).map((c) => {
+          const x = c as Record<string, unknown>;
+          return [x.code, x.description, x.codeType ?? null, x.confidence ?? null, x.sequencePos ?? null, x.predictedCodeId ?? null];
+        }),
+      );
+    return canon(a) === canon(b);
+  }
+
+  /** Re-persist the gateway's codes into `customFields.aiPrediction` so the
+   * snapshot stays current. Preserves the narrative/timing fields the codes
+   * endpoint doesn't return (clinicalSummary, auditNotes, codingTips,
+   * complianceAlerts, documentationGaps, physicianQueries, *At timings).
+   * Re-read → merge → save (mirrors AiPipelineWatcher#finalize) so a concurrent
+   * edit to other customFields keys is never stomped; only writes when the
+   * codes changed, and only onto an existing snapshot for THIS encounter (never
+   * fabricates one, never writes a stale encounter over a newer prediction). */
+  private async syncAiPredictionSnapshot(
+    chartId: number,
+    encounterId: string,
+    gatewayCodes: PredictedCodeReviewItem[],
+    loaded?: Chart,
+  ): Promise<void> {
+    const { primary, secondary, procedures, codes } = this.bucketGatewayCodes(gatewayCodes);
+
+    // Cheap pre-check against the already-loaded row — the steady state after
+    // the first heal — to skip the extra re-read + write entirely.
+    const cur = (loaded?.customFields as Record<string, any> | undefined)?.aiPrediction as
+      | { encounterId?: string; codes?: unknown[] }
+      | undefined;
+    if (cur && cur.encounterId === encounterId && this.codesEqual(cur.codes, codes)) return;
+
+    const fresh = await this.charts.findOne({ where: { id: chartId } });
+    if (!fresh) return;
+    const cf = (fresh.customFields ?? {}) as Record<string, any>;
+    const prev = cf.aiPrediction as { encounterId?: string; codes?: unknown[] } | undefined;
+    // Guard the race: a finalize may have written a newer prediction between our
+    // read and now. Only heal an existing snapshot for the same encounter.
+    if (!prev || prev.encounterId !== encounterId) return;
+    if (this.codesEqual(prev.codes, codes)) return;
+
+    fresh.customFields = {
+      ...cf,
+      aiPrediction: {
+        ...prev,
+        codes,
+        primary,
+        secondary,
+        procedures,
+        codesSyncedAt: new Date().toISOString(),
+      },
+    };
+    await this.charts.save(fresh);
+    this.log.log(
+      `chart=${chartId} encounter=${encounterId} aiPrediction snapshot synced (${codes.length} codes).`,
+    );
   }
 
   private async requireChart(id: number): Promise<Chart> {

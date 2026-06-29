@@ -239,6 +239,10 @@ export interface AiPredictedCode {
   codeType?: string;
   sequencePos?: number;
   justification?: string;
+  /** Gateway UUID (predicted_code_id) for this AI suggestion. Present only when
+   * the code came from the live /predicted-codes response (or a snapshot the
+   * backend has since synced) — the Review modal forwards it on submit. */
+  predictedCodeId?: string;
 }
 
 export interface UploadedDocument {
