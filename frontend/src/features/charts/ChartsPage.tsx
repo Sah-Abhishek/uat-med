@@ -428,24 +428,47 @@ const DEFAULT_VISIBLE_KEYS: ReadonlySet<string> = new Set(
 // Resetting to defaults keeps the new column visible for everyone.
 const COLUMN_PREFS_KEY = 'charts.columns.visible.v3';
 
+// Set once we've surfaced the Assignment column to an auditor, so the one-time
+// seed below doesn't fight a later manual hide.
+const ASSIGNMENT_SEED_KEY = 'charts.columns.assignmentSeeded.v1';
+
 function loadVisibleColumns(isAuditor: boolean): Set<string> {
   const fallback = new Set<string>([...DEFAULT_VISIBLE_KEYS, ...LOCKED_KEYS]);
   // Auditors now see every chart, so default the Assignment column ON for them
-  // so they can tell their own charts from the rest. Still hideable afterwards;
-  // once they save any column prefs, their choice (including hiding it) sticks.
+  // so they can tell their own charts from the rest.
   if (isAuditor) fallback.add('assignment');
+
+  let visible: Set<string>;
   try {
     const raw = localStorage.getItem(COLUMN_PREFS_KEY);
-    if (!raw) return fallback;
-    const parsed: string[] = JSON.parse(raw);
-    const next = new Set(parsed.filter((k) => COLUMN_KEYS.has(k)));
-    // Locked columns can never be removed via stored prefs either — re-add
-    // them in case a user hand-edited localStorage.
-    LOCKED_KEYS.forEach((k) => next.add(k));
-    return next;
+    if (!raw) {
+      visible = fallback;
+    } else {
+      const parsed: string[] = JSON.parse(raw);
+      const next = new Set(parsed.filter((k) => COLUMN_KEYS.has(k)));
+      // Locked columns can never be removed via stored prefs either — re-add
+      // them in case a user hand-edited localStorage.
+      LOCKED_KEYS.forEach((k) => next.add(k));
+      visible = next;
+    }
   } catch {
-    return fallback;
+    visible = fallback;
   }
+
+  // One-time seed: surface the Assignment column for auditors who already had
+  // saved column prefs from before this column existed. Done once per browser
+  // (guarded by ASSIGNMENT_SEED_KEY) so that hiding it afterwards still sticks.
+  if (isAuditor) {
+    try {
+      if (!localStorage.getItem(ASSIGNMENT_SEED_KEY)) {
+        visible.add('assignment');
+        localStorage.setItem(ASSIGNMENT_SEED_KEY, '1');
+      }
+    } catch {
+      /* ignore disabled / full storage */
+    }
+  }
+  return visible;
 }
 
 function saveVisibleColumns(visible: Set<string>) {
