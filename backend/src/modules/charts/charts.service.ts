@@ -814,8 +814,18 @@ async update(id: number, dto: UpdateChartDto) {
       // clear, number = set. So check `!== undefined`, not truthiness.
       if (dto.serviceLineId !== undefined) c.serviceLineId = dto.serviceLineId;
       if (dto.allocation && dto.allocation.action !== 'NONE') {
-        if (dto.allocation.action === 'ALLOCATE_CODING' && dto.allocation.assigneeId) c.allocatedCoderId = dto.allocation.assigneeId;
-        if (dto.allocation.action === 'ALLOCATE_AUDITING' && dto.allocation.assigneeId) c.allocatedAuditorId = dto.allocation.assigneeId;
+        if (dto.allocation.action === 'ALLOCATE_CODING' && dto.allocation.assigneeId) {
+          c.allocatedCoderId = dto.allocation.assigneeId;
+          // First coder allocation lifts the chart out of "Ready to allocate"
+          // into the coding queue (mirrors the worklist-allocate path).
+          if (c.milestone === ChartMilestone.READY_TO_ALLOCATE) c.setMilestone(ChartMilestone.READY_TO_CODE);
+        }
+        if (dto.allocation.action === 'ALLOCATE_AUDITING' && dto.allocation.assigneeId) {
+          c.allocatedAuditorId = dto.allocation.assigneeId;
+          // Allocating an auditor to a *finished* chart moves it into the audit
+          // queue. Only from CODING_DONE — coding must complete before audit.
+          if (c.milestone === ChartMilestone.CODING_DONE) c.setMilestone(ChartMilestone.READY_TO_AUDIT);
+        }
         if (dto.allocation.action === 'REALLOCATE_TO_ORIGINAL_CODER') c.allocatedCoderId = c.originalCoderId ?? c.allocatedCoderId;
       }
     }
@@ -851,6 +861,17 @@ async update(id: number, dto: UpdateChartDto) {
         // Team lead / manager take BOTH slots so they can code and audit the chart.
         c.allocatedCoderId = user.id;
         c.allocatedAuditorId = user.id;
+      }
+      // Self-allocation drives the milestone like the worklist-allocate path:
+      // taking the coder slot lifts READY_TO_ALLOCATE → READY_TO_CODE; taking the
+      // auditor slot on a finished chart moves CODING_DONE → READY_TO_AUDIT.
+      const setsCoder = user.role !== Role.AUDITOR; // coder / teamlead / manager
+      const setsAuditor = user.role !== Role.CODER; // auditor / teamlead / manager
+      if (setsCoder && c.milestone === ChartMilestone.READY_TO_ALLOCATE) {
+        c.setMilestone(ChartMilestone.READY_TO_CODE);
+      }
+      if (setsAuditor && c.milestone === ChartMilestone.CODING_DONE) {
+        c.setMilestone(ChartMilestone.READY_TO_AUDIT);
       }
       toSave.push(c);
       allocatedIds.push(Number(c.id));
