@@ -24,6 +24,7 @@ import { BulkModifyDto, BulkIdsDto } from './dto/bulk-modify.dto';
 import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
 import { ProcessDocumentsDto } from './dto/process-documents.dto';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
+import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
@@ -292,6 +293,28 @@ export class ChartsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.svc.submitCodeDecisions(id, dto, user);
+  }
+
+  /* Per-code auditor audits — the auditor's Agree/Disagree judgment of each
+   * coder decision, layered on top of the (untouched) coder decisions. */
+
+  @Get(':id/code-audits')
+  @Roles(Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
+  @ApiOperation({ summary: "Existing auditor audits (Agree/Disagree per code) for a chart." })
+  listCodeAudits(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.listCodeAudits(id);
+  }
+
+  @Post(':id/code-audits')
+  @Roles(Role.AUDITOR, Role.TEAMLEAD)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Persist auditor audits submitted from the Review & Edit modal. DISAGREE requires a feedback category + note (≥20 chars). Does NOT mutate the coder decisions and is not forwarded to the AI gateway.' })
+  submitCodeAudits(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SubmitCodeAuditsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.submitCodeAudits(id, dto, user);
   }
 
   /** Phase 3 — fetch the final codes once the FE has seen status=SUCCESS. */

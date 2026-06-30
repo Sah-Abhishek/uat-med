@@ -21,6 +21,8 @@ import {
   Save,
   Search,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Undo2,
   X,
 } from 'lucide-react';
@@ -28,9 +30,13 @@ import { IS_PRODUCTION_DEPLOYMENT, DEPLOYMENT } from '@/config/deployment';
 import {
   getActiveTimer,
   getCodeDecisionDraft,
+  listCodeAudits,
   listCodeDecisions,
   saveCodeDecisionDraft,
+  submitCodeAudits,
   submitCodeDecisions,
+  type CodeAuditDraftEntry,
+  type CodeAuditInput,
   type CodeDecisionDraftEntry,
   type CodeDecisionDraftPayload,
   type CodeDecisionInput,
@@ -41,6 +47,7 @@ import {
 import { useAuth } from '@/auth/store';
 import {
   getCodeReviewReasons,
+  getFeedbackCategories,
   type CodeReviewReasonRow,
 } from '@/api/configurations';
 import { AddRuleModal } from '@/features/coder-rules/AddRuleModal';
@@ -78,6 +85,11 @@ interface Props {
    * in-progress draft so QA can watch their unsubmitted accept/reject/edit
    * work. Without it, read-only shows only previously-submitted decisions. */
   liveDraftUserId?: number;
+  /** Auditor mode: the chart has already been coded, so the coder's decisions
+   * are shown locked (like read-only) and the auditor layers an Agree/Disagree
+   * judgment + feedback on each one. Distinct from `readOnly` — audit mode is
+   * editable (of the audit layer) and submits audits, not code decisions. */
+  audit?: boolean;
 }
 
 type Decision = 'pending' | 'accepted' | 'rejected' | 'edited' | 'added';
@@ -153,6 +165,31 @@ interface CodeState {
   rejectReason: string;
   /** Dropdown reason; required on Reject/Edit. Picked from Settings. */
   reasonDropdown: string;
+}
+
+/** Auditor's per-code judgment of a coder decision (audit mode only). */
+type AuditVerdict = 'pending' | 'agree' | 'disagree';
+interface AuditState {
+  verdict: AuditVerdict;
+  /** Feedback category; required on Disagree. Picked from the code's audit area. */
+  feedbackCategory: string;
+  /** Free-text note; required (≥20 chars) on Disagree. */
+  feedbackText: string;
+}
+const AUDIT_FEEDBACK_MIN_CHARS = 20;
+
+/** Maps a board Category onto the configured feedback audit-area name so the
+ * Disagree dropdown shows that area's reasons (mirrors AUDIT_ROWS labels). */
+const CATEGORY_TO_AUDIT_AREA: Record<Category, string> = {
+  'ADMIT CODE': 'Primary Diagnosis',
+  PRIMARY: 'Primary Diagnosis',
+  SECONDARY: 'Secondary Diagnosis',
+  PROCEDURE: 'Procedures',
+};
+
+/** Maps a persisted audit verdict onto the modal's local AuditVerdict. */
+function auditVerdictToLocal(v: 'AGREE' | 'DISAGREE'): AuditVerdict {
+  return v === 'AGREE' ? 'agree' : 'disagree';
 }
 
 // 'ADMIT CODE' intentionally omitted — admit code === primary diagnosis.
@@ -242,10 +279,16 @@ export function ReviewEditModal({
   onSubmitted,
   readOnly = false,
   liveDraftUserId,
+  audit = false,
 }: Props) {
   // QA watching a coder's live draft (read-only). Drives the draft fetch +
   // hydration that's otherwise skipped in read-only mode.
   const watchingLiveDraft = readOnly && liveDraftUserId != null;
+  // The coder's decision controls (Accept/Reject/Edit, Add Code, edits) are
+  // locked both for QA read-only AND for an auditor — the auditor reviews the
+  // coder's work, they don't re-code it. Audit mode then layers its own
+  // editable Agree/Disagree controls on top (see `audit`).
+  const coderControlsLocked = readOnly || audit;
   // Codes come straight from the `prediction` prop — the parent feeds us the
   // SAME unified source the sidebar's AI ICD card uses (live gateway codes
   // preferred, each carrying `predictedCodeId` for the submit forward; the
@@ -254,6 +297,10 @@ export function ReviewEditModal({
   // See docs/AI_CODES_SINGLE_SOURCE_FIX.md.
   const aiItems = useMemo(() => buildItems(prediction), [prediction]);
   const [state, setState] = useState<Record<string, CodeState>>({});
+  // Auditor's per-code verdicts (audit mode only), keyed by item.key. Parallel
+  // to `state` — `state` holds the coder's (locked) decision, this holds the
+  // auditor's judgment of it.
+  const [auditState, setAuditState] = useState<Record<string, AuditState>>({});
   const [selectedIdx, setSelectedIdx] = useState(0);
   // Two-level left pane: top picks Documents vs AI Summary, sub picks
   // which uploaded document is in view.
@@ -335,6 +382,7 @@ export function ReviewEditModal({
     setConfirmOpen(false);
     setAddedItems([]);
     setCategoryOverrides({});
+    setAuditState({});
     setAddCodeOpen(false);
     setAddRuleOpen(false);
     setActiveDocId(docs[0]?.id ?? null);
@@ -370,6 +418,27 @@ export function ReviewEditModal({
     enabled: open && !!clientId && !!locationId,
   });
   const reasonRows: CodeReviewReasonRow[] = reasonsQ.data?.items ?? [];
+
+  // Audit mode only — configured feedback categories (per client/location),
+  // used to populate the Disagree dropdown. Scoped per code category to the
+  // matching audit area, mirroring AuditInfoSection.
+  const feedbackAreasQ = useQuery({
+    queryKey: ['feedback-categories', clientId, locationId],
+    queryFn: () => getFeedbackCategories({ clientId: clientId!, locationId: locationId! }),
+    enabled: open && audit && !!clientId && !!locationId,
+  });
+  const auditFeedbackOptionsFor = useCallback(
+    (category: Category): string[] => {
+      const areas = feedbackAreasQ.data?.areas ?? [];
+      const norm = (s: string) => s.trim().toLowerCase();
+      const match = areas.find((a) => norm(a.name) === norm(CATEGORY_TO_AUDIT_AREA[category]));
+      if (match) return match.reasons.map((r) => r.name).filter(Boolean);
+      // Fallback: no area name matched the category — offer every reason so the
+      // auditor is never blocked by a config-naming mismatch.
+      return areas.flatMap((a) => a.reasons.map((r) => r.name)).filter(Boolean);
+    },
+    [feedbackAreasQ.data],
+  );
 
   // Pull whatever decisions were previously submitted for this chart. Loaded
   // in BOTH modes: QA read-only needs it to show the coder's verdicts, and
@@ -492,6 +561,59 @@ export function ReviewEditModal({
     setAddedItems((prev) => (prev.length > 0 ? prev : seededAdds));
   }, [open, decisionsQ.data, aiItems]);
 
+  /* ── Audit layer (audit mode only) ─────────────────────────────────────
+   * The auditor's Agree/Disagree judgments are kept in `auditState`, parallel
+   * to the coder's (locked) `state`. Seeded from previously-submitted audits,
+   * then overlaid by the auditor's own in-progress draft (see draft restore). */
+  const auditsQ = useQuery({
+    queryKey: ['chart-code-audits', chartId],
+    queryFn: () => listCodeAudits(chartId),
+    enabled: open && audit && !!chartId,
+  });
+  // Seed auditState from previously-submitted audits. Matched to board items by
+  // (codeType, code) — the AI/board code, the SAME key chart_code_decisions uses
+  // (and that submit/draft use here), so no dependence on coder `state`. Only
+  // fills items still 'pending' so it never clobbers the auditor's drafted
+  // verdicts (overlaid by the draft restore below) or in-session edits, even if
+  // it re-runs as the board settles.
+  useEffect(() => {
+    if (!open || !audit) return;
+    const rows = auditsQ.data?.items;
+    if (!rows?.length) return;
+    const byKey = new Map(rows.map((r) => [`${r.codeType}|${normalizeCode(r.codeValue)}`, r]));
+    setAuditState((prev) => {
+      const next = { ...prev };
+      for (const it of items) {
+        const codeType = categoryToCodeType(it.category);
+        if (!codeType) continue;
+        const cur = next[it.key];
+        if (cur && cur.verdict !== 'pending') continue;
+        const r = byKey.get(`${codeType}|${normalizeCode(it.code)}`);
+        if (!r) continue;
+        next[it.key] = {
+          verdict: auditVerdictToLocal(r.verdict),
+          feedbackCategory: r.feedbackCategory ?? '',
+          feedbackText: r.feedbackText ?? '',
+        };
+      }
+      return next;
+    });
+  }, [open, audit, auditsQ.data, items]);
+
+  // Seed any board item that has no audit yet with a 'pending' default, and
+  // drop entries for items that no longer exist. Keeps auditState in lockstep
+  // with the board the same way the coder state-merge effect does.
+  useEffect(() => {
+    if (!open || !audit) return;
+    setAuditState((prev) => {
+      const next: Record<string, AuditState> = {};
+      for (const it of items) {
+        next[it.key] = prev[it.key] ?? { verdict: 'pending', feedbackCategory: '', feedbackText: '' };
+      }
+      return next;
+    });
+  }, [open, audit, items]);
+
   /* ── Draft persistence ─────────────────────────────────────────────────
    * The board's in-progress state autosaves to the server (per chart, per
    * user) so a refresh / crash / device switch doesn't lose unsubmitted
@@ -559,12 +681,33 @@ export function ReviewEditModal({
     open &&
     aiCodesSettled &&
     (decisionsQ.isSuccess || decisionsQ.isError) &&
+    (!audit || auditsQ.isSuccess || auditsQ.isError) &&
     (readOnly || draftQ.isSuccess || draftQ.isError);
 
   /** Serializes the board's reviewable working state. ADMIT CODE rows (UI
    * mirror of PRIMARY) and untouched 'pending' rows are dropped — a restore
-   * only stamps what the user actually decided. */
+   * only stamps what the user actually decided. In audit mode the coder's
+   * decisions/addedItems are already persisted (and read-only here), so the
+   * auditor's draft carries only the audit layer. */
   const buildDraftPayload = useCallback((): CodeDecisionDraftPayload => {
+    if (audit) {
+      const audits: CodeAuditDraftEntry[] = [];
+      for (const it of items) {
+        if (!categoryToCodeType(it.category)) continue;
+        const a = auditState[it.key];
+        if (!a || a.verdict === 'pending') continue;
+        audits.push({
+          category: it.category as CodeDraftCategory,
+          // Keyed by the board/AI code (NOT the coder's edited value) so the
+          // draft re-attaches in restore without depending on coder `state`.
+          code: it.code,
+          verdict: a.verdict,
+          feedbackCategory: a.feedbackCategory,
+          feedbackText: a.feedbackText,
+        });
+      }
+      return { version: 1, decisions: [], addedItems: [], audits };
+    }
     const decisions: CodeDecisionDraftEntry[] = [];
     for (const it of items) {
       if (!categoryToCodeType(it.category)) continue;
@@ -594,7 +737,7 @@ export function ReviewEditModal({
           description: it.description,
         })),
     };
-  }, [items, state, addedItems, categoryOverrides]);
+  }, [audit, items, state, auditState, addedItems, categoryOverrides]);
 
   // Restore: stamp the draft over whatever the submitted-decisions hydration
   // seeded (the draft is newer working state, so it wins — codes absent from
@@ -687,7 +830,31 @@ export function ReviewEditModal({
         return [...prevAdds, ...draftAdds.filter((it) => !present.has(`${it.category}|${it.code}`))];
       });
     }
-  }, [open, readOnly, watchingLiveDraft, boardReady, draftQ.data, draftQ.isError, decisionsQ.data, aiItems]);
+
+    // Audit mode: overlay the auditor's drafted verdicts on top of whatever the
+    // submitted-audit seeding stamped (draft is newer working state, so it wins).
+    // Audit entries are keyed by (category, coder's final code) — the same
+    // identity the autosave wrote — so they re-attach across a refresh.
+    if (audit && Array.isArray(payload.audits) && payload.audits.length > 0) {
+      const auditByKey = new Map(
+        payload.audits.map((a) => [`${a.category}|${normalizeCode(a.code)}`, a]),
+      );
+      setAuditState((prevAudit) => {
+        const next = { ...prevAudit };
+        for (const it of boardItems) {
+          if (!categoryToCodeType(it.category)) continue;
+          const a = auditByKey.get(`${it.category}|${normalizeCode(it.code)}`);
+          if (!a) continue;
+          next[it.key] = {
+            verdict: a.verdict,
+            feedbackCategory: a.feedbackCategory,
+            feedbackText: a.feedbackText,
+          };
+        }
+        return next;
+      });
+    }
+  }, [open, audit, readOnly, watchingLiveDraft, boardReady, draftQ.data, draftQ.isError, decisionsQ.data, aiItems]);
 
   const draftSaveMut = useMutation({
     mutationFn: (payload: CodeDecisionDraftPayload) => saveCodeDecisionDraft(chartId, payload),
@@ -727,7 +894,10 @@ export function ReviewEditModal({
     const payload = buildDraftPayload();
     const serialized = JSON.stringify(payload);
     if (serialized === lastSavedDraftRef.current) return;
-    const isEmpty = payload.decisions.length === 0 && payload.addedItems.length === 0;
+    const isEmpty =
+      payload.decisions.length === 0 &&
+      payload.addedItems.length === 0 &&
+      (payload.audits?.length ?? 0) === 0;
     if (isEmpty && lastSavedDraftRef.current === null) return;
     pendingDraftRef.current = payload;
     const t = setTimeout(() => {
@@ -806,15 +976,28 @@ export function ReviewEditModal({
   const submitMut = useMutation({
     mutationFn: (decisions: CodeDecisionInput[]) => submitCodeDecisions(chartId, decisions),
   });
+  const submitAuditMut = useMutation({
+    mutationFn: (audits: CodeAuditInput[]) => submitCodeAudits(chartId, audits),
+  });
 
   if (!open) return null;
 
   const reviewedCount = items.filter((it) => state[it.key]?.decision !== 'pending').length;
+  // Audit mode progress: how many auditable codes have a verdict.
+  const auditedCount = items.filter(
+    (it) => categoryToCodeType(it.category) && auditState[it.key] && auditState[it.key].verdict !== 'pending',
+  ).length;
   const selected = items[selectedIdx];
   const selectedSt = selected ? state[selected.key] : undefined;
+  const selectedAuditSt = selected ? auditState[selected.key] : undefined;
 
   const update = (key: string, patch: Partial<CodeState>) =>
     setState((p) => ({ ...p, [key]: { ...p[key], ...patch } }));
+  const updateAudit = (key: string, patch: Partial<AuditState>) =>
+    setAuditState((p) => ({
+      ...p,
+      [key]: { ...(p[key] ?? { verdict: 'pending', feedbackCategory: '', feedbackText: '' }), ...patch },
+    }));
 
   // After a code is decided, jump to the next one that still needs review so
   // the coder is walked straight through the worklist. Wraps around to catch
@@ -968,6 +1151,92 @@ export function ReviewEditModal({
     }
   };
 
+  /* ── Audit submit (audit mode) ─────────────────────────────────────────── */
+
+  // Every code the coder acted on is auditable — the auditor must Agree or
+  // Disagree on each. (Codes the coder never touched have no decision to judge.)
+  const auditableItems = items.filter(
+    (it) => categoryToCodeType(it.category) && (state[it.key]?.decision ?? 'pending') !== 'pending',
+  );
+  const unauditedCodes = auditableItems
+    .filter((it) => (auditState[it.key]?.verdict ?? 'pending') === 'pending')
+    .map((it) => state[it.key]?.editedCode || it.code);
+  // Disagree requires a feedback category + a ≥20-char note.
+  const invalidAuditFeedback = auditableItems
+    .map((it) => {
+      const a = auditState[it.key];
+      if (!a || a.verdict !== 'disagree') return null;
+      const catOk = a.feedbackCategory.trim().length > 0;
+      const textOk = a.feedbackText.trim().length >= AUDIT_FEEDBACK_MIN_CHARS;
+      return catOk && textOk ? null : state[it.key]?.editedCode || it.code;
+    })
+    .filter((v): v is string => v !== null);
+
+  const buildAuditPayload = (): CodeAuditInput[] => {
+    const out: CodeAuditInput[] = [];
+    for (const it of items) {
+      const codeType = categoryToCodeType(it.category);
+      if (!codeType) continue;
+      if ((state[it.key]?.decision ?? 'pending') === 'pending') continue;
+      const a = auditState[it.key];
+      if (!a || a.verdict === 'pending') continue;
+      const verdict = a.verdict === 'agree' ? 'AGREE' : 'DISAGREE';
+      out.push({
+        codeType,
+        // Keyed by the AI/board code, exactly like chart_code_decisions.codeValue
+        // (original code; the coder's edited value lives in editedCode there).
+        // This aligns each audit with the coder decision it judges.
+        codeValue: it.code,
+        verdict,
+        feedbackCategory: verdict === 'DISAGREE' ? a.feedbackCategory.trim() : undefined,
+        feedbackText: verdict === 'DISAGREE' ? a.feedbackText.trim() : undefined,
+      });
+    }
+    return out;
+  };
+
+  const auditSubmitDisabled =
+    submitAuditMut.isPending ||
+    auditableItems.length === 0 ||
+    unauditedCodes.length > 0 ||
+    invalidAuditFeedback.length > 0;
+
+  const openAuditConfirm = () => {
+    setSubmitError(null);
+    if (auditableItems.length === 0 || unauditedCodes.length > 0 || invalidAuditFeedback.length > 0) return;
+    setConfirmOpen(true);
+  };
+
+  const onConfirmAuditSubmit = async () => {
+    setSubmitError(null);
+    const payload = buildAuditPayload();
+    if (payload.length === 0) {
+      setConfirmOpen(false);
+      return;
+    }
+    submitInFlightRef.current = true;
+    try {
+      await submitAuditMut.mutateAsync(payload);
+      // The submit superseded (and server-side deleted) the auditor's draft.
+      pendingDraftRef.current = null;
+      lastSavedDraftRef.current = null;
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['chart-code-audits', chartId] }),
+        qc.invalidateQueries({ queryKey: ['chart-code-decision-draft', chartId] }),
+      ]);
+      onSubmitted?.();
+      setConfirmOpen(false);
+      onClose();
+    } catch (err) {
+      submitInFlightRef.current = false;
+      const msg =
+        (err as any)?.response?.data?.error?.message ??
+        (err as any)?.message ??
+        'Failed to submit audit.';
+      setSubmitError(msg);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-stretch p-3 sm:p-5"
@@ -981,7 +1250,7 @@ export function ReviewEditModal({
         <header className="flex items-center justify-between px-5 py-3 bg-[#1A1F2B] text-white">
           <div className="flex items-center gap-4">
             <span className="text-[11px] uppercase tracking-[0.18em] font-semibold text-white/70">
-              {readOnly ? "Coder's Decisions · Read-only" : 'Review & Edit'}
+              {audit ? 'Audit · Review Coder Decisions' : readOnly ? "Coder's Decisions · Read-only" : 'Review & Edit'}
             </span>
             {readOnly ? (
               <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-info/15 border border-info/30 text-info text-xs font-mono">
@@ -1016,7 +1285,46 @@ export function ReviewEditModal({
                 {submitError}
               </span>
             )}
-            {!readOnly && unreviewedCodes.length > 0 && (
+            {/* ── Audit-mode warnings + submit ── */}
+            {audit && unauditedCodes.length > 0 && (
+              <span
+                className="hidden md:inline text-[11px] text-warn"
+                title={`Audit every code first — not yet judged: ${unauditedCodes.join(', ')}`}
+              >
+                {unauditedCodes.length} code(s) not audited yet
+              </span>
+            )}
+            {audit && unauditedCodes.length === 0 && invalidAuditFeedback.length > 0 && (
+              <span
+                className="hidden md:inline text-[11px] text-warn"
+                title={`Missing feedback on: ${invalidAuditFeedback.join(', ')}`}
+              >
+                {invalidAuditFeedback.length} disagree(s) need a category &amp; note ({AUDIT_FEEDBACK_MIN_CHARS}+ chars)
+              </span>
+            )}
+            {audit && (
+              <button
+                type="button"
+                onClick={openAuditConfirm}
+                disabled={auditSubmitDisabled}
+                title={
+                  auditableItems.length === 0
+                    ? 'No coder decisions to audit on this chart'
+                    : unauditedCodes.length > 0
+                      ? `Agree or Disagree on every code first — pending: ${unauditedCodes.join(', ')}`
+                      : invalidAuditFeedback.length > 0
+                        ? 'Provide a feedback category and note (≥20 chars) for every Disagree'
+                        : 'Open audit summary'
+                }
+                className="inline-flex items-center gap-2 h-9 px-4 rounded-pill bg-success text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Check className="w-3.5 h-3.5" />
+                {submitAuditMut.isPending ? 'Submitting…' : 'Review & Submit Audit'}
+              </button>
+            )}
+
+            {/* ── Coder-mode warnings + submit ── */}
+            {!readOnly && !audit && unreviewedCodes.length > 0 && (
               <span
                 className="hidden md:inline text-[11px] text-warn"
                 title={`Review every code first — still pending: ${unreviewedCodes.join(', ')}`}
@@ -1024,7 +1332,7 @@ export function ReviewEditModal({
                 {unreviewedCodes.length} code(s) not reviewed yet
               </span>
             )}
-            {!readOnly && unreviewedCodes.length === 0 && invalidReasons.length > 0 && (
+            {!readOnly && !audit && unreviewedCodes.length === 0 && invalidReasons.length > 0 && (
               <span
                 className="hidden md:inline text-[11px] text-warn"
                 title={`Missing reason on: ${invalidReasons.join(', ')}`}
@@ -1032,7 +1340,7 @@ export function ReviewEditModal({
                 {invalidReasons.length} code(s) need a reason ({REASON_MIN_CHARS}+ chars &amp; dropdown)
               </span>
             )}
-            {!readOnly && (
+            {!readOnly && !audit && (
               <button
                 type="button"
                 onClick={openConfirm}
@@ -1121,9 +1429,15 @@ export function ReviewEditModal({
             setSelectedIdx={setSelectedIdx}
             update={update}
             onSaveAndNext={saveDecisionAndAdvance}
-            reviewedCount={reviewedCount}
+            reviewedCount={audit ? auditedCount : reviewedCount}
             reasonRows={reasonRows}
-            readOnly={readOnly}
+            // Coder controls lock both for QA read-only and for an auditor.
+            readOnly={coderControlsLocked}
+            audit={audit}
+            auditState={auditState}
+            selectedAuditSt={selectedAuditSt}
+            updateAudit={updateAudit}
+            auditFeedbackOptionsFor={auditFeedbackOptionsFor}
             onAddCode={() => setAddCodeOpen(true)}
             onAddRule={() => setAddRuleOpen(true)}
             onChangeCategory={setItemCategory}
@@ -1145,7 +1459,16 @@ export function ReviewEditModal({
         {resizing && <div className="fixed inset-0 z-[60] cursor-col-resize" />}
       </div>
 
-      {confirmOpen && (
+      {confirmOpen && audit && (
+        <AuditConfirmSubmitModal
+          payload={buildAuditPayload()}
+          submitting={submitAuditMut.isPending}
+          error={submitError}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={onConfirmAuditSubmit}
+        />
+      )}
+      {confirmOpen && !audit && (
         <ConfirmSubmitModal
           payload={buildPayload()}
           submitting={submitMut.isPending}
@@ -1430,6 +1753,186 @@ function ConfirmSubmitModal({
   );
 }
 
+/* ── Audit confirm submission ───────────────────────────── */
+
+const AUDIT_VERDICT_META: Record<
+  CodeAuditInput['verdict'],
+  { label: string; chip: string; dot: string }
+> = {
+  AGREE: {
+    label: 'Agree',
+    chip: 'bg-success-soft/60 text-success border-success/30',
+    dot: 'bg-success',
+  },
+  DISAGREE: {
+    label: 'Disagree',
+    chip: 'bg-danger-soft/60 text-danger border-danger/30',
+    dot: 'bg-danger',
+  },
+};
+
+function AuditConfirmSubmitModal({
+  payload,
+  submitting,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  payload: CodeAuditInput[];
+  submitting: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const counts: Record<CodeAuditInput['verdict'], number> = { AGREE: 0, DISAGREE: 0 };
+  for (const a of payload) counts[a.verdict]++;
+
+  const grouped = new Map<CodeDecisionType, CodeAuditInput[]>();
+  for (const a of payload) {
+    const list = grouped.get(a.codeType) ?? [];
+    list.push(a);
+    grouped.set(a.codeType, list);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-stretch p-3 sm:p-6"
+      onClick={() => {
+        if (!submitting) onCancel();
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="m-auto bg-surface rounded-xl shadow-2xl w-[min(720px,96vw)] max-h-[90vh] flex flex-col overflow-hidden border border-line"
+      >
+        <header className="flex items-center justify-between px-5 py-3 border-b border-line bg-surface-sunken/40">
+          <div>
+            <h3 className="text-sm font-bold text-ink">Confirm audit</h3>
+            <p className="text-[11px] text-ink-muted mt-0.5">
+              Review {payload.length} audit{payload.length === 1 ? '' : 's'} before sending.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            aria-label="Close"
+            className="w-8 h-8 rounded-md hover:bg-surface-2 flex items-center justify-center text-ink-muted disabled:opacity-50"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </header>
+
+        {/* Tallies */}
+        <div className="grid grid-cols-2 gap-2 p-4 border-b border-line">
+          {(['AGREE', 'DISAGREE'] as const).map((v) => {
+            const meta = AUDIT_VERDICT_META[v];
+            return (
+              <div
+                key={v}
+                className="rounded-lg border border-line bg-surface-sunken/40 px-3 py-2 flex items-center justify-between"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span className={cn('w-1.5 h-1.5 rounded-full', meta.dot)} />
+                  <span className="text-[11px] uppercase tracking-wide font-semibold text-ink-muted">
+                    {meta.label}
+                  </span>
+                </span>
+                <span className="text-lg font-bold font-mono text-ink">{counts[v]}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Audit list */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+          {payload.length === 0 ? (
+            <p className="text-sm text-ink-muted text-center py-6">Nothing to submit yet.</p>
+          ) : (
+            Array.from(grouped.entries()).map(([codeType, list]) => (
+              <section key={codeType}>
+                <h4 className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-2">
+                  {CODE_TYPE_LABEL[codeType]} ({list.length})
+                </h4>
+                <ul className="space-y-1.5">
+                  {list.map((a, i) => {
+                    const meta = AUDIT_VERDICT_META[a.verdict];
+                    return (
+                      <li
+                        key={`${codeType}-${a.codeValue}-${i}`}
+                        className="rounded-lg border border-line bg-surface px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border',
+                              meta.chip,
+                            )}
+                          >
+                            {meta.label}
+                          </span>
+                          <span className="font-mono font-semibold text-sm text-ink">{a.codeValue}</span>
+                        </div>
+                        {a.verdict === 'DISAGREE' && (a.feedbackCategory || a.feedbackText) && (
+                          <div className="mt-1.5 ml-1 text-[11px] text-ink-muted space-y-0.5">
+                            {a.feedbackCategory && (
+                              <div>
+                                <span className="font-semibold">Category:</span>{' '}
+                                <span className="text-ink">{a.feedbackCategory}</span>
+                              </div>
+                            )}
+                            {a.feedbackText && (
+                              <div className="line-clamp-2">
+                                <span className="font-semibold">Note:</span>{' '}
+                                <span className="text-ink">{a.feedbackText}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ))
+          )}
+        </div>
+
+        {error && (
+          <div className="px-4 py-2 border-t border-line text-xs text-danger bg-danger-soft/30">
+            {error}
+          </div>
+        )}
+
+        <footer className="flex items-center justify-between gap-3 px-4 py-3 border-t border-line bg-surface-sunken/40">
+          <span className="text-[11px] text-ink-muted">
+            Submitting records your audit against this chart.
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={submitting}
+              className="h-9 px-4 rounded-pill border border-line text-sm font-semibold text-ink hover:bg-surface-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={submitting || payload.length === 0}
+              className="inline-flex items-center gap-2 h-9 px-5 rounded-pill bg-success text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Check className="w-3.5 h-3.5" />
+              {submitting ? 'Submitting…' : 'Confirm & Submit Audit'}
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
 /* ── Document pane ───────────────────────────────────────── */
 
 function DocumentPane({
@@ -1616,6 +2119,11 @@ function CodesPane({
   reviewedCount,
   reasonRows,
   readOnly,
+  audit,
+  auditState,
+  selectedAuditSt,
+  updateAudit,
+  auditFeedbackOptionsFor,
   onAddCode,
   onAddRule,
   onChangeCategory,
@@ -1632,6 +2140,11 @@ function CodesPane({
   reviewedCount: number;
   reasonRows: CodeReviewReasonRow[];
   readOnly: boolean;
+  audit: boolean;
+  auditState: Record<string, AuditState>;
+  selectedAuditSt: AuditState | undefined;
+  updateAudit: (key: string, patch: Partial<AuditState>) => void;
+  auditFeedbackOptionsFor: (category: Category) => string[];
   onAddCode: () => void;
   onAddRule: () => void;
   onChangeCategory: (key: string, category: Category) => void;
@@ -1649,7 +2162,7 @@ function CodesPane({
           <div>
             <h3 className="text-base font-semibold text-ink">ICD &amp; CPT Codes</h3>
             <p className="text-xs text-ink-muted mt-0.5">
-              {items.length} code{items.length === 1 ? '' : 's'} · {reviewedCount} reviewed
+              {items.length} code{items.length === 1 ? '' : 's'} · {reviewedCount} {audit ? 'audited' : 'reviewed'}
             </p>
           </div>
           {!readOnly && (
@@ -1689,10 +2202,12 @@ function CodesPane({
               state={state}
               selectedIdx={selectedIdx}
               setSelectedIdx={setSelectedIdx}
+              audit={audit}
+              auditState={auditState}
             />
           ))
         )}
-        {groups.length > 0 && <Legend />}
+        {groups.length > 0 && <Legend audit={audit} />}
       </div>
 
       {/* Selected detail card */}
@@ -1708,6 +2223,10 @@ function CodesPane({
             onSaveAndNext={onSaveAndNext}
             reasonRows={reasonRows}
             readOnly={readOnly}
+            audit={audit}
+            auditSt={selectedAuditSt}
+            onUpdateAudit={(p) => updateAudit(selected.key, p)}
+            auditFeedbackOptions={auditFeedbackOptionsFor(selected.category)}
             onChangeCategory={(cat) => onChangeCategory(selected.key, cat)}
             onRemove={() => onRemoveItem(selected.key)}
           />
@@ -1749,6 +2268,8 @@ function CategoryRow({
   state,
   selectedIdx,
   setSelectedIdx,
+  audit,
+  auditState,
 }: {
   category: Category;
   list: CodeItem[];
@@ -1756,6 +2277,8 @@ function CategoryRow({
   state: Record<string, CodeState>;
   selectedIdx: number;
   setSelectedIdx: (i: number) => void;
+  audit: boolean;
+  auditState: Record<string, AuditState>;
 }) {
   const dot = CATEGORY_DOT[category];
   return (
@@ -1772,18 +2295,34 @@ function CategoryRow({
           const st = state[it.key];
           const isSelected = idx === selectedIdx;
           const dec = (st?.decision ?? 'pending') as Decision;
+          // Audit mode keeps the coder's verdict color on the chip and adds a
+          // small dot for the auditor's progress (agree=green, disagree=red,
+          // pending=hollow) so the auditor can see what's left at a glance.
+          const av = audit ? (auditState[it.key]?.verdict ?? 'pending') : null;
           return (
             <button
               key={it.key}
               type="button"
               onClick={() => setSelectedIdx(idx)}
               className={cn(
-                'inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold border transition',
+                'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold border transition',
                 isSelected
                   ? 'border-warn bg-warn-soft text-warn shadow-sm'
                   : decisionChip(dec),
               )}
             >
+              {av && (
+                <span
+                  className={cn(
+                    'w-1.5 h-1.5 rounded-full border',
+                    av === 'agree'
+                      ? 'bg-success border-success'
+                      : av === 'disagree'
+                        ? 'bg-danger border-danger'
+                        : 'bg-transparent border-ink-subtle',
+                  )}
+                />
+              )}
               {st?.editedCode || it.code}
             </button>
           );
@@ -1808,15 +2347,31 @@ function decisionChip(d: Decision) {
   }
 }
 
-function Legend() {
+function Legend({ audit }: { audit?: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2">
-      {LEGEND.map((l) => (
-        <span key={l.d} className="inline-flex items-center gap-1.5 text-[10px] text-ink-muted">
-          <span className={cn('w-1.5 h-1.5 rounded-full', l.cls)} />
-          {l.label}
-        </span>
-      ))}
+    <div className="space-y-1.5 pt-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {LEGEND.map((l) => (
+          <span key={l.d} className="inline-flex items-center gap-1.5 text-[10px] text-ink-muted">
+            <span className={cn('w-1.5 h-1.5 rounded-full', l.cls)} />
+            {l.label}
+          </span>
+        ))}
+      </div>
+      {audit && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="text-[10px] text-ink-muted font-semibold uppercase tracking-wide">Audit:</span>
+          <span className="inline-flex items-center gap-1.5 text-[10px] text-ink-muted">
+            <span className="w-1.5 h-1.5 rounded-full bg-success border border-success" /> Agree
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-[10px] text-ink-muted">
+            <span className="w-1.5 h-1.5 rounded-full bg-danger border border-danger" /> Disagree
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-[10px] text-ink-muted">
+            <span className="w-1.5 h-1.5 rounded-full bg-transparent border border-ink-subtle" /> Not audited
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1837,11 +2392,28 @@ interface SelectedCardProps {
   onSaveAndNext: (patch: Partial<CodeState> & { decision: Decision }) => void;
   reasonRows: CodeReviewReasonRow[];
   readOnly: boolean;
+  audit: boolean;
+  auditSt: AuditState | undefined;
+  onUpdateAudit: (patch: Partial<AuditState>) => void;
+  auditFeedbackOptions: string[];
   onChangeCategory: (category: Category) => void;
   onRemove: () => void;
 }
 
 function SelectedCard(props: SelectedCardProps) {
+  // Audit mode wins over read-only: it shows the coder's decision locked (the
+  // read-only display) AND the auditor's Agree/Disagree controls on top.
+  if (props.audit) {
+    return (
+      <AuditCard
+        item={props.item}
+        st={props.st}
+        auditSt={props.auditSt ?? { verdict: 'pending', feedbackCategory: '', feedbackText: '' }}
+        onUpdate={props.onUpdateAudit}
+        feedbackOptions={props.auditFeedbackOptions}
+      />
+    );
+  }
   if (props.readOnly) return <ReadOnlyCard item={props.item} st={props.st} />;
   if (props.st.decision === 'added') {
     return (
@@ -2445,6 +3017,154 @@ function ReadOnlyCard({ item, st }: { item: CodeItem; st: CodeState }) {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Auditor's per-code surface: shows the three layers — AI original, the
+ * coder's (locked) decision + reason, and the auditor's editable Agree /
+ * Disagree + feedback. Reuses the read-only display pieces so the AI and coder
+ * layers render identically to the QA view. */
+function AuditCard({
+  item,
+  st,
+  auditSt,
+  onUpdate,
+  feedbackOptions,
+}: {
+  item: CodeItem;
+  st: CodeState;
+  auditSt: AuditState;
+  onUpdate: (patch: Partial<AuditState>) => void;
+  feedbackOptions: string[];
+}) {
+  const hasReason =
+    st.decision === 'rejected' || st.decision === 'edited' || st.decision === 'added';
+  const coderEdited =
+    st.decision === 'edited' && normalizeCode(item.code) !== normalizeCode(st.editedCode);
+  const disagree = auditSt.verdict === 'disagree';
+  const chars = auditSt.feedbackText.trim().length;
+  const short = chars < AUDIT_FEEDBACK_MIN_CHARS;
+
+  return (
+    <div className={cn(CARD_SHELL, 'space-y-4')}>
+      {/* ── Layers 1 + 2: AI original + coder decision ── */}
+      <div>
+        <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
+          {item.category}
+        </p>
+        <CodeDisplay st={st} />
+        {coderEdited && (
+          <p className="mt-1.5 text-xs text-ink-muted">
+            AI suggested <span className="font-mono font-semibold text-ink">{item.code}</span>
+            {' → '}coder changed it to{' '}
+            <span className="font-mono font-semibold text-info">{st.editedCode}</span>
+          </p>
+        )}
+        <AiReasoning item={item} />
+        <ReadOnlyVerdictRow decision={st.decision} />
+        {hasReason && (
+          <div className="mt-3">
+            <RecordedReason
+              dropdown={st.reasonDropdown}
+              notes={st.rejectReason}
+              hideDropdown={st.decision === 'added'}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* ── Layer 3: the auditor's judgment ── */}
+      <div className="rounded-xl border border-warn/30 bg-warn-soft/20 p-3 space-y-3">
+        <p className="text-[10px] uppercase tracking-wide font-semibold text-warn">
+          Your Audit
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            // Agreeing clears any feedback the auditor had typed under Disagree.
+            onClick={() => onUpdate({ verdict: 'agree', feedbackCategory: '', feedbackText: '' })}
+            className={cn(
+              'inline-flex items-center justify-center gap-2 h-10 rounded-lg border text-sm font-semibold transition',
+              auditSt.verdict === 'agree'
+                ? 'border-success bg-success text-white shadow-sm'
+                : 'border-line bg-surface text-ink hover:border-success/60 hover:bg-success-soft/40',
+            )}
+          >
+            <ThumbsUp className="w-4 h-4" /> Agree
+          </button>
+          <button
+            type="button"
+            onClick={() => onUpdate({ verdict: 'disagree' })}
+            className={cn(
+              'inline-flex items-center justify-center gap-2 h-10 rounded-lg border text-sm font-semibold transition',
+              disagree
+                ? 'border-danger bg-danger text-white shadow-sm'
+                : 'border-line bg-surface text-ink hover:border-danger/60 hover:bg-danger-soft/40',
+            )}
+          >
+            <ThumbsDown className="w-4 h-4" /> Disagree
+          </button>
+        </div>
+
+        {disagree && (
+          <div className="rounded-lg border border-line bg-surface p-3 space-y-3">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted inline-flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-danger" />
+                  Feedback Category
+                  <span className="text-danger normal-case">*</span>
+                </label>
+                <span className="text-[10px] text-ink-muted/70 font-mono">
+                  {feedbackOptions.length} option{feedbackOptions.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              {feedbackOptions.length === 0 ? (
+                <div className="text-xs px-3 py-2 rounded-lg border border-warn/30 bg-warn-soft/30 text-warn">
+                  No feedback categories configured for this area. Ask a Team Lead to add some in
+                  Configurations → Feedback Categories.
+                </div>
+              ) : (
+                <FancySelect
+                  value={auditSt.feedbackCategory}
+                  onChange={(v) => onUpdate({ feedbackCategory: v })}
+                  options={feedbackOptions.map((o) => ({ value: o, label: o }))}
+                  placeholder="Select a feedback category…"
+                  className={cn(!auditSt.feedbackCategory.trim() && '[&>button]:border-danger/60')}
+                />
+              )}
+              {!auditSt.feedbackCategory.trim() && feedbackOptions.length > 0 && (
+                <p className="mt-1 text-[11px] text-danger">Feedback category is required.</p>
+              )}
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+                Note <span className="text-danger normal-case">*</span>
+              </label>
+              <Textarea
+                placeholder={`Why do you disagree with the coder? (min ${AUDIT_FEEDBACK_MIN_CHARS} characters)…`}
+                value={auditSt.feedbackText}
+                onChange={(e) => onUpdate({ feedbackText: e.target.value })}
+                rows={3}
+                error={short ? `Minimum ${AUDIT_FEEDBACK_MIN_CHARS} characters.` : undefined}
+              />
+              <div className="flex items-center justify-between mt-1">
+                <div className="flex-1 h-1 bg-surface-sunken rounded-full overflow-hidden mr-3">
+                  <div
+                    className={cn('h-full transition-all', short ? 'bg-danger/70' : 'bg-success')}
+                    style={{ width: `${Math.min(100, (chars / AUDIT_FEEDBACK_MIN_CHARS) * 100)}%` }}
+                  />
+                </div>
+                <span className={cn('text-[11px] font-mono shrink-0', short ? 'text-danger' : 'text-success')}>
+                  {chars} / {AUDIT_FEEDBACK_MIN_CHARS}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

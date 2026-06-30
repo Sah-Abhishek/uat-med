@@ -302,6 +302,38 @@ export const getPredictedCodes = (chartId: string) =>
 export const submitCodeDecisions = (chartId: string, decisions: CodeDecisionInput[]) =>
   post<SubmitDecisionsResponse>(`/charts/${chartId}/code-decisions`, { decisions });
 
+/* ── Per-code auditor audits ─────────────────────────────────
+ * An auditor's Agree/Disagree judgment of each coder decision, layered on top
+ * of the (untouched) coder decisions. Internal QA only — never forwarded to
+ * the AI gateway. */
+
+export type CodeAuditVerdict = 'AGREE' | 'DISAGREE';
+
+export interface CodeAuditInput {
+  codeType: CodeDecisionType;
+  /** The coder's final code value being audited. */
+  codeValue: string;
+  /** The chart_code_decisions row this audit judges (informational linkage). */
+  chartCodeDecisionId?: number;
+  verdict: CodeAuditVerdict;
+  /** Required when verdict is DISAGREE. */
+  feedbackCategory?: string;
+  /** Required (≥20 chars) when verdict is DISAGREE. */
+  feedbackText?: string;
+}
+
+export interface CodeAuditRecord extends CodeAuditInput {
+  id: number;
+  auditedByUserId: number;
+  auditedAt: string;
+}
+
+export const listCodeAudits = (chartId: string) =>
+  get<{ items: CodeAuditRecord[] }>(`/charts/${chartId}/code-audits`);
+
+export const submitCodeAudits = (chartId: string, audits: CodeAuditInput[]) =>
+  post<{ items: CodeAuditRecord[] }>(`/charts/${chartId}/code-audits`, { audits });
+
 /* ── Code-decision drafts (autosaved pre-submission state) ── */
 
 /** Board category a draft entry belongs to (ADMIT CODE rows are a disabled
@@ -330,12 +362,26 @@ export interface CodeDecisionDraftAddedItem {
   description: string;
 }
 
+/** One in-progress auditor audit, identified by (category, code) — the same
+ * stable identity decisions use. Only present in an auditor's draft; a coder's
+ * draft leaves `audits` undefined. */
+export interface CodeAuditDraftEntry {
+  category: CodeDraftCategory;
+  code: string;
+  verdict: 'pending' | 'agree' | 'disagree';
+  feedbackCategory: string;
+  feedbackText: string;
+}
+
 /** Versioned so a future shape change can discard incompatible drafts
  * instead of breaking the restore. Bump `version` on breaking changes. */
 export interface CodeDecisionDraftPayload {
   version: 1;
   decisions: CodeDecisionDraftEntry[];
   addedItems: CodeDecisionDraftAddedItem[];
+  /** Auditor's in-progress audits. Absent in a coder's draft. Additive, so a
+   * coder-shaped draft (no `audits`) restores unchanged. */
+  audits?: CodeAuditDraftEntry[];
 }
 
 /** Fetch a chart's in-progress draft. Omit `userId` for the caller's own

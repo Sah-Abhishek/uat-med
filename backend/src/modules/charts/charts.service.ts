@@ -6,13 +6,15 @@ import { Chart } from '../../entities/chart.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
 import { ChartFeedback } from '../../entities/chart-feedback.entity';
 import { ChartCodeDecision } from '../../entities/chart-code-decision.entity';
+import { ChartCodeAudit } from '../../entities/chart-code-audit.entity';
 import { ChartCodeDecisionDraft } from '../../entities/chart-code-decision-draft.entity';
 import { ChartTimeLog, type ChartTimerKind } from '../../entities/chart-time-log.entity';
 import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
-import { ChartMilestone, ChartStatus, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
+import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
+import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
@@ -130,6 +132,7 @@ export class ChartsService {
     @InjectRepository(ChartAllocation) private readonly allocations: Repository<ChartAllocation>,
     @InjectRepository(ChartFeedback) private readonly feedbacks: Repository<ChartFeedback>,
     @InjectRepository(ChartCodeDecision) private readonly codeDecisions: Repository<ChartCodeDecision>,
+    @InjectRepository(ChartCodeAudit) private readonly codeAudits: Repository<ChartCodeAudit>,
     @InjectRepository(ChartCodeDecisionDraft) private readonly decisionDrafts: Repository<ChartCodeDecisionDraft>,
     @InjectRepository(ChartTimeLog) private readonly timeLogs: Repository<ChartTimeLog>,
     @InjectRepository(CodeReviewReason) private readonly codeReviewReasons: Repository<CodeReviewReason>,
@@ -1509,6 +1512,122 @@ async update(id: number, dto: UpdateChartDto) {
         reasonText: r.reasonText,
         decidedByUserId: Number(r.decidedByUserId),
         decidedAt: r.decidedAt,
+      })),
+    };
+  }
+
+  /* ── Per-code auditor audits ──────────────────────────────────────────
+   * An auditor's Agree/Disagree judgment of each coder decision, layered on
+   * top of chart_code_decisions WITHOUT mutating it — so the AI prediction,
+   * the coder edit and the audit verdict can all be shown together in the
+   * Review & Edit modal. One audit per (chart, codeType, codeValue); submit
+   * upserts on that key. Internal QA only — not forwarded to the AI gateway. */
+
+  async listCodeAudits(chartId: number) {
+    await this.requireChart(chartId);
+    const rows = await this.codeAudits.find({
+      where: { chartId },
+      order: { codeType: 'ASC', codeValue: 'ASC' },
+    });
+    return {
+      items: rows.map((r) => ({
+        id: Number(r.id),
+        chartCodeDecisionId: r.chartCodeDecisionId != null ? Number(r.chartCodeDecisionId) : undefined,
+        codeType: r.codeType,
+        codeValue: r.codeValue,
+        verdict: r.verdict,
+        feedbackCategory: r.feedbackCategory ?? undefined,
+        feedbackText: r.feedbackText ?? undefined,
+        auditedByUserId: Number(r.auditedByUserId),
+        auditedAt: r.auditedAt,
+      })),
+    };
+  }
+
+  async submitCodeAudits(
+    chartId: number,
+    dto: SubmitCodeAuditsDto,
+    user: AuthenticatedUser,
+  ) {
+    await this.requireChart(chartId);
+
+    // Dedupe by (codeType, codeValue) — the unique index would otherwise reject
+    // the second-onwards rows. First wins.
+    const seenKeys = new Set<string>();
+    const uniqueAudits: typeof dto.audits = [];
+    for (const a of dto.audits) {
+      const key = `${a.codeType}|${a.codeValue}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      uniqueAudits.push(a);
+    }
+
+    // Validate up front so a bad row fails the whole batch (atomic write below).
+    for (const a of uniqueAudits) {
+      const key = `${a.codeType}|${a.codeValue}`;
+      if (a.verdict === CodeAuditVerdict.DISAGREE) {
+        if (!(a.feedbackCategory ?? '').trim()) {
+          throw new BadRequestException({
+            error: { code: 'invalid_argument', message: `feedbackCategory is required when verdict is DISAGREE for ${key}.` },
+          });
+        }
+        if ((a.feedbackText ?? '').trim().length < 20) {
+          throw new BadRequestException({
+            error: { code: 'invalid_argument', message: `feedbackText must be at least 20 characters when verdict is DISAGREE for ${key}.` },
+          });
+        }
+      }
+    }
+
+    const now = new Date();
+    // Atomic write: either every audit persists or none does.
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const auditsRepo = manager.getRepository(ChartCodeAudit);
+      const rows: ChartCodeAudit[] = [];
+      for (const a of uniqueAudits) {
+        const existing = await auditsRepo.findOne({
+          where: { chartId, codeType: a.codeType, codeValue: a.codeValue },
+        });
+        // AGREE clears any prior feedback; DISAGREE carries category + note.
+        const isDisagree = a.verdict === CodeAuditVerdict.DISAGREE;
+        const payload: Partial<ChartCodeAudit> = {
+          chartId,
+          chartCodeDecisionId: a.chartCodeDecisionId ?? existing?.chartCodeDecisionId ?? null,
+          codeType: a.codeType,
+          codeValue: a.codeValue,
+          verdict: a.verdict,
+          feedbackCategory: isDisagree ? (a.feedbackCategory ?? '').trim() : null,
+          feedbackText: isDisagree ? (a.feedbackText ?? '').trim() : null,
+          auditedByUserId: user.id,
+          auditedAt: now,
+        };
+        if (existing) {
+          await auditsRepo.update({ id: existing.id }, payload);
+          const reloaded = await auditsRepo.findOne({ where: { id: existing.id } });
+          if (reloaded) rows.push(reloaded);
+        } else {
+          const created = await auditsRepo.save(auditsRepo.create(payload));
+          rows.push(created);
+        }
+      }
+      // The submit supersedes the auditor's autosaved working state — clear
+      // their draft in the same transaction so a refresh can't resurrect it.
+      // (The auditor's draft is a separate per-user row from the coder's.)
+      await manager.getRepository(ChartCodeDecisionDraft).delete({ chartId, userId: user.id });
+      return rows;
+    });
+
+    return {
+      items: saved.map((r) => ({
+        id: Number(r.id),
+        chartCodeDecisionId: r.chartCodeDecisionId != null ? Number(r.chartCodeDecisionId) : undefined,
+        codeType: r.codeType,
+        codeValue: r.codeValue,
+        verdict: r.verdict,
+        feedbackCategory: r.feedbackCategory ?? undefined,
+        feedbackText: r.feedbackText ?? undefined,
+        auditedByUserId: Number(r.auditedByUserId),
+        auditedAt: r.auditedAt,
       })),
     };
   }

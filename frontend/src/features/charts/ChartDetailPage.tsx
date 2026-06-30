@@ -152,6 +152,14 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   const qc = useQueryClient();
   const user = useAuth((s) => s.user);
   const isAuditor = user?.role === 'AUDITOR';
+  // An auditor reviews a chart only once coding is finished — at that point the
+  // Review & Edit modal switches to audit mode (coder decisions shown locked,
+  // auditor layers Agree/Disagree on top). Mirrors HeaderCard's codingFinished.
+  const isAuditMode =
+    isAuditor &&
+    ['CODING_DONE', 'READY_TO_AUDIT', 'AUDIT_IN_PROGRESS', 'AUDIT_DONE', 'CLOSED'].includes(
+      chart.milestone,
+    );
 
   // Frontend-only draft for the source's wide form. Seed with everything the
   // server persists for this chart so the auditor opens with the coder's saved
@@ -1011,6 +1019,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
           // Reflect any draft edits / submission the modal made in the sidebar.
           qc.invalidateQueries({ queryKey: ['chart-code-decision-draft', String(chart.id)] });
           qc.invalidateQueries({ queryKey: ['chart-code-decisions', String(chart.id)] });
+          qc.invalidateQueries({ queryKey: ['chart-code-audits', String(chart.id)] });
         }}
         prediction={aiCodes}
         aiCodesSettled={unifiedAi.isSettled}
@@ -1020,6 +1029,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         locationId={worklistQ.data?.locationId}
         readOnly={qaReadOnly}
         liveDraftUserId={liveDraftUserId}
+        audit={isAuditMode}
         onSubmitted={() => setSaveToastOpen(true)}
       />
 

@@ -70,4 +70,13 @@ export enum CodeReviewDecision {
   ADDED = 'ADDED',
 }
 
+/** An auditor's per-code judgment of a coder's submitted decision. AGREE =
+ * the coder got it right; DISAGREE = the coder got it wrong (carries a
+ * feedback category + note). Internal QA only — not forwarded to the AI
+ * gateway (there is no corrected code to teach). */
+export enum CodeAuditVerdict {
+  AGREE = 'AGREE',
+  DISAGREE = 'DISAGREE',
+}
+
 export { Role } from './roles.enum';
