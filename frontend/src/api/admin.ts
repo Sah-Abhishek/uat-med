@@ -209,8 +209,10 @@ export interface ActiveWorkItem {
   locationName: string | null;
   kind: 'CODING' | 'AUDIT';
   startedAt: string;
-  /** Live elapsed since the timer started (ms). */
+  /** Live elapsed since the timer started (ms); frozen total for paused rows. */
   elapsedMs: number;
+  /** True for a chart the user has paused (on break) rather than actively timing. */
+  paused?: boolean;
 }
 
 export interface ActiveWorkResponse {

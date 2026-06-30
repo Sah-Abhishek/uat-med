@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Clock, FileStack, RefreshCw, Users } from 'lucide-react';
+import { Activity, Clock, FileStack, Pause, RefreshCw, Users } from 'lucide-react';
 
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -46,7 +46,7 @@ export function ActiveWorkPage() {
     <div>
       <PageHeader
         title="Live Activity"
-        subtitle="Charts being worked on right now — coders and auditors with a running timer."
+        subtitle="Charts being worked on right now — coders and auditors with a running or paused timer."
         actions={
           <button
             type="button"
@@ -95,7 +95,10 @@ export function ActiveWorkPage() {
               </thead>
               <tbody>
                 {items.map((it) => {
-                  const liveMs = Math.max(it.elapsedMs, now - Date.parse(it.startedAt));
+                  // Paused rows show the frozen total; running rows tick from startedAt.
+                  const liveMs = it.paused
+                    ? it.elapsedMs
+                    : Math.max(it.elapsedMs, now - Date.parse(it.startedAt));
                   return (
                     <tr key={it.sessionId} className="border-b border-line/60 last:border-b-0 hover:bg-surface-2/40">
                       <td className="px-4 py-2.5">
@@ -112,9 +115,12 @@ export function ActiveWorkPage() {
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
-                        <PillBadge tone={it.kind === 'AUDIT' ? 'sky' : 'mint'}>
-                          {KIND_LABEL[it.kind] ?? it.kind}
-                        </PillBadge>
+                        <span className="inline-flex items-center gap-1.5">
+                          <PillBadge tone={it.kind === 'AUDIT' ? 'sky' : 'mint'}>
+                            {KIND_LABEL[it.kind] ?? it.kind}
+                          </PillBadge>
+                          {it.paused && <PillBadge tone="butter">Paused</PillBadge>}
+                        </span>
                       </td>
                       <td className="px-4 py-2.5">
                         <Link
@@ -134,10 +140,17 @@ export function ActiveWorkPage() {
                       </td>
                       <td className="px-4 py-2.5 text-xs text-ink-muted">{fmtClock(it.startedAt)}</td>
                       <td className="px-4 py-2.5 text-right">
-                        <span className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-success tabular-nums">
-                          <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                          {fmtElapsed(liveMs)}
-                        </span>
+                        {it.paused ? (
+                          <span className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-warn tabular-nums">
+                            <Pause className="w-3 h-3" />
+                            {fmtElapsed(liveMs)}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-success tabular-nums">
+                            <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                            {fmtElapsed(liveMs)}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
