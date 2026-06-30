@@ -224,9 +224,18 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
   useEffect(() => {
     if (!active.data) return;
     if (active.data.chartId === chart.id) {
-      // Same chart — restore from server's start time. Also seed `elapsed`
-      // immediately so the first paint after this effect shows the real
-      // time (not 00:00:00 for ~1s until the interval ticks).
+      // Same chart but PAUSED — the server reports it as active so the Charts
+      // page can show it, but it is NOT running: don't start the live clock
+      // (no open session). The frozen total is shown from chart.coderTimeMs.
+      if (active.data.paused) {
+        setStartedAt(null);
+        setStoppedAt(null);
+        setConflict(null);
+        return;
+      }
+      // Same chart, running — restore from the server's start time. Also seed
+      // `elapsed` immediately so the first paint shows the real time (not
+      // 00:00:00 for ~1s until the interval ticks).
       const startedAtMs = Date.parse(active.data.startedAt);
       setStartedAt(startedAtMs);
       setElapsed(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
@@ -341,7 +350,7 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
   // running timer for this chart but our local `startedAt` hasn't been
   // synced yet, render a placeholder so we don't flash 00:00:00 at the user.
   const restoringTimer =
-    !!active.data && active.data.chartId === chart.id && !running;
+    !!active.data && active.data.chartId === chart.id && !active.data.paused && !running;
   const isResolving = canTime && (active.isPending || restoringTimer);
 
   // QA read-only view: the timer isn't usable here (you're reviewing someone

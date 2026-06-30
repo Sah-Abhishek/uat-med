@@ -431,7 +431,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     queryFn: getActiveTimer,
     enabled: canTime,
   });
-  const timerRunning = activeTimer.data?.chartId === chart.id;
+  // A paused chart is reported by active-timer (so the Charts page can show it)
+  // but it is NOT running — exclude paused so editing stays locked.
+  const timerRunning = activeTimer.data?.chartId === chart.id && !activeTimer.data?.paused;
   const timerStopped = !timerRunning;
   // Paused break (set via the timer's Pause): the timer is frozen and editing,
   // Save, and the Review & Edit modal are all locked until the user resumes.
