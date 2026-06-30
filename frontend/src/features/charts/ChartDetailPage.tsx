@@ -127,11 +127,26 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   // Seed helpers for the multi-value fields (DRG, PCS). For DRG, fall back to the
   // legacy single value (_formDraft.drgValue string, or the numeric drg_value
   // column) so charts saved before DRG went multi still load their value.
-  const seedStringArray = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : []);
-  const seedDrgValues = (stash: Record<string, unknown>): string[] => {
-    if (Array.isArray(stash.drgValues)) return stash.drgValues as string[];
-    if (typeof stash.drgValue === 'string' && stash.drgValue) return [stash.drgValue];
-    if (chart.drgValue != null && String(chart.drgValue) !== '') return [String(chart.drgValue)];
+  type CodeDesc = { code: string; description: string };
+  // Normalize a stored list into {code, description}[]. Tolerates the brief
+  // string[]-only shape (codes without descriptions) and drops empty rows.
+  const seedCodeDescArray = (v: unknown): CodeDesc[] =>
+    Array.isArray(v)
+      ? v
+          .map((x) =>
+            typeof x === 'string'
+              ? { code: x, description: '' }
+              : {
+                  code: String((x as { code?: unknown })?.code ?? ''),
+                  description: String((x as { description?: unknown })?.description ?? ''),
+                },
+          )
+          .filter((x) => x.code || x.description)
+      : [];
+  const seedDrgValues = (stash: Record<string, unknown>): CodeDesc[] => {
+    if (Array.isArray(stash.drgValues)) return seedCodeDescArray(stash.drgValues);
+    if (typeof stash.drgValue === 'string' && stash.drgValue) return [{ code: stash.drgValue, description: '' }];
+    if (chart.drgValue != null && String(chart.drgValue) !== '') return [{ code: String(chart.drgValue), description: '' }];
     return [];
   };
   const { draft, update: rawUpdate, setDraft } = useFormDraft({
@@ -172,7 +187,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     poa: typeof formDraftStash.poa === 'string' ? formDraftStash.poa : '',
     los: typeof formDraftStash.los === 'string' ? formDraftStash.los : '',
     procedureCode: typeof formDraftStash.procedureCode === 'string' ? formDraftStash.procedureCode : '',
-    pcsCodes: seedStringArray(formDraftStash.pcsCodes),
+    pcsCodes: seedCodeDescArray(formDraftStash.pcsCodes),
     responsibleParty: Array.isArray(formDraftStash.responsibleParty) ? formDraftStash.responsibleParty : [],
     holdReason: Array.isArray(formDraftStash.holdReason) ? formDraftStash.holdReason : [],
     auditOption: Array.isArray(formDraftStash.auditOption) ? formDraftStash.auditOption : [],
@@ -502,7 +517,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       poa: typeof stash.poa === 'string' ? stash.poa : '',
       los: typeof stash.los === 'string' ? stash.los : '',
       procedureCode: typeof stash.procedureCode === 'string' ? stash.procedureCode : '',
-      pcsCodes: seedStringArray(stash.pcsCodes),
+      pcsCodes: seedCodeDescArray(stash.pcsCodes),
       responsibleParty: Array.isArray(stash.responsibleParty) ? stash.responsibleParty : [],
       holdReason: Array.isArray(stash.holdReason) ? stash.holdReason : [],
       auditOption: Array.isArray(stash.auditOption) ? stash.auditOption : [],
@@ -631,9 +646,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         // Round-trip the full multi-value DRG and PCS lists. The numeric
         // `drgValue` column below still gets the first DRG value parsed, keeping
         // reports/queries that read the column happy.
-        drgValues: draft.drgValues,
+        drgValues: draft.drgValues.filter((r) => r.code.trim() || r.description.trim()),
         procedureCode: draft.procedureCode,
-        pcsCodes: draft.pcsCodes,
+        pcsCodes: draft.pcsCodes.filter((r) => r.code.trim() || r.description.trim()),
         responsibleParty: draft.responsibleParty,
         holdReason: draft.holdReason,
         auditOption: draft.auditOption,
@@ -649,6 +664,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         const key = String(cf.id);
         if (key in customValues) customFieldValues[key] = customValues[key];
       }
+      // First non-empty DRG code, for the numeric drg_value column below.
+      const firstDrgCode = draft.drgValues.map((r) => r.code.trim()).find(Boolean);
       const payload: UpdateChartDto = {
         chartNo: draft.chartNo || undefined,
         mrNumber: draft.mrNo || undefined,
@@ -662,9 +679,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         admitDate: draft.admitDate || undefined,
         dischargeDate: draft.dischargeDate || undefined,
         dos: draft.dateOfService || undefined,
-        // First DRG value populates the numeric column for backward-compat;
-        // the full list lives in customFields._formDraft.drgValues.
-        drgValue: draft.drgValues[0] ? parseFloat(draft.drgValues[0]) || undefined : undefined,
+        // First non-empty DRG code populates the numeric column for backward-
+        // compat; the full list (code + description) lives in _formDraft.drgValues.
+        drgValue: firstDrgCode ? parseFloat(firstDrgCode) || undefined : undefined,
         // Drives the milestone state machine: backend keeps the chart in
         // CODING_IN_PROGRESS / AUDIT_IN_PROGRESS when these are set, otherwise
         // advances to CODING_DONE / AUDIT_DONE.

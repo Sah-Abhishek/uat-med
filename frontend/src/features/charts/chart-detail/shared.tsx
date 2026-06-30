@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Sparkles, X as XIcon } from 'lucide-react';
+import { Check, ChevronDown, Plus, Sparkles, X as XIcon } from 'lucide-react';
 import { Input, Label, FancySelect, DatePicker, type DateMarker } from '@/components/ui/Field';
 import { cn } from '@/lib/utils';
 
@@ -129,36 +129,31 @@ export function FormField({
   );
 }
 
-/* ── Tags input (free-entry chips) ────────────────────────
- * Free-text multi-value field: type a value and press Enter (or comma) to add a
- * chip, ✕ to remove, Backspace on an empty input removes the last chip. Unlike
- * MultiSelect there's no fixed option list — for codes the coder types freely
- * (e.g. PCS codes, DRG values). Duplicates (case-insensitive) are ignored. */
-export function TagsInput({
+/* ── Code + description list (free-entry rows) ─────────────
+ * Multi-value field where each entry has a code/value AND a description. The
+ * coder adds rows (code input + description input), removes them with ✕, and
+ * appends with "+ Add". Used for PCS codes and DRG values. */
+export function CodeDescListInput({
   label,
   required,
   values,
   onChange,
   readOnly,
-  placeholder,
-  maxLen,
+  codePlaceholder,
+  descPlaceholder,
+  maxCodeLen,
 }: {
   label: string;
   required?: boolean;
-  values: string[];
-  onChange: (next: string[]) => void;
+  values: Array<{ code: string; description: string }>;
+  onChange: (next: Array<{ code: string; description: string }>) => void;
   readOnly?: boolean;
-  placeholder?: string;
-  maxLen?: number;
+  codePlaceholder?: string;
+  descPlaceholder?: string;
+  maxCodeLen?: number;
 }) {
-  const [text, setText] = useState('');
-
-  const add = (raw: string) => {
-    const v = maxLen ? raw.trim().slice(0, maxLen) : raw.trim();
-    if (!v) return;
-    if (!values.some((x) => x.toLowerCase() === v.toLowerCase())) onChange([...values, v]);
-    setText('');
-  };
+  const patch = (i: number, p: Partial<{ code: string; description: string }>) =>
+    onChange(values.map((row, idx) => (idx === i ? { ...row, ...p } : row)));
 
   return (
     <div className="min-w-0">
@@ -168,48 +163,51 @@ export function TagsInput({
           {required && <span className="text-danger"> *</span>}
         </Label>
       </div>
-      <div
-        className={cn(
-          'flex flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1.5 min-h-[38px]',
-          readOnly && 'bg-surface-sunken opacity-70 pointer-events-none',
-        )}
-      >
-        {values.map((v, i) => (
-          <span
-            key={`${v}-${i}`}
-            className="inline-flex items-center gap-1 rounded-pill bg-primary-soft text-primary-ink dark:text-primary px-2 py-0.5 text-xs font-medium"
-          >
-            <span className="font-mono">{v}</span>
-            {!readOnly && (
-              <button
-                type="button"
-                aria-label={`Remove ${v}`}
-                onClick={() => onChange(values.filter((_, idx) => idx !== i))}
-                className="hover:text-danger"
-              >
-                <XIcon className="w-3 h-3" />
-              </button>
-            )}
-          </span>
-        ))}
-        {!readOnly && (
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ',') {
-                e.preventDefault();
-                add(text);
-              } else if (e.key === 'Backspace' && !text && values.length) {
-                onChange(values.slice(0, -1));
-              }
-            }}
-            onBlur={() => add(text)}
-            placeholder={values.length === 0 ? placeholder ?? 'Type and press Enter…' : ''}
-            className="flex-1 min-w-[80px] bg-transparent outline-none text-sm"
-          />
-        )}
-      </div>
+      {readOnly && values.length === 0 ? (
+        <div className="rounded-lg bg-surface-sunken px-3 py-2 text-sm text-ink-subtle">—</div>
+      ) : (
+        <div className="space-y-1.5">
+          {values.map((row, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <Input
+                value={row.code}
+                onChange={(e) =>
+                  patch(i, { code: maxCodeLen ? e.target.value.slice(0, maxCodeLen) : e.target.value })
+                }
+                readOnly={readOnly}
+                placeholder={codePlaceholder ?? 'Code'}
+                className={cn('w-28 shrink-0 font-mono', readOnly && 'bg-surface-sunken')}
+              />
+              <Input
+                value={row.description}
+                onChange={(e) => patch(i, { description: e.target.value })}
+                readOnly={readOnly}
+                placeholder={descPlaceholder ?? 'Description'}
+                className={cn('flex-1', readOnly && 'bg-surface-sunken')}
+              />
+              {!readOnly && (
+                <button
+                  type="button"
+                  aria-label="Remove row"
+                  onClick={() => onChange(values.filter((_, idx) => idx !== i))}
+                  className="shrink-0 p-1 text-ink-subtle hover:text-danger"
+                >
+                  <XIcon className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => onChange([...values, { code: '', description: '' }])}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Toast } from '@/components/ui/Primitives';
-import { FormField, TagsInput, SkeletonGrid } from './shared';
+import { FormField, CodeDescListInput, SkeletonGrid } from './shared';
 import type { DateMarker } from '@/components/ui/Field';
 import { CustomFieldsRenderer } from './CustomFieldsRenderer';
 import type { FormDraft, CustomFieldValues } from './formState';
@@ -298,14 +298,15 @@ export function ChartInfoSection({
               />
             )}
             {visible('drgValue') && (
-              <TagsInput
+              <CodeDescListInput
                 label="DRG Value"
                 required={required('drgValue')}
                 values={draft.drgValues}
                 onChange={(next) => update('drgValues', next)}
                 readOnly={readOnly}
-                maxLen={8}
-                placeholder="Add DRG…"
+                maxCodeLen={8}
+                codePlaceholder="DRG"
+                descPlaceholder="Description"
               />
             )}
           </div>
@@ -336,14 +337,15 @@ export function ChartInfoSection({
               />
             )}
             {visible('pcsCodes') ? (
-              <TagsInput
+              <CodeDescListInput
                 label="PCS codes"
                 required={required('pcsCodes')}
                 values={draft.pcsCodes}
                 onChange={(next) => update('pcsCodes', next)}
                 readOnly={readOnly}
-                maxLen={10}
-                placeholder="Add PCS code…"
+                maxCodeLen={10}
+                codePlaceholder="PCS code"
+                descPlaceholder="Description"
               />
             ) : (
               <div />

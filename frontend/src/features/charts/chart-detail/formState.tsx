@@ -19,9 +19,9 @@ export interface FormDraft {
   facility: string;
   poa: string;
   los: string;
-  drgValues: string[];
+  drgValues: Array<{ code: string; description: string }>;
   procedureCode: string;
-  pcsCodes: string[];
+  pcsCodes: Array<{ code: string; description: string }>;
   subSpecialty: string;
 
   // Processing Info
