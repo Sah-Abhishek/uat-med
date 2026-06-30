@@ -123,6 +123,8 @@ export interface ActiveTimer {
   milestone: ChartMilestone;
   startedAt: string;
   elapsedMs: number;
+  /** True when the chart is paused (timer frozen) rather than actively running. */
+  paused?: boolean;
 }
 
 export const getActiveTimer = () => get<ActiveTimer | null>('/charts/active-timer');

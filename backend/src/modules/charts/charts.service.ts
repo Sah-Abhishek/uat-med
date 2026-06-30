@@ -810,25 +810,50 @@ async update(id: number, dto: UpdateChartDto) {
       where: { userId: user.id, stoppedAt: IsNull() },
       order: { startedAt: 'DESC' },
     });
-    if (!open) return null;
-
-    const chartId = Number(open.chartId);
-    const c = await this.charts.findOne({ where: { id: chartId } });
-    if (!c) {
-      // Orphan (chart gone but FK cascade missed it): close the session so it
-      // stops shadowing future Starts, and report no active timer.
-      open.stoppedAt = new Date();
-      open.elapsedMs = open.stoppedAt.getTime() - open.startedAt.getTime();
-      await this.timeLogs.save(open);
-      return null;
+    if (open) {
+      const chartId = Number(open.chartId);
+      const c = await this.charts.findOne({ where: { id: chartId } });
+      if (!c) {
+        // Orphan (chart gone but FK cascade missed it): close the session so it
+        // stops shadowing future Starts, and report no active timer.
+        open.stoppedAt = new Date();
+        open.elapsedMs = open.stoppedAt.getTime() - open.startedAt.getTime();
+        await this.timeLogs.save(open);
+        return null;
+      }
+      return {
+        chartId: String(chartId),
+        chartNo: c.chartNo ?? null,
+        worklistId: String(c.worklistId),
+        milestone: c.milestone,
+        startedAt: open.startedAt.toISOString(),
+        elapsedMs: Date.now() - open.startedAt.getTime(),
+        paused: false,
+      };
     }
+
+    // No open session: a paused chart still counts as the user's active work
+    // (Pause closes the session but keeps the chart flagged), so surface it here
+    // too — the Charts page shows it and links back so the user can resume.
+    const paused = await this.charts
+      .createQueryBuilder('c')
+      .where(`c.custom_fields -> 'timerPaused' ->> 'userId' = :uid`, { uid: String(user.id) })
+      .getOne();
+    if (!paused) return null;
+    const totalRow = await this.timeLogs
+      .createQueryBuilder('t')
+      .select('COALESCE(SUM(t.elapsed_ms), 0)', 'sum')
+      .where('t.chart_id = :cid', { cid: paused.id })
+      .getRawOne<{ sum: string }>();
+    const pausedAt = (paused.customFields as Record<string, any>)?.timerPaused?.at ?? null;
     return {
-      chartId: String(chartId),
-      chartNo: c.chartNo ?? null,
-      worklistId: String(c.worklistId),
-      milestone: c.milestone,
-      startedAt: open.startedAt.toISOString(),
-      elapsedMs: Date.now() - open.startedAt.getTime(),
+      chartId: String(paused.id),
+      chartNo: paused.chartNo ?? null,
+      worklistId: String(paused.worklistId),
+      milestone: paused.milestone,
+      startedAt: pausedAt ?? new Date().toISOString(),
+      elapsedMs: Number(totalRow?.sum ?? 0),
+      paused: true,
     };
   }
 

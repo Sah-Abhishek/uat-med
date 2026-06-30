@@ -69,6 +69,7 @@ import {
   UserPlus,
   UserCheck,
   Clock,
+  Pause,
   ChevronRight,
   RotateCcw,
   X,
@@ -1600,7 +1601,8 @@ function ActiveTimerCard() {
   });
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    if (!active) return;
+    // Only tick for a running timer — a paused chart shows a frozen total.
+    if (!active || active.paused) return;
     const iv = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(iv);
   }, [active]);
@@ -1635,20 +1637,41 @@ function ActiveTimerCard() {
     );
   }
 
-  const elapsed = Math.max(0, Math.floor((now - Date.parse(active.startedAt)) / 1000));
+  const paused = !!active.paused;
+  const elapsed = paused
+    ? Math.floor(active.elapsedMs / 1000)
+    : Math.max(0, Math.floor((now - Date.parse(active.startedAt)) / 1000));
 
   return (
-    <Link
-      to={`/charts/${active.chartId}`}
-      className="block group"
-    >
-      <div className="rounded-card border border-primary/40 bg-gradient-to-r from-primary-soft/60 to-warn-soft/40 px-5 py-4 flex items-center gap-4 hover:shadow-card transition">
-        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-          <Clock className="w-4 h-4 text-primary-ink dark:text-primary" />
+    <Link to={`/charts/${active.chartId}`} className="block group">
+      <div
+        className={cn(
+          'rounded-card border px-5 py-4 flex items-center gap-4 hover:shadow-card transition',
+          paused
+            ? 'border-warn/40 bg-warn-soft/40'
+            : 'border-primary/40 bg-gradient-to-r from-primary-soft/60 to-warn-soft/40',
+        )}
+      >
+        <div
+          className={cn(
+            'w-10 h-10 rounded-full flex items-center justify-center shrink-0',
+            paused ? 'bg-warn/20' : 'bg-primary/20',
+          )}
+        >
+          {paused ? (
+            <Pause className="w-4 h-4 text-warn" />
+          ) : (
+            <Clock className="w-4 h-4 text-primary-ink dark:text-primary" />
+          )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[11px] uppercase tracking-[0.1em] text-primary-ink dark:text-primary font-bold">
-            Currently working on
+          <p
+            className={cn(
+              'text-[11px] uppercase tracking-[0.1em] font-bold',
+              paused ? 'text-warn' : 'text-primary-ink dark:text-primary',
+            )}
+          >
+            {paused ? 'Paused — click to resume' : 'Currently working on'}
           </p>
           <p className="text-base font-bold text-ink truncate">
             Chart {active.chartNo ? `#${active.chartNo}` : `${active.chartId}`}
@@ -1661,7 +1684,7 @@ function ActiveTimerCard() {
           <p className="text-2xl font-bold font-mono tabular-nums text-ink">
             {formatHMS(elapsed)}
           </p>
-          <p className="text-[11px] text-ink-muted">elapsed</p>
+          <p className="text-[11px] text-ink-muted">{paused ? 'paused' : 'elapsed'}</p>
         </div>
         <ChevronRight className="w-4 h-4 text-ink-muted group-hover:text-ink transition shrink-0" />
       </div>
