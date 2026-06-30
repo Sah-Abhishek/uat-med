@@ -433,6 +433,11 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   });
   const timerRunning = activeTimer.data?.chartId === chart.id;
   const timerStopped = !timerRunning;
+  // Paused break (set via the timer's Pause): the timer is frozen and editing,
+  // Save, and the Review & Edit modal are all locked until the user resumes.
+  const pausedMarker = (chart.customFields as { timerPaused?: { userId?: number | string } } | undefined)
+    ?.timerPaused;
+  const isPaused = !!pausedMarker && String(pausedMarker.userId ?? '') === (user?.id ?? '');
 
   // QA takeover: a viewer (Team Lead / Coder / Auditor — not Manager, who can't
   // self-allocate) looking at a chart in read-only QA view that isn't theirs can
@@ -472,7 +477,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   });
   // Team leads can audit in addition to coding; only block the audit section
   // when the viewer is neither role and the timer is off.
-  const auditDisabled = !(isAuditor || isTeamLead || isManager) || !timerRunning;
+  const auditDisabled = !(isAuditor || isTeamLead || isManager) || !timerRunning || isPaused;
 
   // While the timer is running, treat the chart as needing a save before the
   // user can stop. Without this, a coder/auditor who starts the timer and
@@ -832,7 +837,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         <ChartInfoSection
           draft={draft}
           update={update}
-          readOnly={timerStopped || qaReadOnly}
+          readOnly={timerStopped || qaReadOnly || isPaused}
           isAuditor={isAuditor}
           cfg={cfg}
           customValues={customValues}
@@ -843,7 +848,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         <ProcessingInfoSection
           draft={draft}
           update={update}
-          readOnly={timerStopped || qaReadOnly}
+          readOnly={timerStopped || qaReadOnly || isPaused}
           isAuditor={isAuditor}
           cfg={cfg}
           customValues={customValues}
@@ -890,6 +895,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
               leftIcon={<Save className="w-3.5 h-3.5" />}
               loading={saveMut.isPending}
               onClick={onSaveClick}
+              disabled={isPaused}
+              title={isPaused ? 'Resume the timer to save' : undefined}
             >
               Save
             </Button>

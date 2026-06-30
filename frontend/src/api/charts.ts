@@ -110,6 +110,12 @@ export const startChart = (id: string) =>
 export const stopChart = (id: string) =>
   post<{ chartId: string; elapsedMs: number }>(`/charts/${id}/stop`);
 
+export const pauseChart = (id: string) =>
+  post<{ chartId: string; paused: boolean }>(`/charts/${id}/pause`);
+
+export const resumeChart = (id: string) =>
+  post<{ chartId: string; startedAt: string }>(`/charts/${id}/resume`);
+
 export interface ActiveTimer {
   chartId: string;
   chartNo: string | null;

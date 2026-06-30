@@ -10,6 +10,7 @@ import {
   Clipboard,
   Search,
   Play,
+  Pause,
   Square,
   AlertCircle,
   Lock,
@@ -19,7 +20,7 @@ import {
   Check,
 } from 'lucide-react';
 import type { ApiErrorShape, Chart } from '@/api/types';
-import { startChart, stopChart, getActiveTimer, selfAllocateCharts } from '@/api/charts';
+import { startChart, stopChart, pauseChart, resumeChart, getActiveTimer, selfAllocateCharts } from '@/api/charts';
 import { getWorklist } from '@/api/worklists';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/auth/store';
@@ -190,6 +191,13 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
     (String(chart.allocatedCoderId ?? '') === user.id ||
       String(chart.allocatedAuditorId ?? '') === user.id);
 
+  // Paused-break flag (set by Pause): the session is closed so the timer reads
+  // as "not running" — which already locks editing/Review — and this flag tells
+  // the panel to show Resume and freeze the total. Scoped to the current user.
+  const pausedMarker = (chart.customFields as { timerPaused?: { userId?: number | string } } | undefined)
+    ?.timerPaused;
+  const isPaused = !!pausedMarker && String(pausedMarker.userId ?? '') === (user?.id ?? '');
+
   // Clear the "save first" warning as soon as the user saves (canStop flips back to true).
   useEffect(() => {
     if (canStop) setStopBlocked(false);
@@ -278,6 +286,29 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
     onSuccess: () => {
       setStoppedAt(Date.now());
       setStartedAt(null);
+      invalidateAfterTimerChange();
+    },
+  });
+
+  // Pause closes the current session (elapsed accrues) and flags the chart
+  // paused; Resume clears the flag and starts a fresh session.
+  const pauseMut = useMutation({
+    mutationFn: () => pauseChart(chart.id),
+    onSuccess: () => {
+      setStartedAt(null);
+      setConflict(null);
+      setErrorMsg(null);
+      invalidateAfterTimerChange();
+    },
+  });
+  const resumeMut = useMutation({
+    mutationFn: () => resumeChart(chart.id),
+    onSuccess: (res) => {
+      setStartedAt(Date.parse(res.startedAt));
+      setStoppedAt(null);
+      setElapsed(0);
+      setConflict(null);
+      setErrorMsg(null);
       invalidateAfterTimerChange();
     },
   });
@@ -395,9 +426,14 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
 
   return (
     <div className="rounded-card border border-line bg-gradient-to-br from-primary-soft/40 to-warn-soft/40 p-5 min-w-[260px]">
-      <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-2">
-        Timer
-      </p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold">Timer</p>
+        {isPaused && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-warn bg-warn-soft px-1.5 py-0.5 rounded-pill">
+            <Pause className="w-2.5 h-2.5" /> Paused
+          </span>
+        )}
+      </div>
       {isResolving ? (
         <div className="mb-4">
           <p className="text-3xl font-bold font-mono tabular-nums text-ink-subtle">
@@ -406,8 +442,10 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
           <p className="text-[11px] text-ink-subtle mt-0.5">Checking timer…</p>
         </div>
       ) : (
+        // Show the accumulated total (closed sessions + the live one) so the
+        // number freezes on Pause and continues on Resume.
         <p className="text-3xl font-bold font-mono tabular-nums text-ink mb-4">
-          {formatTime(elapsed)}
+          {formatTime(Math.floor((chart.coderTimeMs ?? 0) / 1000) + (running ? elapsed : 0))}
         </p>
       )}
       {stopBlocked && (
@@ -449,21 +487,44 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
       )}
       {canTime && (
         <div className="flex gap-2 mb-4">
-          <Button
-            size="sm"
-            leftIcon={<Play className="w-3.5 h-3.5" />}
-            disabled={running || !!conflict || isResolving}
-            loading={startMut.isPending}
-            onClick={() => startMut.mutate()}
-            className="flex-1"
-          >
-            Start
-          </Button>
+          {isPaused ? (
+            <Button
+              size="sm"
+              leftIcon={<Play className="w-3.5 h-3.5" />}
+              loading={resumeMut.isPending}
+              onClick={() => resumeMut.mutate()}
+              className="flex-1"
+            >
+              Resume
+            </Button>
+          ) : running ? (
+            <Button
+              size="sm"
+              variant="soft"
+              leftIcon={<Pause className="w-3.5 h-3.5" />}
+              loading={pauseMut.isPending}
+              onClick={() => pauseMut.mutate()}
+              className="flex-1"
+            >
+              Pause
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              leftIcon={<Play className="w-3.5 h-3.5" />}
+              disabled={!!conflict || isResolving}
+              loading={startMut.isPending}
+              onClick={() => startMut.mutate()}
+              className="flex-1"
+            >
+              Start
+            </Button>
+          )}
           <Button
             size="sm"
             variant="danger"
             leftIcon={<Square className="w-3.5 h-3.5" />}
-            disabled={!running}
+            disabled={!running && !isPaused}
             loading={stopMut.isPending}
             onClick={attemptStop}
             className="flex-1"

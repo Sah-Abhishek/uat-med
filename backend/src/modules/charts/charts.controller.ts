@@ -127,6 +127,22 @@ export class ChartsController {
     return this.svc.stopTimer(id, user);
   }
 
+  @Post(':id/pause')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Pause the active timer (break) — locks editing / Save / Review until resumed.' })
+  pause(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.pauseTimer(id, user);
+  }
+
+  @Post(':id/resume')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Resume a paused timer — clears the pause flag and starts a fresh session.' })
+  resume(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.resumeTimer(id, user);
+  }
+
   @Post(':id/transition')
   @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(200)

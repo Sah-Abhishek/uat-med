@@ -52,7 +52,7 @@ const TRANSITIONS: Record<ChartMilestone, ChartMilestone[]> = {
  * stale snapshot — resurrecting a cleared aiPredictionError or
  * pendingPrediction, or clobbering uploadedDocs (see docs/handoff.md).
  */
-const RESERVED_PIPELINE_KEYS = ['aiPrediction', 'aiPredictionError', 'pendingPrediction', 'uploadedDocs'] as const;
+const RESERVED_PIPELINE_KEYS = ['aiPrediction', 'aiPredictionError', 'pendingPrediction', 'uploadedDocs', 'timerPaused'] as const;
 
 // Simple in-memory column preferences keyed by userId. A real impl would persist in Redis or `user_preferences`.
 const columnPrefs = new Map<number, Array<{ key: string; visible: boolean }>>();
@@ -713,7 +713,13 @@ async update(id: number, dto: UpdateChartDto) {
     const open = await this.timeLogs.findOne({
       where: { userId: user.id, chartId: id, stoppedAt: IsNull() },
     });
+
+    // Stopping ends the work — clear any paused-break flag too. Handles "Stop"
+    // pressed while paused (the session is already closed, only the flag remains).
+    const wasPaused = await this.clearPausedFlag(id);
+
     if (!open) {
+      if (wasPaused) return { chartId: id, elapsedMs: 0 };
       throw new BadRequestException({ error: { code: 'bad_request', message: 'No active timer for this user/chart.' } });
     }
     const stoppedAt = new Date();
@@ -722,6 +728,55 @@ async update(id: number, dto: UpdateChartDto) {
     open.elapsedMs = elapsedMs;
     await this.timeLogs.save(open);
     return { chartId: id, elapsedMs };
+  }
+
+  /**
+   * Pause the user's running timer on this chart: close the open session (so
+   * elapsed accrues) and flag the chart as paused. With no open session the
+   * timer reads as "not running", which already locks the Chart/Processing/Audit
+   * inputs and the Review & Edit modal; the paused flag additionally tells the
+   * UI to lock Save and offer Resume. Milestone is untouched — a break is not a
+   * handoff.
+   */
+  async pauseTimer(id: number, user: AuthenticatedUser) {
+    const open = await this.timeLogs.findOne({
+      where: { userId: user.id, chartId: id, stoppedAt: IsNull() },
+    });
+    if (!open) {
+      throw new BadRequestException({ error: { code: 'bad_request', message: 'No active timer to pause.' } });
+    }
+    const stoppedAt = new Date();
+    open.stoppedAt = stoppedAt;
+    open.elapsedMs = stoppedAt.getTime() - open.startedAt.getTime();
+    await this.timeLogs.save(open);
+
+    const c = await this.charts.findOne({ where: { id } });
+    if (c) {
+      c.customFields = {
+        ...(c.customFields ?? {}),
+        timerPaused: { userId: user.id, at: stoppedAt.toISOString() },
+      };
+      await this.charts.save(c);
+    }
+    return { chartId: id, paused: true };
+  }
+
+  /** Resume a paused timer: clear the paused flag, then start a fresh session. */
+  async resumeTimer(id: number, user: AuthenticatedUser) {
+    await this.clearPausedFlag(id);
+    return this.startTimer(id, user);
+  }
+
+  /** Remove the `timerPaused` marker from a chart's customFields. Returns true
+   *  if a marker was present (i.e. the chart was paused). */
+  private async clearPausedFlag(id: number): Promise<boolean> {
+    const c = await this.charts.findOne({ where: { id } });
+    const cf = (c?.customFields ?? {}) as Record<string, unknown>;
+    if (!c || !cf.timerPaused) return false;
+    const { timerPaused: _drop, ...rest } = cf;
+    c.customFields = rest;
+    await this.charts.save(c);
+    return true;
   }
 
   /**
