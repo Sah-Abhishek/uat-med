@@ -238,7 +238,13 @@ export function ChartInfoSection({
               aiTag={draft._aiFields?.has('em')}
             />
           )}
-          {visible('primaryDiagnosis') && (
+          <div />
+        </div>
+
+        {/* Primary diagnosis on its own full-width row so the description shows
+            big, beside the code value (ICD descriptions can be long). */}
+        {visible('primaryDiagnosis') && (
+          <div className="mb-4">
             <CodeAutocompleteField
               label="Primary diagnosis"
               required={required('primaryDiagnosis')}
@@ -254,8 +260,8 @@ export function ChartInfoSection({
               placeholder="Type an ICD code…"
               aiTag={draft._aiFields?.has('primaryDiagnosis')}
             />
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Row 4 */}
         {row4Visible && (

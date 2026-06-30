@@ -366,19 +366,27 @@ export function CodeAutocompleteField({
         )}
       </div>
       <div className="relative" ref={wrapRef}>
-        <Input
-          value={code}
-          onChange={(e) => {
-            // Typing changes the code; clear the description until it matches a
-            // suggestion again (the effect above re-fills on an exact match).
-            onChange(e.target.value, '');
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          readOnly={readOnly}
-          placeholder={placeholder ?? 'Type a code (min 2 chars)…'}
-          className={cn(readOnly && 'bg-surface-sunken cursor-not-allowed')}
-        />
+        {/* Narrow code input + the description shown big, beside the value. */}
+        <div className="flex items-center gap-3">
+          <Input
+            value={code}
+            onChange={(e) => {
+              // Typing changes the code; clear the description until it matches a
+              // suggestion again (the effect above re-fills on an exact match).
+              onChange(e.target.value, '');
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            readOnly={readOnly}
+            placeholder={placeholder ?? 'Type a code (min 2 chars)…'}
+            className={cn('w-32 shrink-0 font-mono', readOnly && 'bg-surface-sunken cursor-not-allowed')}
+          />
+          {description && (
+            <p className="flex-1 min-w-0 text-base font-semibold text-ink leading-snug">
+              {description}
+            </p>
+          )}
+        </div>
         {showDropdown && (
           <div className="absolute z-30 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-line bg-surface shadow-card">
             {hits.map((hit) => (
@@ -399,7 +407,6 @@ export function CodeAutocompleteField({
           </div>
         )}
       </div>
-      {description && <p className="mt-1 text-xs text-ink-muted leading-snug">{description}</p>}
     </div>
   );
 }
