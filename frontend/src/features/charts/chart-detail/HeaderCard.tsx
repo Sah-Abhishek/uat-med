@@ -335,30 +335,59 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
   // Not allocated to this user → no timer. Show a self-allocate prompt instead
   // (this is what an admin sees when opening a chart they haven't taken).
   if (canTime && !allocatedToMe) {
+    const isAuditor = user?.role === 'AUDITOR';
+    // An auditor can only pick a chart up for audit once coding is finished —
+    // i.e. the milestone has reached CODING_DONE or moved into the audit lane.
+    const codingFinished = [
+      'CODING_DONE',
+      'READY_TO_AUDIT',
+      'AUDIT_IN_PROGRESS',
+      'AUDIT_DONE',
+      'CLOSED',
+    ].includes(chart.milestone);
+    const auditorNotReady = isAuditor && !codingFinished;
+
     return (
       <div className="rounded-card border border-line bg-gradient-to-br from-primary-soft/40 to-warn-soft/40 p-5 min-w-[260px]">
         <p className="text-[11px] uppercase tracking-[0.1em] text-ink-muted font-semibold mb-3">
           Timer
         </p>
-        <div className="flex items-start gap-2 mb-3">
-          <Lock className="w-4 h-4 text-ink-subtle mt-0.5 shrink-0" />
-          <p className="text-[12px] text-ink-muted leading-snug">
-            Self-allocate this chart to yourself to work on it.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          leftIcon={<UserPlus className="w-3.5 h-3.5" />}
-          loading={selfAllocateMut.isPending}
-          onClick={() => selfAllocateMut.mutate()}
-          className="w-full"
-        >
-          Self-allocate
-        </Button>
-        {errorMsg && (
-          <div className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2">
-            <p className="text-[11px] text-danger leading-snug">{errorMsg}</p>
+        {auditorNotReady ? (
+          // Coding isn't done, so there's nothing to audit yet — explain instead
+          // of offering a self-allocate-to-audit button.
+          <div className="flex items-start gap-2">
+            <Lock className="w-4 h-4 text-ink-subtle mt-0.5 shrink-0" />
+            <p className="text-[12px] text-ink-muted leading-snug">
+              {chart.milestone === 'CODING_IN_PROGRESS'
+                ? 'This chart is still being coded — it’s not ready for audit yet.'
+                : 'This chart hasn’t been coded yet — it’s not ready for audit yet.'}
+            </p>
           </div>
+        ) : (
+          <>
+            <div className="flex items-start gap-2 mb-3">
+              <Lock className="w-4 h-4 text-ink-subtle mt-0.5 shrink-0" />
+              <p className="text-[12px] text-ink-muted leading-snug">
+                {isAuditor
+                  ? 'Self-allocate this chart to audit it.'
+                  : 'Self-allocate this chart to yourself to work on it.'}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              leftIcon={<UserPlus className="w-3.5 h-3.5" />}
+              loading={selfAllocateMut.isPending}
+              onClick={() => selfAllocateMut.mutate()}
+              className="w-full"
+            >
+              {isAuditor ? 'Self-allocate to audit' : 'Self-allocate'}
+            </Button>
+            {errorMsg && (
+              <div className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2">
+                <p className="text-[11px] text-danger leading-snug">{errorMsg}</p>
+              </div>
+            )}
+          </>
         )}
       </div>
     );

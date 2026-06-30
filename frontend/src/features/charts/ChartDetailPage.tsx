@@ -124,6 +124,16 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   // POA, LOS, sub-speciality, etc.) live under customFields._formDraft per the
   // backend DTO's escape-hatch comment.
   const formDraftStash = (chart.customFields as { _formDraft?: Partial<FormDraft> } | undefined)?._formDraft ?? {};
+  // Seed helpers for the multi-value fields (DRG, PCS). For DRG, fall back to the
+  // legacy single value (_formDraft.drgValue string, or the numeric drg_value
+  // column) so charts saved before DRG went multi still load their value.
+  const seedStringArray = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : []);
+  const seedDrgValues = (stash: Record<string, unknown>): string[] => {
+    if (Array.isArray(stash.drgValues)) return stash.drgValues as string[];
+    if (typeof stash.drgValue === 'string' && stash.drgValue) return [stash.drgValue];
+    if (chart.drgValue != null && String(chart.drgValue) !== '') return [String(chart.drgValue)];
+    return [];
+  };
   const { draft, update: rawUpdate, setDraft } = useFormDraft({
     chartNo: chart.chartNo ?? '',
     mrNo: chart.mrNumber ?? '',
@@ -132,15 +142,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     dischargeDate: chart.dischargeDate ?? '',
     primaryDiagnosis: chart.primaryDiagnosis ?? '',
     em: chart.emLevel ?? '',
-    // Prefer the _formDraft string (preserves whatever the user typed, even
-    // non-numeric) over the entity column. Falls back to the column for older
-    // charts saved before drgValue was added to the formDraft blob.
-    drgValue:
-      typeof formDraftStash.drgValue === 'string'
-        ? formDraftStash.drgValue
-        : chart.drgValue != null
-        ? String(chart.drgValue)
-        : '',
+    // DRG is multi-value now; seedDrgValues handles the legacy single-value
+    // fallback (_formDraft.drgValue string, or the numeric drg_value column).
+    drgValues: seedDrgValues(formDraftStash as Record<string, unknown>),
     coderComments: chart.coderCommentsToClient ?? '',
     rejectionComments: chart.rejectionDenialComments ?? '',
     deficiencyComments: chart.deficiencyComments ?? '',
@@ -168,6 +172,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     poa: typeof formDraftStash.poa === 'string' ? formDraftStash.poa : '',
     los: typeof formDraftStash.los === 'string' ? formDraftStash.los : '',
     procedureCode: typeof formDraftStash.procedureCode === 'string' ? formDraftStash.procedureCode : '',
+    pcsCodes: seedStringArray(formDraftStash.pcsCodes),
     responsibleParty: Array.isArray(formDraftStash.responsibleParty) ? formDraftStash.responsibleParty : [],
     holdReason: Array.isArray(formDraftStash.holdReason) ? formDraftStash.holdReason : [],
     auditOption: Array.isArray(formDraftStash.auditOption) ? formDraftStash.auditOption : [],
@@ -479,12 +484,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       dischargeDate: chart.dischargeDate ?? '',
       primaryDiagnosis: chart.primaryDiagnosis ?? '',
       em: chart.emLevel ?? '',
-      drgValue:
-        typeof stash.drgValue === 'string'
-          ? stash.drgValue
-          : chart.drgValue != null
-          ? String(chart.drgValue)
-          : '',
+      drgValues: seedDrgValues(stash as Record<string, unknown>),
       coderComments: chart.coderCommentsToClient ?? '',
       rejectionComments: chart.rejectionDenialComments ?? '',
       deficiencyComments: chart.deficiencyComments ?? '',
@@ -502,6 +502,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       poa: typeof stash.poa === 'string' ? stash.poa : '',
       los: typeof stash.los === 'string' ? stash.los : '',
       procedureCode: typeof stash.procedureCode === 'string' ? stash.procedureCode : '',
+      pcsCodes: seedStringArray(stash.pcsCodes),
       responsibleParty: Array.isArray(stash.responsibleParty) ? stash.responsibleParty : [],
       holdReason: Array.isArray(stash.holdReason) ? stash.holdReason : [],
       auditOption: Array.isArray(stash.auditOption) ? stash.auditOption : [],
@@ -627,11 +628,12 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         subSpecialty: draft.subSpecialty,
         poa: draft.poa,
         los: draft.los,
-        // Mirror the typed string so even non-numeric input round-trips.
-        // The numeric `drgValue` column below still gets the parsed number
-        // when valid, keeping reports/queries that read the column happy.
-        drgValue: draft.drgValue,
+        // Round-trip the full multi-value DRG and PCS lists. The numeric
+        // `drgValue` column below still gets the first DRG value parsed, keeping
+        // reports/queries that read the column happy.
+        drgValues: draft.drgValues,
         procedureCode: draft.procedureCode,
+        pcsCodes: draft.pcsCodes,
         responsibleParty: draft.responsibleParty,
         holdReason: draft.holdReason,
         auditOption: draft.auditOption,
@@ -660,7 +662,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         admitDate: draft.admitDate || undefined,
         dischargeDate: draft.dischargeDate || undefined,
         dos: draft.dateOfService || undefined,
-        drgValue: draft.drgValue ? parseFloat(draft.drgValue) || undefined : undefined,
+        // First DRG value populates the numeric column for backward-compat;
+        // the full list lives in customFields._formDraft.drgValues.
+        drgValue: draft.drgValues[0] ? parseFloat(draft.drgValues[0]) || undefined : undefined,
         // Drives the milestone state machine: backend keeps the chart in
         // CODING_IN_PROGRESS / AUDIT_IN_PROGRESS when these are set, otherwise
         // advances to CODING_DONE / AUDIT_DONE.

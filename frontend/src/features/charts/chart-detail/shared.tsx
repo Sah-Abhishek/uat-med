@@ -129,6 +129,91 @@ export function FormField({
   );
 }
 
+/* ── Tags input (free-entry chips) ────────────────────────
+ * Free-text multi-value field: type a value and press Enter (or comma) to add a
+ * chip, ✕ to remove, Backspace on an empty input removes the last chip. Unlike
+ * MultiSelect there's no fixed option list — for codes the coder types freely
+ * (e.g. PCS codes, DRG values). Duplicates (case-insensitive) are ignored. */
+export function TagsInput({
+  label,
+  required,
+  values,
+  onChange,
+  readOnly,
+  placeholder,
+  maxLen,
+}: {
+  label: string;
+  required?: boolean;
+  values: string[];
+  onChange: (next: string[]) => void;
+  readOnly?: boolean;
+  placeholder?: string;
+  maxLen?: number;
+}) {
+  const [text, setText] = useState('');
+
+  const add = (raw: string) => {
+    const v = maxLen ? raw.trim().slice(0, maxLen) : raw.trim();
+    if (!v) return;
+    if (!values.some((x) => x.toLowerCase() === v.toLowerCase())) onChange([...values, v]);
+    setText('');
+  };
+
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between mb-1.5">
+        <Label className="!mb-0">
+          {label}
+          {required && <span className="text-danger"> *</span>}
+        </Label>
+      </div>
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1.5 min-h-[38px]',
+          readOnly && 'bg-surface-sunken opacity-70 pointer-events-none',
+        )}
+      >
+        {values.map((v, i) => (
+          <span
+            key={`${v}-${i}`}
+            className="inline-flex items-center gap-1 rounded-pill bg-primary-soft text-primary-ink dark:text-primary px-2 py-0.5 text-xs font-medium"
+          >
+            <span className="font-mono">{v}</span>
+            {!readOnly && (
+              <button
+                type="button"
+                aria-label={`Remove ${v}`}
+                onClick={() => onChange(values.filter((_, idx) => idx !== i))}
+                className="hover:text-danger"
+              >
+                <XIcon className="w-3 h-3" />
+              </button>
+            )}
+          </span>
+        ))}
+        {!readOnly && (
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                add(text);
+              } else if (e.key === 'Backspace' && !text && values.length) {
+                onChange(values.slice(0, -1));
+              }
+            }}
+            onBlur={() => add(text)}
+            placeholder={values.length === 0 ? placeholder ?? 'Type and press Enter…' : ''}
+            className="flex-1 min-w-[80px] bg-transparent outline-none text-sm"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ── Multi-select (chips + searchable dropdown) ──────────── */
 
 interface MultiSelectProps {

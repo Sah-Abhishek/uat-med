@@ -19,8 +19,9 @@ export interface FormDraft {
   facility: string;
   poa: string;
   los: string;
-  drgValue: string;
+  drgValues: string[];
   procedureCode: string;
+  pcsCodes: string[];
   subSpecialty: string;
 
   // Processing Info
@@ -64,8 +65,9 @@ export const EMPTY_FORM_DRAFT: FormDraft = {
   facility: '',
   poa: '',
   los: '',
-  drgValue: '',
+  drgValues: [],
   procedureCode: '',
+  pcsCodes: [],
   subSpecialty: '',
   // Empty draft slot renders as the "Open" placeholder in the chart-status
   // select. The user only sees / picks "Complete" or "Incomplete"; saving an

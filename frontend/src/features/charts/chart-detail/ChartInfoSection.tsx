@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Toast } from '@/components/ui/Primitives';
-import { FormField, SkeletonGrid } from './shared';
+import { FormField, TagsInput, SkeletonGrid } from './shared';
 import type { DateMarker } from '@/components/ui/Field';
 import { CustomFieldsRenderer } from './CustomFieldsRenderer';
 import type { FormDraft, CustomFieldValues } from './formState';
@@ -124,7 +124,7 @@ export function ChartInfoSection({
   const row2Visible = visible('admitDate') || visible('dischargeDate');
   const row4Visible = visible('primaryHealthPlan') || visible('facility');
   const row5Visible = visible('poa') || visible('los') || visible('drgValue');
-  const row6Visible = visible('procedureCode') || visible('subSpeciality');
+  const row6Visible = visible('procedureCode') || visible('subSpeciality') || visible('pcsCodes');
 
   // Order-aware ranges (admit ≤ DOS ≤ discharge): each picker greys out the
   // dates that would break the order, on top of the worklist's DOS range — so
@@ -298,12 +298,14 @@ export function ChartInfoSection({
               />
             )}
             {visible('drgValue') && (
-              <FormField
+              <TagsInput
                 label="DRG Value"
                 required={required('drgValue')}
-                value={draft.drgValue}
-                onChange={(v) => update('drgValue', v.slice(0, 8))}
+                values={draft.drgValues}
+                onChange={(next) => update('drgValues', next)}
                 readOnly={readOnly}
+                maxLen={8}
+                placeholder="Add DRG…"
               />
             )}
           </div>
@@ -333,7 +335,19 @@ export function ChartInfoSection({
                 readOnly={readOnly}
               />
             )}
-            <div />
+            {visible('pcsCodes') ? (
+              <TagsInput
+                label="PCS codes"
+                required={required('pcsCodes')}
+                values={draft.pcsCodes}
+                onChange={(next) => update('pcsCodes', next)}
+                readOnly={readOnly}
+                maxLen={10}
+                placeholder="Add PCS code…"
+              />
+            ) : (
+              <div />
+            )}
           </div>
         )}
 
