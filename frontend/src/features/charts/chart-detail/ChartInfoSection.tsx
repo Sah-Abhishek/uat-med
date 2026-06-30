@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Toast } from '@/components/ui/Primitives';
-import { FormField, CodeDescListInput, SkeletonGrid } from './shared';
+import { FormField, CodeSearchListInput, SkeletonGrid } from './shared';
+import { searchDrgCodes, searchPcsCodes } from '@/api/referenceCodes';
 import type { DateMarker } from '@/components/ui/Field';
 import { CustomFieldsRenderer } from './CustomFieldsRenderer';
 import type { FormDraft, CustomFieldValues } from './formState';
@@ -341,29 +342,29 @@ export function ChartInfoSection({
             3-column grid rows above and breaking that layout. */}
         {visible('drgValue') && (
           <div className="mt-4">
-            <CodeDescListInput
+            <CodeSearchListInput
               label="DRG Value"
               required={required('drgValue')}
               values={draft.drgValues}
               onChange={(next) => update('drgValues', next)}
               readOnly={readOnly}
-              maxCodeLen={8}
-              codePlaceholder="DRG"
-              descPlaceholder="Description"
+              search={searchDrgCodes}
+              queryKeyPrefix="drg-codes-search"
+              placeholder="Type a DRG code (min 2 chars)…"
             />
           </div>
         )}
         {visible('pcsCodes') && (
           <div className="mt-4">
-            <CodeDescListInput
+            <CodeSearchListInput
               label="PCS codes"
               required={required('pcsCodes')}
               values={draft.pcsCodes}
               onChange={(next) => update('pcsCodes', next)}
               readOnly={readOnly}
-              maxCodeLen={10}
-              codePlaceholder="PCS code"
-              descPlaceholder="Description"
+              search={searchPcsCodes}
+              queryKeyPrefix="pcs-codes-search"
+              placeholder="Type a PCS code (min 2 chars)…"
             />
           </div>
         )}

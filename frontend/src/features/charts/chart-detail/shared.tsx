@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Plus, Sparkles, X as XIcon } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Check, ChevronDown, Sparkles, X as XIcon } from 'lucide-react';
 import { Input, Label, FancySelect, DatePicker, type DateMarker } from '@/components/ui/Field';
 import { cn } from '@/lib/utils';
 
@@ -129,31 +130,76 @@ export function FormField({
   );
 }
 
-/* ── Code + description list (free-entry rows) ─────────────
- * Multi-value field where each entry has a code/value AND a description. The
- * coder adds rows (code input + description input), removes them with ✕, and
- * appends with "+ Add". Used for PCS codes and DRG values. */
-export function CodeDescListInput({
+/* ── Code search list (autocomplete-backed, locked entries) ─────
+ * Multi-value field where each entry is a {code, description} picked from a
+ * reference table. The user types a code (≥2 chars) into the search box, gets
+ * code-prefix suggestions from the backend, and clicks one to append a LOCKED
+ * row (code + description, read-only; removable with ✕). Rows aren't editable
+ * after selection — to change one, remove it and pick again. Used for PCS codes
+ * and DRG values. */
+export function CodeSearchListInput({
   label,
   required,
   values,
   onChange,
   readOnly,
-  codePlaceholder,
-  descPlaceholder,
-  maxCodeLen,
+  search,
+  queryKeyPrefix,
+  placeholder,
 }: {
   label: string;
   required?: boolean;
   values: Array<{ code: string; description: string }>;
   onChange: (next: Array<{ code: string; description: string }>) => void;
   readOnly?: boolean;
-  codePlaceholder?: string;
-  descPlaceholder?: string;
-  maxCodeLen?: number;
+  /** Backend prefix-search for this code type (PCS or DRG). */
+  search: (q: string, limit?: number) => Promise<{ codes: Array<{ code: string; description: string }> }>;
+  /** Stable react-query key prefix, distinct per code type. */
+  queryKeyPrefix: string;
+  placeholder?: string;
 }) {
-  const patch = (i: number, p: Partial<{ code: string; description: string }>) =>
-    onChange(values.map((row, idx) => (idx === i ? { ...row, ...p } : row)));
+  const [text, setText] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const trimmed = text.trim();
+  const canSuggest = !readOnly && trimmed.length >= 2;
+
+  // Debounce so we hit the API ~once per pause, not per keypress.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(trimmed), 180);
+    return () => clearTimeout(t);
+  }, [trimmed]);
+
+  const q = useQuery({
+    queryKey: [queryKeyPrefix, debounced],
+    queryFn: () => search(debounced, 15),
+    enabled: canSuggest && debounced.length >= 2,
+    staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const hits = q.data?.codes ?? [];
+  const showDropdown = open && canSuggest && hits.length > 0;
+
+  // Close the dropdown when focus/click leaves the widget.
+  useEffect(() => {
+    if (!showDropdown) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showDropdown]);
+
+  const pick = (hit: { code: string; description: string }) => {
+    if (!values.some((v) => v.code.toLowerCase() === hit.code.toLowerCase())) {
+      onChange([...values, { code: hit.code, description: hit.description }]);
+    }
+    setText('');
+    setDebounced('');
+    setOpen(false);
+  };
 
   return (
     <div className="min-w-0">
@@ -163,48 +209,72 @@ export function CodeDescListInput({
           {required && <span className="text-danger"> *</span>}
         </Label>
       </div>
-      {readOnly && values.length === 0 ? (
-        <div className="rounded-lg bg-surface-sunken px-3 py-2 text-sm text-ink-subtle">—</div>
-      ) : (
-        <div className="space-y-1.5">
+
+      {/* Selected (locked) entries */}
+      {values.length > 0 ? (
+        <div className="space-y-1 mb-1.5">
           {values.map((row, i) => (
-            <div key={i} className="flex items-center gap-1.5">
-              <Input
-                value={row.code}
-                onChange={(e) =>
-                  patch(i, { code: maxCodeLen ? e.target.value.slice(0, maxCodeLen) : e.target.value })
-                }
-                readOnly={readOnly}
-                placeholder={codePlaceholder ?? 'Code'}
-                className={cn('w-28 shrink-0 font-mono', readOnly && 'bg-surface-sunken')}
-              />
-              <Input
-                value={row.description}
-                onChange={(e) => patch(i, { description: e.target.value })}
-                readOnly={readOnly}
-                placeholder={descPlaceholder ?? 'Description'}
-                className={cn('flex-1', readOnly && 'bg-surface-sunken')}
-              />
+            <div
+              key={`${row.code}-${i}`}
+              className="flex items-center gap-2 rounded-lg bg-surface-sunken px-2.5 py-1.5"
+            >
+              <span className="font-mono font-semibold text-xs text-ink shrink-0">{row.code}</span>
+              {row.description && (
+                <span className="text-xs text-ink-muted truncate">— {row.description}</span>
+              )}
               {!readOnly && (
                 <button
                   type="button"
-                  aria-label="Remove row"
+                  aria-label={`Remove ${row.code}`}
                   onClick={() => onChange(values.filter((_, idx) => idx !== i))}
-                  className="shrink-0 p-1 text-ink-subtle hover:text-danger"
+                  className="shrink-0 ml-auto p-0.5 text-ink-subtle hover:text-danger"
                 >
                   <XIcon className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
           ))}
-          {!readOnly && (
-            <button
-              type="button"
-              onClick={() => onChange([...values, { code: '', description: '' }])}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add
-            </button>
+        </div>
+      ) : (
+        readOnly && (
+          <div className="rounded-lg bg-surface-sunken px-3 py-2 text-sm text-ink-subtle mb-1.5">—</div>
+        )
+      )}
+
+      {/* Search box (hidden in read-only / auditor view) */}
+      {!readOnly && (
+        <div className="relative" ref={wrapRef}>
+          <Input
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder={placeholder ?? 'Type a code (min 2 chars)…'}
+          />
+          {showDropdown && (
+            <div className="absolute z-30 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-line bg-surface shadow-card">
+              {hits.map((hit) => (
+                <button
+                  key={hit.code}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pick(hit);
+                  }}
+                  className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-surface-sunken"
+                >
+                  <span className="font-mono font-semibold text-xs text-ink shrink-0">{hit.code}</span>
+                  <span className="text-xs text-ink-muted">{hit.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {open && canSuggest && !q.isFetching && hits.length === 0 && (
+            <div className="absolute z-30 mt-1 w-full rounded-lg border border-line bg-surface shadow-card px-3 py-2 text-xs text-ink-subtle">
+              No matching codes
+            </div>
           )}
         </div>
       )}
