@@ -123,8 +123,8 @@ export function ChartInfoSection({
   // Track whether either field in a row is visible to avoid empty grid rows.
   const row2Visible = visible('admitDate') || visible('dischargeDate');
   const row4Visible = visible('primaryHealthPlan') || visible('facility');
-  const row5Visible = visible('poa') || visible('los') || visible('drgValue');
-  const row6Visible = visible('procedureCode') || visible('subSpeciality') || visible('pcsCodes');
+  const row5Visible = visible('poa') || visible('los');
+  const row6Visible = visible('procedureCode') || visible('subSpeciality');
 
   // Order-aware ranges (admit ≤ DOS ≤ discharge): each picker greys out the
   // dates that would break the order, on top of the worklist's DOS range — so
@@ -297,18 +297,6 @@ export function ChartInfoSection({
                 readOnly={readOnly}
               />
             )}
-            {visible('drgValue') && (
-              <CodeDescListInput
-                label="DRG Value"
-                required={required('drgValue')}
-                values={draft.drgValues}
-                onChange={(next) => update('drgValues', next)}
-                readOnly={readOnly}
-                maxCodeLen={8}
-                codePlaceholder="DRG"
-                descPlaceholder="Description"
-              />
-            )}
           </div>
         )}
 
@@ -336,20 +324,7 @@ export function ChartInfoSection({
                 readOnly={readOnly}
               />
             )}
-            {visible('pcsCodes') ? (
-              <CodeDescListInput
-                label="PCS codes"
-                required={required('pcsCodes')}
-                values={draft.pcsCodes}
-                onChange={(next) => update('pcsCodes', next)}
-                readOnly={readOnly}
-                maxCodeLen={10}
-                codePlaceholder="PCS code"
-                descPlaceholder="Description"
-              />
-            ) : (
-              <div />
-            )}
+            <div />
           </div>
         )}
 
@@ -360,6 +335,38 @@ export function ChartInfoSection({
           onChange={updateCustomValue}
           readOnly={readOnly}
         />
+
+        {/* DRG values & PCS codes sit at the end as full-width blocks so their
+            multi-row code+description lists can grow long without stretching the
+            3-column grid rows above and breaking that layout. */}
+        {visible('drgValue') && (
+          <div className="mt-4">
+            <CodeDescListInput
+              label="DRG Value"
+              required={required('drgValue')}
+              values={draft.drgValues}
+              onChange={(next) => update('drgValues', next)}
+              readOnly={readOnly}
+              maxCodeLen={8}
+              codePlaceholder="DRG"
+              descPlaceholder="Description"
+            />
+          </div>
+        )}
+        {visible('pcsCodes') && (
+          <div className="mt-4">
+            <CodeDescListInput
+              label="PCS codes"
+              required={required('pcsCodes')}
+              values={draft.pcsCodes}
+              onChange={(next) => update('pcsCodes', next)}
+              readOnly={readOnly}
+              maxCodeLen={10}
+              codePlaceholder="PCS code"
+              descPlaceholder="Description"
+            />
+          </div>
+        )}
       </div>
 
       <Toast
