@@ -282,6 +282,128 @@ export function CodeSearchListInput({
   );
 }
 
+/* ── Single-value code autocomplete (code + description) ────
+ * For a single reference code such as Primary diagnosis. The user types a code;
+ * matching code + description suggestions appear; picking one fills the code and
+ * its description (shown beneath the field). Typing a code that exactly matches
+ * a suggestion auto-fills its description too. */
+export function CodeAutocompleteField({
+  label,
+  required,
+  code,
+  description,
+  onChange,
+  readOnly,
+  search,
+  queryKeyPrefix,
+  placeholder,
+  aiTag,
+}: {
+  label: string;
+  required?: boolean;
+  code: string;
+  description: string;
+  onChange: (code: string, description: string) => void;
+  readOnly?: boolean;
+  search: (q: string, limit?: number) => Promise<{ codes: Array<{ code: string; description: string }> }>;
+  queryKeyPrefix: string;
+  placeholder?: string;
+  aiTag?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [debounced, setDebounced] = useState('');
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const trimmed = code.trim();
+  const canSuggest = !readOnly && trimmed.length >= 2;
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(trimmed), 180);
+    return () => clearTimeout(t);
+  }, [trimmed]);
+
+  const q = useQuery({
+    queryKey: [queryKeyPrefix, debounced],
+    queryFn: () => search(debounced, 12),
+    enabled: canSuggest && debounced.length >= 2,
+    staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const hits = q.data?.codes ?? [];
+  const showDropdown = open && canSuggest && hits.length > 0;
+
+  // Auto-fill the description when the typed code exactly matches a suggestion,
+  // so a coder who types (or loads) a full code gets its description without
+  // opening the list. Skipped in read-only.
+  useEffect(() => {
+    if (readOnly || !trimmed) return;
+    const exact = hits.find((h) => h.code.toUpperCase() === trimmed.toUpperCase());
+    if (exact && exact.description !== description) onChange(exact.code, exact.description);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hits, trimmed]);
+
+  useEffect(() => {
+    if (!showDropdown) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showDropdown]);
+
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between mb-1.5">
+        <Label className="!mb-0">
+          {label}
+          {required && <span className="text-danger"> *</span>}
+        </Label>
+        {aiTag && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary-ink dark:text-primary bg-primary-soft px-1.5 py-0.5 rounded-pill">
+            <Sparkles className="w-2.5 h-2.5" />
+            AI Generated
+          </span>
+        )}
+      </div>
+      <div className="relative" ref={wrapRef}>
+        <Input
+          value={code}
+          onChange={(e) => {
+            // Typing changes the code; clear the description until it matches a
+            // suggestion again (the effect above re-fills on an exact match).
+            onChange(e.target.value, '');
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          readOnly={readOnly}
+          placeholder={placeholder ?? 'Type a code (min 2 chars)…'}
+          className={cn(readOnly && 'bg-surface-sunken cursor-not-allowed')}
+        />
+        {showDropdown && (
+          <div className="absolute z-30 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-line bg-surface shadow-card">
+            {hits.map((hit) => (
+              <button
+                key={hit.code}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(hit.code, hit.description);
+                  setOpen(false);
+                }}
+                className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-surface-sunken"
+              >
+                <span className="font-mono font-semibold text-xs text-ink shrink-0">{hit.code}</span>
+                <span className="text-xs text-ink-muted">{hit.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {description && <p className="mt-1 text-xs text-ink-muted leading-snug">{description}</p>}
+    </div>
+  );
+}
+
 /* ── Multi-select (chips + searchable dropdown) ──────────── */
 
 interface MultiSelectProps {

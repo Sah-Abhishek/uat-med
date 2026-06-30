@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Toast } from '@/components/ui/Primitives';
-import { FormField, CodeSearchListInput, SkeletonGrid } from './shared';
+import { FormField, CodeSearchListInput, CodeAutocompleteField, SkeletonGrid } from './shared';
 import { searchDrgCodes, searchPcsCodes } from '@/api/referenceCodes';
+import { searchIcdCodes } from '@/api/icdCodes';
 import type { DateMarker } from '@/components/ui/Field';
 import { CustomFieldsRenderer } from './CustomFieldsRenderer';
 import type { FormDraft, CustomFieldValues } from './formState';
@@ -238,12 +239,19 @@ export function ChartInfoSection({
             />
           )}
           {visible('primaryDiagnosis') && (
-            <FormField
+            <CodeAutocompleteField
               label="Primary diagnosis"
               required={required('primaryDiagnosis')}
-              value={draft.primaryDiagnosis}
-              onChange={(v) => update('primaryDiagnosis', v)}
+              code={draft.primaryDiagnosis}
+              description={draft.primaryDiagnosisDescription}
+              onChange={(c, d) => {
+                update('primaryDiagnosis', c);
+                update('primaryDiagnosisDescription', d);
+              }}
               readOnly={readOnly}
+              search={searchIcdCodes}
+              queryKeyPrefix="icd-code-search"
+              placeholder="Type an ICD code…"
               aiTag={draft._aiFields?.has('primaryDiagnosis')}
             />
           )}

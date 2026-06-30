@@ -15,6 +15,7 @@ export interface FormDraft {
   disposition: string;
   em: string;
   primaryDiagnosis: string;
+  primaryDiagnosisDescription: string;
   primaryHealth: string;
   facility: string;
   poa: string;
@@ -61,6 +62,7 @@ export const EMPTY_FORM_DRAFT: FormDraft = {
   disposition: '',
   em: '',
   primaryDiagnosis: '',
+  primaryDiagnosisDescription: '',
   primaryHealth: '',
   facility: '',
   poa: '',
@@ -122,8 +124,8 @@ export function useCustomFieldValues(initial?: CustomFieldValues) {
   return { values, updateValue, setValues };
 }
 
-export function useAuditDraft() {
-  const [audit, setAudit] = useState<Record<string, AuditCell>>({});
+export function useAuditDraft(initial?: Record<string, AuditCell>) {
+  const [audit, setAudit] = useState<Record<string, AuditCell>>(initial ?? {});
 
   const updateAudit = useCallback(
     (rowKey: string, field: keyof AuditCell, value: string | string[]) => {

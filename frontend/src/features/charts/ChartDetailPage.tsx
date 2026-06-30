@@ -38,7 +38,7 @@ import { AuditInfoSection } from './chart-detail/AuditInfoSection';
 import { DocumentViewerModal } from './chart-detail/DocumentViewerModal';
 import { ReviewEditModal } from './chart-detail/ReviewEditModal';
 import { ChartLiveDecisionToasts } from '../qa/live/ChartLiveDecisionToasts';
-import { useFormDraft, useAuditDraft, useCustomFieldValues, EMPTY_FORM_DRAFT, type FormDraft } from './chart-detail/formState';
+import { useFormDraft, useAuditDraft, useCustomFieldValues, EMPTY_FORM_DRAFT, type FormDraft, type AuditCell } from './chart-detail/formState';
 import { useChartAiCodes } from './chart-detail/useChartAiCodes';
 import { useFieldConfig, STANDARD_FIELD_MAP, isFieldDisabledByStatus } from './chart-detail/useFieldConfig';
 import { ChartDetailSkeleton } from './chart-detail/ChartDetailSkeleton';
@@ -110,6 +110,42 @@ export function ChartDetailPage() {
   );
 }
 
+/* ── Local draft persistence (refresh-safe unsaved edits) ──────
+ * The Chart/Processing/Audit form draft lives only in React state until the
+ * user clicks Save. To survive a refresh, mirror it to localStorage (per chart
+ * + user) as the user types, restore it on mount, and clear it once saved. */
+const LOCAL_DRAFT_PREFIX = 'chart-draft:v1';
+interface LocalDraft {
+  draft?: Partial<FormDraft>;
+  customValues?: Record<string, unknown>;
+  audit?: Record<string, AuditCell>;
+}
+function localDraftKey(chartId: string, userId: string): string {
+  return `${LOCAL_DRAFT_PREFIX}:${chartId}:${userId}`;
+}
+function loadLocalDraft(chartId: string, userId: string): LocalDraft | null {
+  try {
+    const raw = localStorage.getItem(localDraftKey(chartId, userId));
+    return raw ? (JSON.parse(raw) as LocalDraft) : null;
+  } catch {
+    return null;
+  }
+}
+function saveLocalDraft(chartId: string, userId: string, payload: LocalDraft): void {
+  try {
+    localStorage.setItem(localDraftKey(chartId, userId), JSON.stringify(payload));
+  } catch {
+    /* ignore quota / disabled storage */
+  }
+}
+function clearLocalDraft(chartId: string, userId: string): void {
+  try {
+    localStorage.removeItem(localDraftKey(chartId, userId));
+  } catch {
+    /* ignore */
+  }
+}
+
 /* ── Body — owns shared form state ───────────────────────── */
 
 function ChartDetailBody({ chart }: { chart: Chart }) {
@@ -124,6 +160,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   // POA, LOS, sub-speciality, etc.) live under customFields._formDraft per the
   // backend DTO's escape-hatch comment.
   const formDraftStash = (chart.customFields as { _formDraft?: Partial<FormDraft> } | undefined)?._formDraft ?? {};
+  // Unsaved edits this user left for this chart, restored from localStorage so a
+  // refresh doesn't lose them. Read once on mount; overlaid on the server seed.
+  const [restoredLocal] = useState(() => loadLocalDraft(String(chart.id), user?.id ?? ''));
   // Seed helpers for the multi-value fields (DRG, PCS). For DRG, fall back to the
   // legacy single value (_formDraft.drgValue string, or the numeric drg_value
   // column) so charts saved before DRG went multi still load their value.
@@ -156,6 +195,10 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     admitDate: chart.admitDate ?? '',
     dischargeDate: chart.dischargeDate ?? '',
     primaryDiagnosis: chart.primaryDiagnosis ?? '',
+    primaryDiagnosisDescription:
+      typeof formDraftStash.primaryDiagnosisDescription === 'string'
+        ? formDraftStash.primaryDiagnosisDescription
+        : '',
     em: chart.emLevel ?? '',
     // DRG is multi-value now; seedDrgValues handles the legacy single-value
     // fallback (_formDraft.drgValue string, or the numeric drg_value column).
@@ -192,15 +235,18 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     holdReason: Array.isArray(formDraftStash.holdReason) ? formDraftStash.holdReason : [],
     auditOption: Array.isArray(formDraftStash.auditOption) ? formDraftStash.auditOption : [],
     qcStatus: typeof formDraftStash.qcStatus === 'string' ? formDraftStash.qcStatus : '',
+    // Overlay refresh-restored unsaved edits (localStorage) on the server seed.
+    ...(restoredLocal?.draft ?? {}),
   });
-  const { audit, updateAudit: rawUpdateAudit } = useAuditDraft();
-  const { values: customValues, updateValue: rawUpdateCustomValue } = useCustomFieldValues(
-    Object.fromEntries(
+  const { audit, updateAudit: rawUpdateAudit } = useAuditDraft(restoredLocal?.audit);
+  const { values: customValues, updateValue: rawUpdateCustomValue } = useCustomFieldValues({
+    ...Object.fromEntries(
       Object.entries((chart.customFields ?? {}) as Record<string, unknown>).filter(
         ([k]) => !NON_FORM_CUSTOM_FIELD_KEYS.has(k),
       ),
     ),
-  );
+    ...(restoredLocal?.customValues ?? {}),
+  });
 
   const [viewerOpen, setViewerOpen] = useState(false);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
@@ -402,7 +448,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   // without it the Save button would just stop spinning with no feedback.
   const [saveError, setSaveError] = useState<string | null>(null);
   // Track unsaved edits so we can block "Stop timer" until the user saves.
-  const [isDirty, setIsDirty] = useState(false);
+  // Start "dirty" when we restored unsaved edits, so the server-reseed effect
+  // below doesn't overwrite them.
+  const [isDirty, setIsDirty] = useState(!!restoredLocal);
 
   // Wrap each updater so any user edit flips the draft to "dirty"; cleared on save success.
   const update: typeof rawUpdate = (k, v) => {
@@ -417,6 +465,23 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     setIsDirty(true);
     rawUpdateCustomValue(id, v);
   };
+
+  // Mirror the in-progress draft (Chart/Processing/Audit) to localStorage so a
+  // refresh doesn't lose unsaved edits. Debounced; only while there are edits.
+  // `_aiFields` is a Set (non-serialisable) so it's stripped before persisting.
+  useEffect(() => {
+    if (!isDirty) return;
+    const t = setTimeout(() => {
+      const draftToSave = { ...draft };
+      delete (draftToSave as { _aiFields?: unknown })._aiFields;
+      saveLocalDraft(String(chart.id), user?.id ?? '', {
+        draft: draftToSave,
+        customValues,
+        audit,
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [draft, customValues, audit, isDirty, chart.id, user?.id]);
 
   // Real timer state — only true when this user has an active timer ticking
   // on this specific chart. Milestone alone is unreliable (it stays at
@@ -505,6 +570,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       admitDate: chart.admitDate ?? '',
       dischargeDate: chart.dischargeDate ?? '',
       primaryDiagnosis: chart.primaryDiagnosis ?? '',
+      primaryDiagnosisDescription:
+        typeof stash.primaryDiagnosisDescription === 'string' ? stash.primaryDiagnosisDescription : '',
       em: chart.emLevel ?? '',
       drgValues: seedDrgValues(stash as Record<string, unknown>),
       coderComments: chart.coderCommentsToClient ?? '',
@@ -644,6 +711,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       // first preserves user-defined custom fields while overwriting our
       // reserved blob with the latest draft.
       const formDraftBlob: Partial<FormDraft> = {
+        primaryDiagnosisDescription: draft.primaryDiagnosisDescription,
         disposition: draft.disposition,
         primaryHealth: draft.primaryHealth,
         facility: draft.facility,
@@ -700,6 +768,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     },
     onSuccess: () => {
       setIsDirty(false);
+      // The draft is now persisted server-side — drop the local refresh copy.
+      clearLocalDraft(String(chart.id), user?.id ?? '');
       setSaveError(null);
       setSaveToastOpen(true);
       qc.invalidateQueries({ queryKey: ['chart', chart.id] });
