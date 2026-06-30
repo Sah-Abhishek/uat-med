@@ -648,6 +648,26 @@ async update(id: number, dto: UpdateChartDto) {
       await this.timerConflict(open);
     }
 
+    // A PAUSED chart still counts as the user's active work. Pause closes the
+    // session, so the open-session guard above can't see it — find any chart the
+    // user has paused (other than this one) and route them back to resume and
+    // finish it before starting a different chart.
+    const pausedElsewhere = await this.charts
+      .createQueryBuilder('c')
+      .where(`c.custom_fields -> 'timerPaused' ->> 'userId' = :uid`, { uid: String(user.id) })
+      .andWhere('c.id != :id', { id })
+      .getOne();
+    if (pausedElsewhere) {
+      throw new ConflictException({
+        error: {
+          code: 'timer_conflict',
+          message: 'Another chart is paused. Resume and finish it before working on this chart.',
+          activeChartId: String(pausedElsewhere.id),
+          activeChartNo: pausedElsewhere.chartNo ?? null,
+        },
+      });
+    }
+
     // Per-chart lock: only one person may run a timer on a chart at a time.
     // (At this point we know the caller has no open session, so any open
     // session on this chart belongs to someone else.)
