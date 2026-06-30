@@ -1,6 +1,6 @@
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Input, Label } from '@/components/ui/Field';
-import { AUDIT_ROWS, FormField, MultiSelect } from './shared';
+import { FormField, MultiSelect, type AuditAreaRow } from './shared';
 import type { FormDraft } from './formState';
 import type { AuditCell } from './formState';
 import { cn } from '@/lib/utils';
@@ -20,9 +20,12 @@ interface Props {
   /** Drives default-open: this card opens by default for auditors. */
   isAuditor?: boolean;
   feedbackTypes?: string[];
-  /** Per-row feedback category options, keyed by AUDIT_ROWS.key. Sourced from the
-   * /configurations Feedback Categories tab and scoped to the chart's client + location. */
-  feedbackOptionsByRow?: Record<string, string[]>;
+  /** The audit areas to render as rows, configured per the chart's client +
+   * location (Configurations → Feedback Categories). One row per area, each
+   * carrying its own Feedback Category options. */
+  auditAreas?: AuditAreaRow[];
+  /** True while the configured areas are still loading. */
+  areasLoading?: boolean;
   /** Coders the auditor can hand the chart back to when picking "Feedback Provided". */
   coders?: CoderOption[];
   codersLoading?: boolean;
@@ -36,18 +39,25 @@ export function AuditInfoSection({
   disabled,
   isAuditor,
   feedbackTypes,
-  feedbackOptionsByRow,
+  auditAreas = [],
+  areasLoading,
   coders = [],
   codersLoading,
 }: Props) {
   /** Strip everything except digits — Total / Correct codes are integer counts. */
   const onlyDigits = (s: string) => s.replace(/\D+/g, '');
-  const totalSum = Object.values(audit).reduce(
-    (s, r) => s + (parseInt(r.totalCodes, 10) || 0),
+  /** Coerce a stored feedback value (legacy single-string or multi array) to an
+   * array, so rows that were saved before the table became uniform still load. */
+  const asArray = (v: AuditCell['feedbackCategory']): string[] =>
+    Array.isArray(v) ? v : v ? [v] : [];
+  // Sum only over the rendered rows so stale localStorage keys from a different
+  // area config don't leak into the totals.
+  const totalSum = auditAreas.reduce(
+    (s, row) => s + (parseInt(audit[row.key]?.totalCodes ?? '', 10) || 0),
     0,
   );
-  const correctSum = Object.values(audit).reduce(
-    (s, r) => s + (parseInt(typeof r.correctCodes === 'string' ? r.correctCodes : '', 10) || 0),
+  const correctSum = auditAreas.reduce(
+    (s, row) => s + (parseInt(audit[row.key]?.correctCodes ?? '', 10) || 0),
     0,
   );
 
@@ -70,30 +80,27 @@ export function AuditInfoSection({
             </HeaderCell>
           </div>
 
-          {AUDIT_ROWS.map((row) => {
-            const cell = audit[row.key] ?? { totalCodes: '', correctCodes: '', feedbackCategory: row.multiFeedback ? [] : '' };
-            const total = parseInt(cell.totalCodes, 10);
-            const correct = parseInt(typeof cell.correctCodes === 'string' ? cell.correctCodes : '', 10);
-            const feedbackEnabled =
-              !disabled && cell.totalCodes !== '' && cell.correctCodes !== '' && !isNaN(total) && !isNaN(correct) && correct < total;
+          {auditAreas.length === 0 ? (
+            <div className="px-3.5 py-6 text-center text-[13px] text-ink-muted">
+              {areasLoading
+                ? 'Loading audit areas…'
+                : 'No audit areas configured for this client / location. Add them in Configurations → Feedback Categories.'}
+            </div>
+          ) : (
+            auditAreas.map((row) => {
+              const cell = audit[row.key] ?? { totalCodes: '', correctCodes: '', feedbackCategory: [] };
+              const total = parseInt(cell.totalCodes, 10);
+              const correct = parseInt(typeof cell.correctCodes === 'string' ? cell.correctCodes : '', 10);
+              const feedbackEnabled =
+                !disabled && cell.totalCodes !== '' && cell.correctCodes !== '' && !isNaN(total) && !isNaN(correct) && correct < total;
 
-            return (
-              <div
-                key={row.key}
-                className="grid grid-cols-[160px_1fr_1fr_1fr] border-b border-line last:border-b-0 items-center"
-              >
-                <BodyCell border>{row.label}</BodyCell>
-                <BodyCell>
-                  {row.totalCodesOptions ? (
-                    <FormField
-                      label=""
-                      type="select"
-                      value={cell.totalCodes}
-                      onChange={(v) => updateAudit(row.key, 'totalCodes', v)}
-                      options={row.totalCodesOptions}
-                      readOnly={disabled}
-                    />
-                  ) : (
+              return (
+                <div
+                  key={row.key}
+                  className="grid grid-cols-[160px_1fr_1fr_1fr] border-b border-line last:border-b-0 items-center"
+                >
+                  <BodyCell border>{row.label}</BodyCell>
+                  <BodyCell>
                     <Input
                       value={cell.totalCodes}
                       readOnly={disabled}
@@ -101,39 +108,28 @@ export function AuditInfoSection({
                       pattern="[0-9]*"
                       onChange={(e) => updateAudit(row.key, 'totalCodes', onlyDigits(e.target.value))}
                     />
-                  )}
-                </BodyCell>
-                <BodyCell>
-                  <Input
-                    value={typeof cell.correctCodes === 'string' ? cell.correctCodes : ''}
-                    readOnly={disabled}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    onChange={(e) => updateAudit(row.key, 'correctCodes', onlyDigits(e.target.value))}
-                  />
-                </BodyCell>
-                <BodyCell>
-                  {row.multiFeedback ? (
+                  </BodyCell>
+                  <BodyCell>
+                    <Input
+                      value={typeof cell.correctCodes === 'string' ? cell.correctCodes : ''}
+                      readOnly={disabled}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      onChange={(e) => updateAudit(row.key, 'correctCodes', onlyDigits(e.target.value))}
+                    />
+                  </BodyCell>
+                  <BodyCell>
                     <MultiSelect
-                      value={Array.isArray(cell.feedbackCategory) ? cell.feedbackCategory : []}
+                      value={asArray(cell.feedbackCategory)}
                       onChange={(v) => updateAudit(row.key, 'feedbackCategory', v)}
-                      options={feedbackOptionsByRow?.[row.key] ?? []}
+                      options={row.options}
                       readOnly={!feedbackEnabled}
                     />
-                  ) : (
-                    <FormField
-                      label=""
-                      type="select"
-                      value={typeof cell.feedbackCategory === 'string' ? cell.feedbackCategory : ''}
-                      onChange={(v) => updateAudit(row.key, 'feedbackCategory', v)}
-                      options={feedbackOptionsByRow?.[row.key] ?? []}
-                      readOnly={!feedbackEnabled}
-                    />
-                  )}
-                </BodyCell>
-              </div>
-            );
-          })}
+                  </BodyCell>
+                </div>
+              );
+            })
+          )}
 
           {/* Total row */}
           <div className="grid grid-cols-[160px_1fr_1fr_1fr] bg-surface-sunken/60 items-center">

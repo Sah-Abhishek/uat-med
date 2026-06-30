@@ -179,7 +179,8 @@ interface AuditState {
 const AUDIT_FEEDBACK_MIN_CHARS = 20;
 
 /** Maps a board Category onto the configured feedback audit-area name so the
- * Disagree dropdown shows that area's reasons (mirrors AUDIT_ROWS labels). */
+ * Disagree dropdown shows that area's reasons (matches the default built-in
+ * audit-area labels). */
 const CATEGORY_TO_AUDIT_AREA: Record<Category, string> = {
   'ADMIT CODE': 'Primary Diagnosis',
   PRIMARY: 'Primary Diagnosis',

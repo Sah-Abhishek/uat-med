@@ -5,25 +5,21 @@ import { Check, ChevronDown, Sparkles, X as XIcon } from 'lucide-react';
 import { Input, Label, FancySelect, DatePicker, type DateMarker } from '@/components/ui/Field';
 import { cn } from '@/lib/utils';
 
-/* ── Audit table row config (mirrors source) ─────────────── */
+/* ── Audit table row config ──────────────────────────────────
+ * The Audit Information rows are no longer hardcoded — they're driven by the
+ * audit areas configured per client + location (Configurations → Feedback
+ * Categories). Each configured area becomes one row, keyed by its area id, with
+ * its reasons as the Feedback Category options. All rows behave identically
+ * (numeric Total/Correct + multi-select feedback). */
 
-export interface AuditRow {
+export interface AuditAreaRow {
+  /** Stable key — the configured area's id (stringified). */
   key: string;
+  /** Display label — the configured area's name. */
   label: string;
-  feedKey: string;
-  multiFeedback?: boolean;
-  totalCodesOptions?: string[];
+  /** Feedback Category options — the area's configured reasons. */
+  options: string[];
 }
-
-export const AUDIT_ROWS: AuditRow[] = [
-  { key: 'primaryDiagnosis', label: 'Primary Diagnosis', feedKey: 'prim_diag_feed' },
-  { key: 'secondaryDiagnosis', label: 'Secondary Diagnosis', feedKey: 'sec_diag_feed', multiFeedback: true },
-  { key: 'procedures', label: 'Procedures', feedKey: 'procedure_feed', multiFeedback: true },
-  { key: 'edEmLevel', label: 'ED/EM Level', feedKey: 'ed_em_feed', totalCodesOptions: ['0', '1'] },
-  { key: 'modifier', label: 'Modifier', feedKey: 'modifier_feed', multiFeedback: true },
-  { key: 'poaIndicator', label: 'POA Indicator', feedKey: 'poa_feed', multiFeedback: true },
-  { key: 'drgValue', label: 'DRG Value', feedKey: 'drug_feed', multiFeedback: true },
-];
 
 /* ── Metadata item (icon + label) ────────────────────────── */
 

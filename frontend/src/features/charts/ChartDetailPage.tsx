@@ -24,7 +24,7 @@ import type { AiPredictedCode } from '@/api/types';
 import { getWorklist } from '@/api/worklists';
 import { listUsers } from '@/api/users';
 import { getFeedbackCategories } from '@/api/configurations';
-import { AUDIT_ROWS } from './chart-detail/shared';
+import type { AuditAreaRow } from './chart-detail/shared';
 import type { AiEncounterResult, ApiErrorShape, Chart, ChartStatus, Priority, UploadedDocument } from '@/api/types';
 import { useAuth } from '@/auth/store';
 import { Button } from '@/components/ui/Button';
@@ -630,16 +630,14 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     queryFn: () => getFeedbackCategories({ clientId: feedbackClientId!, locationId: feedbackLocationId! }),
     enabled: !!feedbackClientId && !!feedbackLocationId,
   });
-  const feedbackOptionsByRow = (() => {
-    const map: Record<string, string[]> = {};
-    const areas = feedbackCategoriesQ.data?.areas ?? [];
-    const norm = (s: string) => s.trim().toLowerCase();
-    for (const row of AUDIT_ROWS) {
-      const match = areas.find((a) => norm(a.name) === norm(row.label));
-      map[row.key] = match ? match.reasons.map((r) => r.name).filter(Boolean) : [];
-    }
-    return map;
-  })();
+  // Audit Information rows are driven by the audit areas configured for this
+  // chart's client + location — one row per area, in the configured order, each
+  // carrying its own reasons as Feedback Category options.
+  const auditAreaRows: AuditAreaRow[] = (feedbackCategoriesQ.data?.areas ?? []).map((a) => ({
+    key: String(a.id),
+    label: a.name,
+    options: a.reasons.map((r) => r.name).filter(Boolean),
+  }));
 
   // Seed the Date of Service draft from the worklist's range start once the
   // worklist data lands — but only if the chart had no DoS persisted and the
@@ -946,7 +944,8 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
           disabled={auditDisabled || qaReadOnly}
           isAuditor={isAuditor}
           feedbackTypes={cfg.options.feedbackTypes}
-          feedbackOptionsByRow={feedbackOptionsByRow}
+          auditAreas={auditAreaRows}
+          areasLoading={feedbackCategoriesQ.isLoading}
           coders={coderOpts}
           codersLoading={codersQ.isFetching}
         />
