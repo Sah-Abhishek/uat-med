@@ -97,7 +97,7 @@ export class AdminActiveWorkService {
         u.role            AS "userRole",
         u.avatar_url      AS "avatarUrl",
         (c.custom_fields->'timerPaused'->>'at') AS "pausedAt",
-        COALESCE((SELECT SUM(elapsed_ms) FROM chart_time_logs t WHERE t.chart_id = c.id), 0) AS "elapsedMs",
+        COALESCE((SELECT SUM(elapsed_ms) FROM chart_time_logs t WHERE t.chart_id = c.id AND t.user_id = (c.custom_fields->'timerPaused'->>'userId')::bigint), 0) AS "elapsedMs",
         w.id              AS "worklistId",
         w.worklist_number AS "worklistNumber",
         cl.name           AS "clientName",

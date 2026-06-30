@@ -226,7 +226,7 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
     if (active.data.chartId === chart.id) {
       // Same chart but PAUSED — the server reports it as active so the Charts
       // page can show it, but it is NOT running: don't start the live clock
-      // (no open session). The frozen total is shown from chart.coderTimeMs.
+      // (no open session). The frozen total is shown from chart.myTimeMs.
       if (active.data.paused) {
         setStartedAt(null);
         setStoppedAt(null);
@@ -454,7 +454,7 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
         // Show the accumulated total (closed sessions + the live one) so the
         // number freezes on Pause and continues on Resume.
         <p className="text-3xl font-bold font-mono tabular-nums text-ink mb-4">
-          {formatTime(Math.floor((chart.coderTimeMs ?? 0) / 1000) + (running ? elapsed : 0))}
+          {formatTime(Math.floor((chart.myTimeMs ?? 0) / 1000) + (running ? elapsed : 0))}
         </p>
       )}
       {stopBlocked && (
@@ -548,7 +548,7 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
         {/* Total = all durable logged sessions on this chart + the live one. */}
         <MiniStat
           label="Total"
-          value={formatTime(Math.floor((chart.coderTimeMs ?? 0) / 1000) + (running ? elapsed : 0))}
+          value={formatTime(Math.floor((chart.myTimeMs ?? 0) / 1000) + (running ? elapsed : 0))}
         />
       </div>
     </div>

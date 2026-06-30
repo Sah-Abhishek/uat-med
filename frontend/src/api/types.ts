@@ -224,6 +224,10 @@ export interface Chart {
    * sessions, ms). Present on the chart-detail response. The header timer adds
    * the live running session on top. */
   coderTimeMs?: number;
+  /** The current user's OWN logged time on this chart (ms). The editable timer
+   * uses this so a new worker (e.g. an auditor) starts from zero rather than the
+   * coder's elapsed; coderTimeMs stays the chart total for the QA read-only view. */
+  myTimeMs?: number;
 }
 
 export type AiReportType =

@@ -95,8 +95,8 @@ export class ChartsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Full chart detail for the coding editor.' })
-  detail(@Param('id', ParseIntPipe) id: number) {
-    return this.svc.detail(id);
+  detail(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.detail(id, user);
   }
 
   @Get(':id/time-logs')

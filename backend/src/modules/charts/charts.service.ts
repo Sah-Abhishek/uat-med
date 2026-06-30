@@ -445,7 +445,7 @@ export class ChartsService {
     );
   }
 
-  async detail(id: number) {
+  async detail(id: number, user?: AuthenticatedUser) {
     // Load the parent worklist + its config relations so the detail header can
     // show the same enriched fields the list does (worklist #, client,
     // location, speciality, process, received date) without the frontend
@@ -501,6 +501,20 @@ export class ChartsService {
       .getRawOne<{ sum: string }>();
     const coderTimeMs = Number(timeAgg?.sum ?? 0);
 
+    // The current user's OWN logged time on this chart. The editable timer shows
+    // this (not the chart total) so a new worker — e.g. an auditor opening a
+    // coder-finished chart — starts from zero instead of the coder's elapsed.
+    let myTimeMs = 0;
+    if (user) {
+      const myAgg = await this.timeLogs
+        .createQueryBuilder('t')
+        .select('COALESCE(SUM(t.elapsed_ms), 0)', 'sum')
+        .where('t.chart_id = :id', { id })
+        .andWhere('t.user_id = :uid', { uid: user.id })
+        .getRawOne<{ sum: string }>();
+      myTimeMs = Number(myAgg?.sum ?? 0);
+    }
+
     const { serviceLine, worklist, ...rest } = c;
     const cf = (rest.customFields ?? {}) as Record<string, any>;
     return {
@@ -509,6 +523,7 @@ export class ChartsService {
       dateOfService: c.dos ?? null,
       serviceLineName: serviceLine?.name ?? null,
       coderTimeMs,
+      myTimeMs,
       // ── List-parity enrichments so the detail header shows full info ──
       worklistNumber: worklist?.worklistNumber ?? null,
       clientName: worklist?.client?.name ?? null,
@@ -844,6 +859,7 @@ async update(id: number, dto: UpdateChartDto) {
       .createQueryBuilder('t')
       .select('COALESCE(SUM(t.elapsed_ms), 0)', 'sum')
       .where('t.chart_id = :cid', { cid: paused.id })
+      .andWhere('t.user_id = :uid', { uid: user.id })
       .getRawOne<{ sum: string }>();
     const pausedAt = (paused.customFields as Record<string, any>)?.timerPaused?.at ?? null;
     return {
