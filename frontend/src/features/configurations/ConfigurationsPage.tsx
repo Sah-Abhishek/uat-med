@@ -1415,7 +1415,7 @@ function FeedbackCategoriesEditor({
   }, [data]);
 
   const m = useMutation({
-    mutationFn: (payload: { areas: Array<{ id: number; reasons: FeedbackReason[] }> }) =>
+    mutationFn: (payload: { areas: Array<{ id: number; reasons: FeedbackReason[]; isActive?: boolean }> }) =>
       updateFeedbackCategories({ clientId, locationId, ...payload }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['configurations', 'feedback-categories', clientId, locationId] });
@@ -1507,6 +1507,7 @@ function FeedbackCategoriesEditor({
                   areas: areas.map((a) => ({
                     id: a.id,
                     reasons: a.reasons.filter((r) => r.name.trim()),
+                    isActive: a.isActive,
                   })),
                 });
               }}
@@ -1553,26 +1554,41 @@ function FeedbackAreaCard({
   }
 
   return (
-    <Card>
+    <Card className={cn(!area.isActive && 'opacity-60')}>
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-bold text-ink">{area.name}</h3>
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className="text-sm font-bold text-ink truncate">{area.name}</h3>
           {!area.isBuiltin && (
             <span className="text-[10px] uppercase tracking-[0.08em] text-ink-muted bg-surface-sunken px-1.5 py-0.5 rounded">
               Custom
             </span>
           )}
+          {!area.isActive && (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-ink-muted bg-surface-sunken px-1.5 py-0.5 rounded">
+              Inactive
+            </span>
+          )}
         </div>
-        {onDelete && (
-          <button
-            type="button"
-            onClick={onDelete}
-            className="w-7 h-7 rounded-full bg-danger-soft text-danger hover:bg-danger/15 transition flex items-center justify-center"
-            title="Delete custom audit area"
-          >
-            <X className="w-3.5 h-3.5" strokeWidth={2.5} />
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Active toggle — applies to every area, including built-ins (which
+              can't be deleted but can be hidden from the chart audit table). */}
+          <Switch
+            checked={area.isActive}
+            onChange={(next) => onChange({ ...area, isActive: next })}
+            disabled={!canEdit}
+            label={<span className="text-[11px] font-semibold text-ink-muted">Active</span>}
+          />
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="w-7 h-7 rounded-full bg-danger-soft text-danger hover:bg-danger/15 transition flex items-center justify-center"
+              title="Delete custom audit area"
+            >
+              <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+            </button>
+          )}
+        </div>
       </div>
       <div className="space-y-2">
         {area.reasons.map((r, i) => (

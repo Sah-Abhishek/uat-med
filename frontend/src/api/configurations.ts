@@ -171,6 +171,9 @@ export interface FeedbackArea {
   name: string;
   isBuiltin: boolean;
   isSystem: boolean;
+  /** Whether this area renders as a row in the chart Audit Information table.
+   * Deactivating hides it (including built-ins) without losing its reasons. */
+  isActive: boolean;
   reasons: FeedbackReason[];
 }
 
@@ -178,7 +181,11 @@ export const getFeedbackCategories = (scope: { clientId: number; locationId: num
   get<{ areas: FeedbackArea[] }>('/configurations/specialities/feedback-categories', scope);
 
 export const updateFeedbackCategories = (
-  dto: { clientId: number; locationId: number; areas: Array<{ id: number; reasons: FeedbackReason[] }> },
+  dto: {
+    clientId: number;
+    locationId: number;
+    areas: Array<{ id: number; reasons: FeedbackReason[]; isActive?: boolean }>;
+  },
 ) =>
   put<{ areas: FeedbackArea[] }>('/configurations/specialities/feedback-categories', dto);
 

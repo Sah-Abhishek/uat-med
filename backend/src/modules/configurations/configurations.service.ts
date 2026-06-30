@@ -517,6 +517,7 @@ export class ConfigurationsService {
         name: a.name,
         isBuiltin: a.isBuiltin,
         isSystem: a.isSystem,
+        isActive: a.isActive,
         reasons: (reasonsByArea.get(Number(a.id)) ?? []).map((r) => ({
           id: Number(r.id),
           name: r.name,
@@ -526,7 +527,7 @@ export class ConfigurationsService {
   }
 
   async updateFeedbackCategories(
-    body: { areas?: Array<{ id: number; reasons?: Array<{ id?: number; name: string }> }> },
+    body: { areas?: Array<{ id: number; reasons?: Array<{ id?: number; name: string }>; isActive?: boolean }> },
     scope: { clientId?: number; locationId?: number },
   ) {
     const { clientId, locationId } = this.requireScope(scope);
@@ -537,6 +538,12 @@ export class ConfigurationsService {
       // Confirm the area belongs to this location (security check).
       const owned = await this.auditAreasRepo.findOne({ where: { id: areaId, locationId } });
       if (!owned) continue;
+
+      // Active/inactive toggle — applies to every area, including built-ins
+      // (which can't be deleted but can be hidden from the audit table).
+      if (typeof area.isActive === 'boolean' && area.isActive !== owned.isActive) {
+        await this.auditAreasRepo.update({ id: areaId }, { isActive: area.isActive });
+      }
 
       const incoming = (area.reasons ?? []).filter((r) => (r.name ?? '').trim());
       const existing = await this.auditReasonsRepo.find({ where: { auditAreaId: areaId } });

@@ -631,13 +631,16 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     enabled: !!feedbackClientId && !!feedbackLocationId,
   });
   // Audit Information rows are driven by the audit areas configured for this
-  // chart's client + location — one row per area, in the configured order, each
-  // carrying its own reasons as Feedback Category options.
-  const auditAreaRows: AuditAreaRow[] = (feedbackCategoriesQ.data?.areas ?? []).map((a) => ({
-    key: String(a.id),
-    label: a.name,
-    options: a.reasons.map((r) => r.name).filter(Boolean),
-  }));
+  // chart's client + location — one active row per area, in the configured
+  // order, each carrying its own reasons as Feedback Category options.
+  // Deactivated areas (Configurations → Feedback Categories) are hidden.
+  const auditAreaRows: AuditAreaRow[] = (feedbackCategoriesQ.data?.areas ?? [])
+    .filter((a) => a.isActive)
+    .map((a) => ({
+      key: String(a.id),
+      label: a.name,
+      options: a.reasons.map((r) => r.name).filter(Boolean),
+    }));
 
   // Seed the Date of Service draft from the worklist's range start once the
   // worklist data lands — but only if the chart had no DoS persisted and the
