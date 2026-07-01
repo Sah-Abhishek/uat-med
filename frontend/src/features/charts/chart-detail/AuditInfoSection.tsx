@@ -1,7 +1,7 @@
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Input, Label } from '@/components/ui/Field';
 import { FormField, MultiSelect, type AuditAreaRow } from './shared';
-import type { FormDraft } from './formState';
+import { QC_STATUS_OPTIONS_REQUIRED, type FormDraft } from './formState';
 import type { AuditCell } from './formState';
 import { cn } from '@/lib/utils';
 
@@ -172,10 +172,10 @@ export function AuditInfoSection({
             type="select"
             value={draft.auditorQcStatus}
             onChange={(v) => update('auditorQcStatus', v)}
-            options={['Agreed', 'Feedback Provided']}
+            options={QC_STATUS_OPTIONS_REQUIRED}
             readOnly={disabled}
           />
-          {draft.auditorQcStatus !== 'Agreed' && (
+          {draft.auditorQcStatus !== 'Agree' && (
             <FormField
               label="Allocate to Coder"
               type="select"

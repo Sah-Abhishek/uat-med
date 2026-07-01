@@ -2,7 +2,7 @@ import { CollapsibleCard } from '@/components/ui/Card';
 import { Label, Textarea } from '@/components/ui/Field';
 import { FormField, MultiSelect, SkeletonGrid, FieldSkeleton } from './shared';
 import { CustomFieldsRenderer } from './CustomFieldsRenderer';
-import type { FormDraft, CustomFieldValues } from './formState';
+import { QC_STATUS_OPTIONS, type FormDraft, type CustomFieldValues } from './formState';
 import { isFieldDisabledByStatus, type FieldConfig } from './useFieldConfig';
 import { cn } from '@/lib/utils';
 
@@ -211,7 +211,7 @@ export function ProcessingInfoSection({
               type="select"
               value={draft.qcStatus}
               onChange={(v) => update('qcStatus', v)}
-              options={['Pending', 'Approved', 'Reject']}
+              options={QC_STATUS_OPTIONS}
               readOnly={!isAuditor}
             />
           </div>

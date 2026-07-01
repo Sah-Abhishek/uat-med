@@ -53,6 +53,22 @@ export interface AuditCell {
   feedbackCategory: string | string[];
 }
 
+/**
+ * Canonical QC Status options — the single source of truth for every QC Status
+ * dropdown (Coder QC Status, Auditor QC Status) and mirrored by the Reports
+ * QC Status filter (backend reports.service.ts). "Blank" carries an empty value
+ * meaning "not set", so it's only offered on optional fields; required fields
+ * use QC_STATUS_OPTIONS_REQUIRED (the concrete statuses only).
+ */
+export const QC_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: 'Agree', label: 'Agree' },
+  { value: 'Feedback Implemented', label: 'Feedback Implemented' },
+  { value: 'Feedback Rejected', label: 'Feedback Rejected' },
+  { value: 'Feedback Provided', label: 'Feedback Provided' },
+  { value: '', label: 'Blank' },
+];
+export const QC_STATUS_OPTIONS_REQUIRED = QC_STATUS_OPTIONS.filter((o) => o.value !== '');
+
 export const EMPTY_FORM_DRAFT: FormDraft = {
   chartNo: '',
   mrNo: '',
