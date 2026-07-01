@@ -1,0 +1,166 @@
+{
+  "chartId": 1551,
+  "backed_up_at": "2026-06-26T07:34:52.464Z",
+  "old_aiPrediction": {
+    "codes": [
+      {
+        "code": "O80",
+        "codeType": "primary",
+        "confidence": 0.9,
+        "description": "Encounter for full-term uncomplicated delivery",
+        "justification": "Primary diagnosis for delivery"
+      },
+      {
+        "code": "Z3800",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Single liveborn infant, delivered vaginally",
+        "justification": "Primary reason for admission"
+      },
+      {
+        "code": "Z370",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Liveborn infant, single birth",
+        "justification": "Secondary diagnosis for single liveborn"
+      },
+      {
+        "code": "Z3A39",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "39 weeks gestation of pregnancy",
+        "justification": "Gestation period documented"
+      },
+      {
+        "code": "Z22330",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Carrier of Group B streptococcus",
+        "justification": "Documented GBS positive status"
+      },
+      {
+        "code": "D72829",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Elevated white blood cell count, unspecified",
+        "justification": "Documented WBC elevation"
+      },
+      {
+        "code": "D62",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Acute posthemorrhagic anemia",
+        "justification": "Documented low hemoglobin"
+      }
+    ],
+    "status": "COMPLETE",
+    "primary": [
+      {
+        "code": "O80",
+        "codeType": "primary",
+        "confidence": 0.9,
+        "description": "Encounter for full-term uncomplicated delivery",
+        "justification": "Primary diagnosis for delivery"
+      }
+    ],
+    "reportIds": [
+      "b3a161e7-c257-4a5e-8026-5c12e2e61f9c"
+    ],
+    "secondary": [
+      {
+        "code": "Z3800",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Single liveborn infant, delivered vaginally",
+        "justification": "Primary reason for admission"
+      },
+      {
+        "code": "Z370",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Liveborn infant, single birth",
+        "justification": "Secondary diagnosis for single liveborn"
+      },
+      {
+        "code": "Z3A39",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "39 weeks gestation of pregnancy",
+        "justification": "Gestation period documented"
+      },
+      {
+        "code": "Z22330",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Carrier of Group B streptococcus",
+        "justification": "Documented GBS positive status"
+      },
+      {
+        "code": "D72829",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Elevated white blood cell count, unspecified",
+        "justification": "Documented WBC elevation"
+      },
+      {
+        "code": "D62",
+        "codeType": "secondary",
+        "confidence": 0.9,
+        "description": "Acute posthemorrhagic anemia",
+        "justification": "Documented low hemoglobin"
+      }
+    ],
+    "startedAt": "2026-06-26T06:20:50.432Z",
+    "auditNotes": "",
+    "procedures": [],
+    "completedAt": "2026-06-26T06:27:17.201Z",
+    "encounterId": "614b659b-2b07-4e8a-93db-3655fd6c0e60",
+    "generatedAt": "2026-06-26T06:27:17.201Z",
+    "processingMs": 386769,
+    "clinicalSummary": {
+      "vitals": {
+        "heart_rate": "74",
+        "pain_score": "",
+        "temperature": "98.4 °F (36.9 °C)",
+        "blood_pressure": "104/70",
+        "respiratory_rate": "18",
+        "oxygen_saturation": "99 %"
+      },
+      "medications": [
+        "docusate sodium 100 MG capsule by mouth 2 times a day",
+        "ferrous sulfate 325 mg (65 mg of elemental Iron) per tablet by mouth 2 times a day",
+        "ibuprofen 800 MG tablet by mouth every 8 hours as needed for discomfort",
+        "albuterol sulfate 108 (90 Base) MCG/ACT (PROVENTIL HFA) inhalation aerosol 2 puffs every 6 hours as needed for wheezing or shortness of breath",
+        "famotidine 20 MG tablet by mouth daily",
+        "phenazopyridine 200 MG tablet by mouth 3 times a day as needed for bladder spasms",
+        "Prenatal MV-Min-Fe Fum-FA-DHA (PRENATAL 1 ORAL) 1 tablet by mouth daily"
+      ],
+      "social_history": {
+        "drugs": "Yes (Marijuana)",
+        "alcohol": "No",
+        "tobacco": "Never"
+      },
+      "chief_complaint": "39 weeks 0 days gestation for delivery",
+      "clinical_context": "The patient, a 25-year-old G2P1, was admitted at 39 weeks 0 days for delivery. She had a spontaneous vaginal delivery with no complications. The newborn had Apgar scores of 8 at 1 minute and 9 at 5 minutes. Postpartum, the patient was stable with a normal exam and no postpartum complications.",
+      "significant_labs": {
+        "HCT": "28.7 (L)",
+        "HGB": "10.6 (L)",
+        "WBC": "18.1 (H)"
+      },
+      "primary_diagnoses": [
+        "Normal labor and delivery",
+        "Group B Streptococcus positive status",
+        "Anemia"
+      ],
+      "secondary_diagnoses": [
+        "Asthma",
+        "Bacterial vaginosis treated in pregnancy",
+        "Eczema",
+        "Recurrent urinary tract infections (none in pregnancy)"
+      ],
+      "procedures_performed": [
+        "ARM SKIN LESION BIOPSY / EXCISION (right)"
+      ]
+    }
+  }
+}

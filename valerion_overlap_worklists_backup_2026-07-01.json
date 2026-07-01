@@ -1,0 +1,1996 @@
+{
+ "captured_at": "2026-07-01",
+ "db": "prod-med-icdcore",
+ "worklists": [
+  {
+   "id": 44,
+   "worklist_number": "OB_NB_06.19.2026",
+   "client_id": 7,
+   "location_id": 9,
+   "primary_speciality_id": 13,
+   "process_id": 6,
+   "date_of_service": "2026-06-01",
+   "received_date": "2026-06-19",
+   "total_charts": 3,
+   "net_change": 0,
+   "status": "IN_PROGRESS",
+   "created_by": 23,
+   "created_at": "2026-06-19T03:00:46.722067+00:00",
+   "updated_at": "2026-06-19T03:00:59.023456+00:00",
+   "deleted_at": null,
+   "date_of_service_to": "2026-06-19",
+   "sub_speciality_id": 105
+  },
+  {
+   "id": 81,
+   "worklist_number": "OBGYN_OP_06.24.2026",
+   "client_id": 8,
+   "location_id": 11,
+   "primary_speciality_id": 30,
+   "process_id": 7,
+   "date_of_service": "2026-06-01",
+   "received_date": "2026-06-24",
+   "total_charts": 5,
+   "net_change": 0,
+   "status": "IN_PROGRESS",
+   "created_by": 23,
+   "created_at": "2026-06-24T01:57:38.689764+00:00",
+   "updated_at": "2026-06-24T07:51:38.538336+00:00",
+   "deleted_at": null,
+   "date_of_service_to": "2026-06-24",
+   "sub_speciality_id": 121
+  },
+  {
+   "id": 136,
+   "worklist_number": "OBGYN_OP_06.30.2026",
+   "client_id": 8,
+   "location_id": 11,
+   "primary_speciality_id": 30,
+   "process_id": 7,
+   "date_of_service": "2026-06-01",
+   "received_date": "2026-06-30",
+   "total_charts": 5,
+   "net_change": 0,
+   "status": "IN_PROGRESS",
+   "created_by": 23,
+   "created_at": "2026-06-30T01:29:51.351803+00:00",
+   "updated_at": "2026-06-30T01:30:01.863613+00:00",
+   "deleted_at": null,
+   "date_of_service_to": "2026-06-30",
+   "sub_speciality_id": 121
+  }
+ ],
+ "charts": [
+  {
+   "id": 781,
+   "worklist_id": 44,
+   "serial_no": 3,
+   "chart_no": null,
+   "mr_number": null,
+   "dos": null,
+   "admit_date": null,
+   "discharge_date": null,
+   "milestone": "READY_TO_CODE",
+   "chart_status": "OPEN",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 46,
+   "allocated_auditor_id": null,
+   "original_coder_id": 46,
+   "original_auditor_id": null,
+   "primary_diagnosis": null,
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": null,
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {},
+   "created_at": "2026-06-19T03:00:46.722067+00:00",
+   "updated_at": "2026-06-19T03:00:59.023456+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-19T03:00:59.029000+00:00",
+   "chart_status_changed_at": null,
+   "service_line_id": null
+  },
+  {
+   "id": 779,
+   "worklist_id": 44,
+   "serial_no": 1,
+   "chart_no": "563583",
+   "mr_number": "100008",
+   "dos": "2026-06-15",
+   "admit_date": "2026-06-15",
+   "discharge_date": "2026-06-15",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "COMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 46,
+   "allocated_auditor_id": null,
+   "original_coder_id": 46,
+   "original_auditor_id": null,
+   "primary_diagnosis": "Z38.00",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99460",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "1": "BUI YEN PHUONG",
+    "2": "BCBS",
+    "3": 0,
+    "4": 0,
+    "5": "99239-25",
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "",
+     "procedureCode": "",
+     "responsibleParty": [
+      "Final"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "Z380",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Single liveborn infant, born in hospital",
+       "justification": "The primary focus of the encounter is the postnatal care of a single term newborn born in the hospital."
+      },
+      {
+       "code": "Z380",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Single liveborn infant, born in hospital",
+       "justification": "The patient is a single term newborn, and the documentation indicates the birth occurred in the hospital."
+      },
+      {
+       "code": "Z412",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Encounter for routine and ritual male circumcision",
+       "justification": "The documentation indicates that the newborn is being seen for a routine circumcision."
+      },
+      {
+       "code": "54160",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Routine neonatal circumcision",
+       "justification": "The documentation clearly states that a neonatal circumcision was performed."
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "Z380",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Single liveborn infant, born in hospital",
+       "justification": "The primary focus of the encounter is the postnatal care of a single term newborn born in the hospital."
+      }
+     ],
+     "reportIds": [
+      "ea005eb8-8d0d-4d60-bd4c-116a1586669a"
+     ],
+     "secondary": [
+      {
+       "code": "Z380",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Single liveborn infant, born in hospital",
+       "justification": "The patient is a single term newborn, and the documentation indicates the birth occurred in the hospital."
+      },
+      {
+       "code": "Z412",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Encounter for routine and ritual male circumcision",
+       "justification": "The documentation indicates that the newborn is being seen for a routine circumcision."
+      }
+     ],
+     "startedAt": "2026-06-22T06:12:00.660Z",
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "54160",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Routine neonatal circumcision",
+       "justification": "The documentation clearly states that a neonatal circumcision was performed."
+      }
+     ],
+     "completedAt": "2026-06-22T06:16:17.445Z",
+     "encounterId": "00ca5ded-979c-40ae-b51e-1a01793046f5",
+     "generatedAt": "2026-06-22T06:16:17.445Z",
+     "processingMs": 256785,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "",
+       "pain_score": "",
+       "temperature": "",
+       "blood_pressure": "",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [],
+      "social_history": {
+       "drugs": "",
+       "alcohol": "",
+       "tobacco": ""
+      },
+      "chief_complaint": "Routine newborn evaluation and circumcision",
+      "clinical_context": "The patient is a male newborn delivered via normal spontaneous vaginal delivery at 40.6 weeks gestation. The birth weight was 4110 grams, and there were no complications at delivery. The newborn had a routine physical exam with all systems within normal limits. A neonatal circumcision was performed without complications. The infant is stable and ready for discharge home with the mother, with a follow-up plan for a routine newborn check at 1 week.",
+      "significant_labs": {},
+      "primary_diagnoses": [
+       "Single term newborn"
+      ],
+      "secondary_diagnoses": [],
+      "procedures_performed": [
+       "Neonatal circumcision"
+      ]
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "779-1782055883658-0",
+      "key": "clinical_documents/779/1782055883575_563583_NB.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/779/1782055883575_563583_NB.pdf",
+      "size": 111674,
+      "filename": "563583 NB.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "ea005eb8-8d0d-4d60-bd4c-116a1586669a",
+      "reportType": "CLINIC_NOTE"
+     }
+    ]
+   },
+   "created_at": "2026-06-19T03:00:46.722067+00:00",
+   "updated_at": "2026-06-22T10:34:09.905811+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-22T10:25:54.978000+00:00",
+   "chart_status_changed_at": "2026-06-22T10:34:09.904000+00:00",
+   "service_line_id": null
+  },
+  {
+   "id": 780,
+   "worklist_id": 44,
+   "serial_no": 2,
+   "chart_no": "563582",
+   "mr_number": "98614",
+   "dos": "2026-06-15",
+   "admit_date": "2026-06-15",
+   "discharge_date": "2026-06-16",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "COMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 46,
+   "allocated_auditor_id": null,
+   "original_coder_id": 46,
+   "original_auditor_id": null,
+   "primary_diagnosis": "O80",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99239",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "1": "BUI YEN PHUONG",
+    "2": "Lucent Health commercial",
+    "3": 0,
+    "4": 0,
+    "5": "0",
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "",
+     "procedureCode": "59409",
+     "responsibleParty": [
+      "Final"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "O629",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Abnormality of forces of labor, unspecified",
+       "justification": "The patient is in active labor at 40.6 weeks gestation, which is an abnormality of labor."
+      },
+      {
+       "code": "Z3A40",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "40 weeks gestation of pregnancy",
+       "justification": "The patient is at 40.6 weeks gestation, which rounds down to 40 completed weeks."
+      },
+      {
+       "code": "O701",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Second degree perineal laceration during delivery",
+       "justification": "The patient had a second-degree perineal laceration that was repaired."
+      },
+      {
+       "code": "Z3800",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Single liveborn infant, delivered vaginally",
+       "justification": "The patient had a normal spontaneous vaginal delivery (NSVD)."
+      },
+      {
+       "code": "57210",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Repair of the perineal laceration.",
+       "justification": "The patient had a second-degree perineal laceration that was repaired with 3-0 chromic running suture."
+      },
+      {
+       "code": "99214",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Office or other outpatient visit for the evaluation and management of an established patient, which requires at least 2 of these 3 key components: A detailed history; A detailed examination; Medical decision making of moderate complexity. Counseling and/or coordination of care with other physicians, other qualified health care professionals, or agencies are provided consistent with the nature of the problem(s) and the patient's needs. Usually, the presenting problem(s) are of moderate severity. Typically, 25 minutes are spent at the encounter.",
+       "justification": "The encounter involves active labor, a second-degree perineal laceration, and a vaginal delivery, requiring a detailed history, examination, and moderate medical decision-making."
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "O629",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Abnormality of forces of labor, unspecified",
+       "justification": "The patient is in active labor at 40.6 weeks gestation, which is an abnormality of labor."
+      }
+     ],
+     "reportIds": [
+      "a97d618c-773b-452e-a5d2-97e294300902",
+      "bd2a9123-5387-468d-896f-30292ebd8cbb",
+      "9e5f8654-7421-4952-9210-1490c5839ac3"
+     ],
+     "secondary": [
+      {
+       "code": "Z3A40",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "40 weeks gestation of pregnancy",
+       "justification": "The patient is at 40.6 weeks gestation, which rounds down to 40 completed weeks."
+      },
+      {
+       "code": "O701",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Second degree perineal laceration during delivery",
+       "justification": "The patient had a second-degree perineal laceration that was repaired."
+      },
+      {
+       "code": "Z3800",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Single liveborn infant, delivered vaginally",
+       "justification": "The patient had a normal spontaneous vaginal delivery (NSVD)."
+      }
+     ],
+     "startedAt": "2026-06-22T10:43:46.113Z",
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "57210",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Repair of the perineal laceration.",
+       "justification": "The patient had a second-degree perineal laceration that was repaired with 3-0 chromic running suture."
+      },
+      {
+       "code": "99214",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Office or other outpatient visit for the evaluation and management of an established patient, which requires at least 2 of these 3 key components: A detailed history; A detailed examination; Medical decision making of moderate complexity. Counseling and/or coordination of care with other physicians, other qualified health care professionals, or agencies are provided consistent with the nature of the problem(s) and the patient's needs. Usually, the presenting problem(s) are of moderate severity. Typically, 25 minutes are spent at the encounter.",
+       "justification": "The encounter involves active labor, a second-degree perineal laceration, and a vaginal delivery, requiring a detailed history, examination, and moderate medical decision-making."
+      }
+     ],
+     "completedAt": "2026-06-22T10:44:52.675Z",
+     "encounterId": "4489b0de-cebe-4a83-80d5-ede8eeeb1f6a",
+     "generatedAt": "2026-06-22T10:44:52.675Z",
+     "processingMs": 66562,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "",
+       "pain_score": "",
+       "temperature": "",
+       "blood_pressure": "",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [
+       "Ibuprofen 800 mg BID x 14 days",
+       "Docusate 100 mg BID x 30 days",
+       "PNVs qD x 90 days",
+       "Ferrous sulfate 325 mg qD x 90 days",
+       "Tylenol 3 30-300 mg q6hr PRN, #30"
+      ],
+      "social_history": {
+       "drugs": "",
+       "alcohol": "",
+       "tobacco": ""
+      },
+      "chief_complaint": "contractions",
+      "clinical_context": "The patient, a 31-year-old G6P2032, presented in active labor at 40.6 weeks gestation. She underwent a normal spontaneous vaginal delivery (NSVD) with a 2nd degree perineal laceration that was repaired. Postpartum, she met all goals, with pain controlled, lochia slowing, and normal vital signs. She was discharged home in stable condition.",
+      "significant_labs": {
+       "Post op hemoglobin": "11.5 g/dL"
+      },
+      "primary_diagnoses": [
+       "Intrauterine pregnancy at 40.6 weeks gestation",
+       "Active labor"
+      ],
+      "secondary_diagnoses": [
+       "2nd degree perineal laceration"
+      ],
+      "procedures_performed": [
+       "Normal spontaneous vaginal delivery (NSVD)",
+       "Perineal laceration repair with 3-0 chromic running suture"
+      ]
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "780-1782125025787-0",
+      "key": "clinical_documents/780/1782125025662_563582_HP.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/780/1782125025662_563582_HP.pdf",
+      "size": 102613,
+      "filename": "563582_HP.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "a97d618c-773b-452e-a5d2-97e294300902",
+      "reportType": "CLINIC_NOTE"
+     },
+     {
+      "id": "780-1782125025787-1",
+      "key": "clinical_documents/780/1782125025773_563582_Procedure.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/780/1782125025773_563582_Procedure.pdf",
+      "size": 91223,
+      "filename": "563582_Procedure.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "bd2a9123-5387-468d-896f-30292ebd8cbb",
+      "reportType": "CLINIC_NOTE"
+     },
+     {
+      "id": "780-1782125025787-2",
+      "key": "clinical_documents/780/1782125025781_563582_Discharge.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/780/1782125025781_563582_Discharge.pdf",
+      "size": 99462,
+      "filename": "563582_Discharge.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "9e5f8654-7421-4952-9210-1490c5839ac3",
+      "reportType": "DISCHARGE_SUMMARY"
+     }
+    ]
+   },
+   "created_at": "2026-06-19T03:00:46.722067+00:00",
+   "updated_at": "2026-06-22T10:55:55.873677+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-22T10:47:14.010000+00:00",
+   "chart_status_changed_at": "2026-06-22T10:55:55.871000+00:00",
+   "service_line_id": null
+  },
+  {
+   "id": 1189,
+   "worklist_id": 81,
+   "serial_no": 1,
+   "chart_no": "WV11103",
+   "mr_number": "M056029",
+   "dos": "2026-06-23",
+   "admit_date": "2026-06-23",
+   "discharge_date": "2026-06-23",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "INCOMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": "Z01.419",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99395",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": "Missing pap smear report",
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [
+      "Missing path report"
+     ],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "Commercial",
+     "procedureCode": "Q0091",
+     "responsibleParty": [
+      "TRH"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "Z01419",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Encntr for gyn exam (general) (routine) w/o abn findings",
+       "justification": "Routine gyn exam, no abnormalities"
+      },
+      {
+       "code": "Z124",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Encounter for screening for malignant neoplasm of cervix",
+       "justification": "Cervical cancer screening"
+      },
+      {
+       "code": "57410",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Pelvic examination",
+       "justification": "Pelvic exam performed"
+      },
+      {
+       "code": "87161",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Pap smear (CPT 87161)",
+       "justification": "Pap smear obtained"
+      },
+      {
+       "code": "99212",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Office or other outpatient visit for the evaluation and management of an established patient, that may require the following: a limited examination and/or obtaining and/or reviewing the results of routinely performed diagnostic tests. Problem focused",
+       "justification": "Routine gyn exam, straightforward"
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "Z01419",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Encntr for gyn exam (general) (routine) w/o abn findings",
+       "justification": "Routine gyn exam, no abnormalities"
+      }
+     ],
+     "reportIds": [
+      "b641a23a-ff73-47ef-bbbb-0e21b49c6e38"
+     ],
+     "secondary": [
+      {
+       "code": "Z124",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Encounter for screening for malignant neoplasm of cervix",
+       "justification": "Cervical cancer screening"
+      }
+     ],
+     "startedAt": "2026-06-24T08:11:50.430Z",
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "57410",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Pelvic examination",
+       "justification": "Pelvic exam performed"
+      },
+      {
+       "code": "87161",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Pap smear (CPT 87161)",
+       "justification": "Pap smear obtained"
+      },
+      {
+       "code": "99212",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Office or other outpatient visit for the evaluation and management of an established patient, that may require the following: a limited examination and/or obtaining and/or reviewing the results of routinely performed diagnostic tests. Problem focused",
+       "justification": "Routine gyn exam, straightforward"
+      }
+     ],
+     "completedAt": "2026-06-24T08:13:13.275Z",
+     "encounterId": "fb2ed2ae-c403-471d-ba95-453bfc1276df",
+     "generatedAt": "2026-06-24T08:13:13.275Z",
+     "processingMs": 82845,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "77",
+       "pain_score": "0",
+       "temperature": "",
+       "blood_pressure": "120/83",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [],
+      "social_history": {
+       "drugs": "Denies use",
+       "alcohol": "None",
+       "tobacco": "Never smoker"
+      },
+      "chief_complaint": "Yearly exam, YEARLY EXAM AND PAP",
+      "clinical_context": "The patient is a 38-year-old female who presented for a routine yearly gynecological examination. She has no current concerns or new health changes. Her gynecological history includes a history of abnormal pap smears and high-risk HPV. She has a history of cryosurgery for cervical intraepithelial neoplasia. The physical examination was unremarkable, and a Pap smear and clinical breast examination were performed. The patient was educated on contraception, mammograms, and breast self-examination. She is scheduled to return in one year.",
+      "significant_labs": {},
+      "primary_diagnoses": [
+       "Routine gynecological examination (Z01.419)"
+      ],
+      "secondary_diagnoses": [
+       "History of abnormal pap smear",
+       "History of high-risk human papillomavirus (HR HPV)",
+       "History of cryosurgery for cervical intraepithelial neoplasia (CKC)",
+       "History of venous insufficiency",
+       "History of allergies to cefaclor and sulfa (sulfonamide antibiotics)"
+      ],
+      "procedures_performed": [
+       "Pap smear (CPT 87161)",
+       "Clinical breast examination (CPT 99201)"
+      ]
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "1189-1782288710139-0",
+      "key": "clinical_documents/1189/1782288709990_Document_1_1.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/1189/1782288709990_Document_1_1.pdf",
+      "size": 56000,
+      "filename": "Document-1 1.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "b641a23a-ff73-47ef-bbbb-0e21b49c6e38",
+      "reportType": "CLINIC_NOTE"
+     }
+    ]
+   },
+   "created_at": "2026-06-24T01:57:38.689764+00:00",
+   "updated_at": "2026-06-24T08:22:44.073558+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-24T08:14:49.224000+00:00",
+   "chart_status_changed_at": "2026-06-24T08:22:44.072000+00:00",
+   "service_line_id": null
+  },
+  {
+   "id": 1192,
+   "worklist_id": 81,
+   "serial_no": 4,
+   "chart_no": "WV21493",
+   "mr_number": "M267677",
+   "dos": "2026-06-23",
+   "admit_date": "2026-06-23",
+   "discharge_date": "2026-06-23",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "COMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": "O09.893",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99024",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "Commercial",
+     "procedureCode": "81003-QW",
+     "responsibleParty": [
+      "Batch entry Done"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "O09893",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Supervision of other high risk pregnancies, third trimester",
+       "justification": "High-risk pregnancy supervision"
+      },
+      {
+       "code": "Z3A30",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "30 weeks gestation of pregnancy",
+       "justification": "Direct match to gestation"
+      },
+      {
+       "code": "O24410",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Gestational diabetes mellitus in pregnancy, diet controlled",
+       "justification": "Documented condition"
+      },
+      {
+       "code": "K219",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Gastro-esophageal reflux disease without esophagitis",
+       "justification": "Documented condition"
+      },
+      {
+       "code": "76810",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Ultrasound for fetal growth",
+       "justification": "Documented procedure"
+      },
+      {
+       "code": "59025",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Non-stress test",
+       "justification": "Documented procedure"
+      },
+      {
+       "code": "82143",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Amniotic fluid index",
+       "justification": "Documented procedure"
+      },
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Automated urinalysis",
+       "justification": "Documented procedure"
+      },
+      {
+       "code": "85025",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "CBC with auto diff",
+       "justification": "Documented procedure"
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "O09893",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Supervision of other high risk pregnancies, third trimester",
+       "justification": "High-risk pregnancy supervision"
+      }
+     ],
+     "reportIds": [
+      "0571c207-7be0-42d6-81bc-89812c440cd0"
+     ],
+     "secondary": [
+      {
+       "code": "Z3A30",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "30 weeks gestation of pregnancy",
+       "justification": "Direct match to gestation"
+      },
+      {
+       "code": "O24410",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Gestational diabetes mellitus in pregnancy, diet controlled",
+       "justification": "Documented condition"
+      },
+      {
+       "code": "K219",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Gastro-esophageal reflux disease without esophagitis",
+       "justification": "Documented condition"
+      }
+     ],
+     "startedAt": "2026-06-24T09:06:31.838Z",
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "76810",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Ultrasound for fetal growth",
+       "justification": "Documented procedure"
+      },
+      {
+       "code": "59025",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Non-stress test",
+       "justification": "Documented procedure"
+      },
+      {
+       "code": "82143",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Amniotic fluid index",
+       "justification": "Documented procedure"
+      },
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Automated urinalysis",
+       "justification": "Documented procedure"
+      },
+      {
+       "code": "85025",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "CBC with auto diff",
+       "justification": "Documented procedure"
+      }
+     ],
+     "completedAt": "2026-06-24T09:09:59.617Z",
+     "encounterId": "7d65185f-ec67-48fd-9d0a-6cfc1f2a0ad3",
+     "generatedAt": "2026-06-24T09:09:59.617Z",
+     "processingMs": 207779,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "79 bpm",
+       "pain_score": "0",
+       "temperature": "",
+       "blood_pressure": "139/85 mmHg",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [
+       "famotidine (pepcid) 20 mg tablet po daily",
+       "prenatal vits w-ca,fe,fa (prenatal vitamins) 28 mg iron-800 mcg tablet po daily",
+       "omeprazole 20 mg tablet po daily"
+      ],
+      "social_history": {
+       "drugs": "0 drugs/day",
+       "alcohol": "0 drinks/day",
+       "tobacco": "never smoker"
+      },
+      "chief_complaint": "pregnancy",
+      "clinical_context": "The patient is a 37-year-old woman in her third trimester of pregnancy, presenting for a routine prenatal visit. She has a history of gestational diabetes and increased GERD. The patient is currently asymptomatic with no pain or vaginal bleeding. Fetal movement is reported as good. The plan includes monitoring blood glucose levels, a growth scan at 32 weeks, and initiating antenatal testing with biweekly NSTs and weekly AFIs at 34 weeks.",
+      "significant_labs": {
+       "urine pH": "8.0",
+       "hematocrit": "42.4%",
+       "hemoglobin": "14.4 g/dL",
+       "glucose (glucola)": "143 mg/dL",
+       "urine specific gravity": "1.015"
+      },
+      "primary_diagnoses": [
+       "30 weeks gestation of pregnancy",
+       "advanced maternal age, primigravida in third trimester, antepartum",
+       "supervision of other high risk pregnancies, third trimester"
+      ],
+      "secondary_diagnoses": [
+       "gestational diabetes mellitus",
+       "increased GERD"
+      ],
+      "procedures_performed": [
+       "urinalysis (automated)",
+       "pap test",
+       "anatomy ultrasound",
+       "growth scan",
+       "non-stress test (NST)",
+       "amniotic fluid index (AFI)"
+      ]
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "1192-1782291991495-0",
+      "key": "clinical_documents/1192/1782291991485_Document_4_1.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/1192/1782291991485_Document_4_1.pdf",
+      "size": 68021,
+      "filename": "Document 4 1.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "0571c207-7be0-42d6-81bc-89812c440cd0",
+      "reportType": "CLINIC_NOTE"
+     }
+    ]
+   },
+   "created_at": "2026-06-24T01:57:38.689764+00:00",
+   "updated_at": "2026-06-24T09:18:01.291355+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-24T09:10:18.415000+00:00",
+   "chart_status_changed_at": "2026-06-24T09:18:01.290000+00:00",
+   "service_line_id": null
+  },
+  {
+   "id": 1190,
+   "worklist_id": 81,
+   "serial_no": 2,
+   "chart_no": "WV13115",
+   "mr_number": "M108171",
+   "dos": "2026-06-23",
+   "admit_date": "2026-06-23",
+   "discharge_date": "2026-06-23",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "COMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": "O12.03",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99024",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "Commercial",
+     "procedureCode": "81003-QW",
+     "responsibleParty": [
+      "Batch entry Done"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "R2241",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Localized swelling, mass and lump, right lower limb",
+       "justification": "Exact match to right leg swelling"
+      },
+      {
+       "code": "Z3A37",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "37 weeks gestation of pregnancy",
+       "justification": "Exact match to gestation"
+      },
+      {
+       "code": "M79604",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Pain in right leg",
+       "justification": "Exact match to leg pain, right"
+      },
+      {
+       "code": "R600",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Localized edema",
+       "justification": "Exact match to lower extremity edema"
+      },
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Urinalysis",
+       "justification": "Exact match to URINALYSIS (AUTOMATED)"
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "R2241",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Localized swelling, mass and lump, right lower limb",
+       "justification": "Exact match to right leg swelling"
+      }
+     ],
+     "reportIds": [
+      "9c9b0be5-31a6-4b23-af95-56b1248f30f3"
+     ],
+     "secondary": [
+      {
+       "code": "Z3A37",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "37 weeks gestation of pregnancy",
+       "justification": "Exact match to gestation"
+      },
+      {
+       "code": "M79604",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Pain in right leg",
+       "justification": "Exact match to leg pain, right"
+      },
+      {
+       "code": "R600",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Localized edema",
+       "justification": "Exact match to lower extremity edema"
+      }
+     ],
+     "startedAt": "2026-06-24T08:35:05.017Z",
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Urinalysis",
+       "justification": "Exact match to URINALYSIS (AUTOMATED)"
+      }
+     ],
+     "completedAt": "2026-06-24T08:37:00.345Z",
+     "encounterId": "e0c4a3c9-8b89-4d9e-a326-069d56ed07b1",
+     "generatedAt": "2026-06-24T08:37:00.345Z",
+     "processingMs": 115328,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "94",
+       "pain_score": "0",
+       "temperature": "",
+       "blood_pressure": "114/80",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [
+       "ondansetron hcl (zofran 4mg tablet) 4 mg po q6-8h prn for nausea/vomiting, #30 tab 3 refills",
+       "multivitamin"
+      ],
+      "social_history": {
+       "drugs": "0 amount/day pre-pregnancy, 0 amount/day during pregnancy",
+       "alcohol": "0 amount/day pre-pregnancy, 0 amount/day during pregnancy",
+       "tobacco": "Former smoker, 0.5 pack/day pre-pregnancy, 0 pack/day during pregnancy"
+      },
+      "chief_complaint": "pregnancy",
+      "clinical_context": "The patient is a 22-year-old female at 37 weeks gestation with a chief complaint of pregnancy. She has been experiencing right leg swelling and pain, for which a Doppler ultrasound was ordered to rule out DVT. The patient is O positive, rubella immune, and has a history of T12, L1 fracture. She prefers nitrous oxide and IV pain medication for labor and delivery, avoiding an epidural due to her back history. The patient is scheduled to return to the office in 1 week for a follow-up.",
+      "significant_labs": {
+       "Urine Blood": "Negative (NEG)",
+       "Urine Glucose": "Negative (NEG)",
+       "Urine Ketones": "Negative (NEG)",
+       "Urine Nitrite": "Negative (NEG)",
+       "Urine Protein": "NEGATIVE",
+       "Urine Bilirubin": "Negative (NEG)",
+       "Urine Urobilinogen": "0.2 mg/dL",
+       "Urine Specific Gravity": "1.015",
+       "Urine Leukocyte Esterase": "Small (NEG)"
+      },
+      "primary_diagnoses": [
+       "37 weeks gestation of pregnancy",
+       "right leg swelling",
+       "lower extremity edema",
+       "leg pain, right"
+      ],
+      "secondary_diagnoses": [
+       "history of T12, L1 fracture",
+       "O positive, rubella immune",
+       "HEP/HIV negative",
+       "NIPT low risk, male",
+       "GBS negative",
+       "1 hour GCT--113"
+      ],
+      "procedures_performed": [
+       "urinalysis (automated)",
+       "US Venous Doppler Unilat RT"
+      ]
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "1190-1782290104679-0",
+      "key": "clinical_documents/1190/1782290104670_Document_2.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/1190/1782290104670_Document_2.pdf",
+      "size": 74012,
+      "filename": "Document 2.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "9c9b0be5-31a6-4b23-af95-56b1248f30f3",
+      "reportType": "CLINIC_NOTE"
+     }
+    ]
+   },
+   "created_at": "2026-06-24T01:57:38.689764+00:00",
+   "updated_at": "2026-06-24T08:51:43.222283+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-24T08:37:05.430000+00:00",
+   "chart_status_changed_at": "2026-06-24T08:51:43.221000+00:00",
+   "service_line_id": null
+  },
+  {
+   "id": 1191,
+   "worklist_id": 81,
+   "serial_no": 3,
+   "chart_no": "WV15072",
+   "mr_number": "M201192",
+   "dos": "2026-06-23",
+   "admit_date": "2026-06-23",
+   "discharge_date": "2026-06-23",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "COMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": "Z34.83",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99024",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "Commercial",
+     "procedureCode": "81003-QW",
+     "responsibleParty": [
+      "Batch entry Done"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "Z3493",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Encntr for suprvsn of normal preg, unsp, third trimester",
+       "justification": "Primary reason for visit"
+      },
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Urinalysis",
+       "justification": "Documented procedure"
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "Z3493",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Encntr for suprvsn of normal preg, unsp, third trimester",
+       "justification": "Primary reason for visit"
+      }
+     ],
+     "reportIds": [
+      "d923584b-e48a-4a13-83ca-5a6885f4af0d"
+     ],
+     "secondary": [],
+     "startedAt": "2026-06-24T08:54:44.390Z",
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Urinalysis",
+       "justification": "Documented procedure"
+      }
+     ],
+     "completedAt": "2026-06-24T08:56:23.489Z",
+     "encounterId": "a09b8b62-a190-408c-84cc-e490b88182bb",
+     "generatedAt": "2026-06-24T08:56:23.489Z",
+     "processingMs": 99099,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "91 bpm",
+       "pain_score": "0",
+       "temperature": "",
+       "blood_pressure": "115/66 mmHg",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [
+       "Prenatal Vits W-Ca,Fe,Fa (Prenatal Vitamins) 28 Mg Iron-800 Mcg Tablet 1 TAB PO DAILY, #90 TAB 3 Refills"
+      ],
+      "social_history": {
+       "drugs": "0 drugs/day pre-pregnancy, 0 drugs/day during pregnancy",
+       "alcohol": "0 drinks/day pre-pregnancy, 0 drinks/day during pregnancy",
+       "tobacco": "Never smoker"
+      },
+      "chief_complaint": "pregnancy",
+      "clinical_context": "The patient is a 21-year-old woman in her third trimester of pregnancy, with a due date confirmed by LMP and ultrasound. She has been doing well throughout her pregnancy, with no significant issues reported. Her prenatal labs are within normal limits, and she is scheduled for a follow-up visit in one week.",
+      "significant_labs": {
+       "Hematocrit": "32.7%",
+       "Hemoglobin": "10.7 g/dL",
+       "Glucose Tolerance Test (1-hr GTT)": "94 mg/dL"
+      },
+      "primary_diagnoses": [
+       "supervision of other normal pregnancy, third trimester"
+      ],
+      "secondary_diagnoses": [
+       "juvenile rheumatoid arthritis",
+       "O+ blood type, antibody screen negative",
+       "rubella immune",
+       "RPR negative",
+       "glucose tolerance test 94 (normal)",
+       "non-invasive prenatal testing (NIPT) low risk female",
+       "group B streptococcus (GBS) negative"
+      ],
+      "procedures_performed": []
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "1191-1782291284052-0",
+      "key": "clinical_documents/1191/1782291283969_Document_3_1.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/1191/1782291283969_Document_3_1.pdf",
+      "size": 69996,
+      "filename": "Document 3 1.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "d923584b-e48a-4a13-83ca-5a6885f4af0d",
+      "reportType": "CLINIC_NOTE"
+     }
+    ]
+   },
+   "created_at": "2026-06-24T01:57:38.689764+00:00",
+   "updated_at": "2026-06-24T09:04:15.166961+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-24T08:56:52.312000+00:00",
+   "chart_status_changed_at": "2026-06-24T09:04:15.165000+00:00",
+   "service_line_id": null
+  },
+  {
+   "id": 1193,
+   "worklist_id": 81,
+   "serial_no": 5,
+   "chart_no": "WV9159",
+   "mr_number": "M101849",
+   "dos": "2026-06-23",
+   "admit_date": "2026-06-23",
+   "discharge_date": "2026-06-23",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "COMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": "O03.9",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99213",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "Commercial",
+     "procedureCode": "NA",
+     "responsibleParty": [
+      "Batch entry Done"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "O034",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Incomplete spontaneous abortion without complication",
+       "justification": "Primary reason for visit"
+      },
+      {
+       "code": "59820",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Care of miscarriage",
+       "justification": "Procedure performed"
+      },
+      {
+       "code": "99213",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Office or other outpatient visit for the evaluation and management of an established patient, which requires at least 2 of these 3 key components: A detailed history; A detailed examination; Medical decision making of low complexity. Counseling and/or coordination of care with other physicians, other qualified health care professionals, or agencies are provided consistent with the nature of the problem(s) and the patient's needs.",
+       "justification": "MDM basis, low complexity"
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "O034",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Incomplete spontaneous abortion without complication",
+       "justification": "Primary reason for visit"
+      }
+     ],
+     "reportIds": [
+      "6d72bcd8-4e38-42ec-945f-ba5317e05275"
+     ],
+     "secondary": [],
+     "startedAt": "2026-06-24T09:19:55.083Z",
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "59820",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Care of miscarriage",
+       "justification": "Procedure performed"
+      },
+      {
+       "code": "99213",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Office or other outpatient visit for the evaluation and management of an established patient, which requires at least 2 of these 3 key components: A detailed history; A detailed examination; Medical decision making of low complexity. Counseling and/or coordination of care with other physicians, other qualified health care professionals, or agencies are provided consistent with the nature of the problem(s) and the patient's needs.",
+       "justification": "MDM basis, low complexity"
+      }
+     ],
+     "completedAt": "2026-06-24T09:20:48.094Z",
+     "encounterId": "1daa6e3c-f51a-4689-8074-cc49ba7fd108",
+     "generatedAt": "2026-06-24T09:20:48.094Z",
+     "processingMs": 53011,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "78",
+       "pain_score": "0",
+       "temperature": "",
+       "blood_pressure": "121/73",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [
+       "Progesterone, Micronized (Prometrium 200MG) 200 MG CAPSULE: 1 CAP VG HS #30 (discontinued)",
+       "TRANEXAMIC ACID (LYSTEDA) 650 MG TABLET: 1,300 MG PO TID for heavy bleeding 3 Days #18 (discontinued)",
+       "Sulfamethoxazole/Trimethoprim (Bactrim Ds Tablet) 800 MG-160 MG TABLET: 1 TAB PO BID 3 Days #6 (discontinued)"
+      ],
+      "social_history": {
+       "drugs": "Marijuana",
+       "alcohol": "None",
+       "tobacco": "Current every day smoker, uses e-cigarettes"
+      },
+      "chief_complaint": "Spontaneous abortion",
+      "clinical_context": "The patient, a 24-year-old female, presents for follow-up after a spontaneous abortion. She reports that her bleeding stopped last week and she feels much better. She and her boyfriend are not planning to try for pregnancy soon and do not desire birth control. The patient has a history of acne and prior tonsillectomy and adenoidectomy. She is a current smoker and uses e-cigarettes, and she uses marijuana. Her vitals are stable, and she denies any other symptoms.",
+      "significant_labs": {},
+      "primary_diagnoses": [
+       "Spontaneous abortion"
+      ],
+      "secondary_diagnoses": [
+       "Acne",
+       "Tonsillectomy",
+       "Adenoidectomy"
+      ],
+      "procedures_performed": []
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "1193-1782292794729-0",
+      "key": "clinical_documents/1193/1782292794721_Document_5_1.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/1193/1782292794721_Document_5_1.pdf",
+      "size": 47337,
+      "filename": "Document 5 1.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "6d72bcd8-4e38-42ec-945f-ba5317e05275",
+      "reportType": "CLINIC_NOTE"
+     }
+    ]
+   },
+   "created_at": "2026-06-24T01:57:38.689764+00:00",
+   "updated_at": "2026-06-24T09:24:54.325773+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-24T09:21:04.918000+00:00",
+   "chart_status_changed_at": "2026-06-24T09:24:54.324000+00:00",
+   "service_line_id": null
+  },
+  {
+   "id": 1773,
+   "worklist_id": 136,
+   "serial_no": 3,
+   "chart_no": null,
+   "mr_number": null,
+   "dos": null,
+   "admit_date": null,
+   "discharge_date": null,
+   "milestone": "READY_TO_CODE",
+   "chart_status": "OPEN",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": null,
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": null,
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {},
+   "created_at": "2026-06-30T01:29:51.351803+00:00",
+   "updated_at": "2026-06-30T01:30:01.863613+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-30T01:30:01.871000+00:00",
+   "chart_status_changed_at": null,
+   "service_line_id": null
+  },
+  {
+   "id": 1774,
+   "worklist_id": 136,
+   "serial_no": 4,
+   "chart_no": null,
+   "mr_number": null,
+   "dos": null,
+   "admit_date": null,
+   "discharge_date": null,
+   "milestone": "READY_TO_CODE",
+   "chart_status": "OPEN",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": null,
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": null,
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {},
+   "created_at": "2026-06-30T01:29:51.351803+00:00",
+   "updated_at": "2026-06-30T01:30:01.863613+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-30T01:30:01.873000+00:00",
+   "chart_status_changed_at": null,
+   "service_line_id": null
+  },
+  {
+   "id": 1775,
+   "worklist_id": 136,
+   "serial_no": 5,
+   "chart_no": null,
+   "mr_number": null,
+   "dos": null,
+   "admit_date": null,
+   "discharge_date": null,
+   "milestone": "READY_TO_CODE",
+   "chart_status": "OPEN",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": null,
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": null,
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {},
+   "created_at": "2026-06-30T01:29:51.351803+00:00",
+   "updated_at": "2026-06-30T01:30:01.863613+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-30T01:30:01.874000+00:00",
+   "chart_status_changed_at": null,
+   "service_line_id": null
+  },
+  {
+   "id": 1771,
+   "worklist_id": 136,
+   "serial_no": 1,
+   "chart_no": "WV17736",
+   "mr_number": "M249656",
+   "dos": "2026-06-29",
+   "admit_date": "2026-06-29",
+   "discharge_date": "2026-06-29",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "COMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": "Z34.83",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99024",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "Commercial",
+     "procedureCode": "81003-QW",
+     "responsibleParty": [
+      "Batch entry Done"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "O2693",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Pregnancy related conditions, unspecified, third trimester",
+       "justification": "Third trimester pregnancy"
+      },
+      {
+       "code": "N1330",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Unspecified hydronephrosis",
+       "justification": "Fetal hydronephrosis noted"
+      },
+      {
+       "code": "Z1151",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Encounter for screening for human papillomavirus (HPV)",
+       "justification": "Screening mentioned"
+      },
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Urinalysis",
+       "justification": "Procedure performed"
+      },
+      {
+       "code": "Z51.5",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Encounter for palliative care",
+       "justification": ""
+      },
+      {
+       "code": "Z3A.28",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "28 weeks gestation of pregnancy",
+       "justification": ""
+      },
+      {
+       "code": "Z331",
+       "codeType": "secondary",
+       "confidence": 0.5,
+       "description": "Pregnant state, incidental",
+       "justification": "Not primary focus"
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "O2693",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Pregnancy related conditions, unspecified, third trimester",
+       "justification": "Third trimester pregnancy"
+      }
+     ],
+     "reportIds": [
+      "2bb1cab1-8ebd-4d5b-9e08-567bf6c233b6"
+     ],
+     "secondary": [
+      {
+       "code": "N1330",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Unspecified hydronephrosis",
+       "justification": "Fetal hydronephrosis noted"
+      },
+      {
+       "code": "Z1151",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Encounter for screening for human papillomavirus (HPV)",
+       "justification": "Screening mentioned"
+      },
+      {
+       "code": "Z51.5",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Encounter for palliative care",
+       "justification": ""
+      },
+      {
+       "code": "Z3A.28",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "28 weeks gestation of pregnancy",
+       "justification": ""
+      },
+      {
+       "code": "Z331",
+       "codeType": "secondary",
+       "confidence": 0.5,
+       "description": "Pregnant state, incidental",
+       "justification": "Not primary focus"
+      }
+     ],
+     "startedAt": "2026-06-30T11:46:39.960Z",
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Urinalysis",
+       "justification": "Procedure performed"
+      }
+     ],
+     "completedAt": "2026-06-30T11:47:59.529Z",
+     "encounterId": "45232087-8716-46be-a711-cde896f26033",
+     "generatedAt": "2026-06-30T11:47:59.529Z",
+     "processingMs": 79569,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "102",
+       "pain_score": "0",
+       "temperature": "",
+       "blood_pressure": "111/71",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [
+       "Prenatal Vits W-Ca,Fe,Fa (Prenatal Vitamins) 28 Mg Iron-800 Mcg Tablet 1 TAB PO DAILY, #90 TAB 3 Refills"
+      ],
+      "social_history": {
+       "drugs": "0",
+       "alcohol": "0",
+       "tobacco": "Never smoker"
+      },
+      "chief_complaint": "pregnancy",
+      "clinical_context": "The patient is a 27-year-old female in her third trimester of pregnancy, with an estimated due date based on LMP and confirmed by ultrasound. She has a history of migraines and is rubella nonimmune. Fetal hydronephrosis was noted on ultrasound, but has since resolved. The patient declined the 1-hour glucose challenge test and needs a CBC and Tdap vaccination. She reports good fetal movement and denies vaginal bleeding, contractions, or leaking of fluid. The patient was educated on signs and symptoms of pre-eclampsia and preterm labor.",
+      "significant_labs": {
+       "Urine pH": "6.5",
+       "Urine Blood": "Trace",
+       "Urine Glucose": "Negative",
+       "Urine Ketones": "Trace",
+       "Urine Nitrite": "Negative",
+       "Urine Protein": "NEGATIVE",
+       "Urine Bilirubin": "Negative",
+       "Urine Urobilinogen": "0.2 mg/dL",
+       "Urine Specific Gravity": "1.010",
+       "Urine Leukocyte Esterase": "Negative"
+      },
+      "primary_diagnoses": [
+       "pregnancy, third trimester"
+      ],
+      "secondary_diagnoses": [
+       "fetal hydronephrosis",
+       "history of migraines",
+       "rubella nonimmune"
+      ],
+      "procedures_performed": [
+       "urinalysis (automated)"
+      ]
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "1771-1782819999680-0",
+      "key": "clinical_documents/1771/1782819999668_Document_1.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/1771/1782819999668_Document_1.pdf",
+      "size": 70387,
+      "filename": "Document 1.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "2bb1cab1-8ebd-4d5b-9e08-567bf6c233b6",
+      "reportType": "CLINIC_NOTE"
+     }
+    ]
+   },
+   "created_at": "2026-06-30T01:29:51.351803+00:00",
+   "updated_at": "2026-06-30T12:05:02.210909+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-30T11:46:17.257000+00:00",
+   "chart_status_changed_at": "2026-06-30T11:52:35.655000+00:00",
+   "service_line_id": null
+  },
+  {
+   "id": 1772,
+   "worklist_id": 136,
+   "serial_no": 2,
+   "chart_no": "WV18286",
+   "mr_number": "M253083",
+   "dos": "2026-06-29",
+   "admit_date": "2026-06-29",
+   "discharge_date": "2026-06-29",
+   "milestone": "CODING_IN_PROGRESS",
+   "chart_status": "COMPLETE",
+   "priority": "MEDIUM",
+   "allocated_coder_id": 44,
+   "allocated_auditor_id": null,
+   "original_coder_id": 44,
+   "original_auditor_id": null,
+   "primary_diagnosis": "O09.891",
+   "secondary_diagnoses": null,
+   "procedures": null,
+   "em_level": "99213",
+   "drg_value": null,
+   "hold_reason_id": null,
+   "responsible_party_id": null,
+   "primary_health_plan_id": null,
+   "coder_comments_to_client": null,
+   "rejection_denial_comments": null,
+   "deficiency_comments": null,
+   "custom_fields": {
+    "_formDraft": {
+     "los": "",
+     "poa": "",
+     "drgValue": "",
+     "facility": "",
+     "qcStatus": "",
+     "holdReason": [],
+     "auditOption": [
+      "None"
+     ],
+     "disposition": "",
+     "subSpecialty": "",
+     "primaryHealth": "Government",
+     "procedureCode": "81003-QW",
+     "responsibleParty": [
+      "Batch entry Done"
+     ]
+    },
+    "aiPrediction": {
+     "codes": [
+      {
+       "code": "O09891",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Supervision of other high risk pregnancies, first trimester",
+       "justification": "High-risk pregnancy"
+      },
+      {
+       "code": "Z34111",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Routine antenatal care, first trimester, single live fetus",
+       "justification": "Routine prenatal visit"
+      },
+      {
+       "code": "Z722",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Marijuana use",
+       "justification": "History of marijuana use"
+      },
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Automated urinalysis",
+       "justification": "Routine prenatal care"
+      },
+      {
+       "code": "Z3A.13",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "13 weeks gestation of pregnancy",
+       "justification": ""
+      }
+     ],
+     "status": "COMPLETE",
+     "primary": [
+      {
+       "code": "O09891",
+       "codeType": "primary",
+       "confidence": 0.9,
+       "description": "Supervision of other high risk pregnancies, first trimester",
+       "justification": "High-risk pregnancy"
+      }
+     ],
+     "reportIds": [
+      "4ebda29a-dcb6-4ac1-9cab-e46c1839ce61"
+     ],
+     "secondary": [
+      {
+       "code": "Z34111",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Routine antenatal care, first trimester, single live fetus",
+       "justification": "Routine prenatal visit"
+      },
+      {
+       "code": "Z722",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "Marijuana use",
+       "justification": "History of marijuana use"
+      },
+      {
+       "code": "Z3A.13",
+       "codeType": "secondary",
+       "confidence": 0.9,
+       "description": "13 weeks gestation of pregnancy",
+       "justification": ""
+      }
+     ],
+     "startedAt": null,
+     "auditNotes": "",
+     "procedures": [
+      {
+       "code": "81005",
+       "codeType": "cpt",
+       "confidence": 0.9,
+       "description": "Automated urinalysis",
+       "justification": "Routine prenatal care"
+      }
+     ],
+     "completedAt": "2026-06-30T11:53:55.978Z",
+     "encounterId": "08a1c14a-f71f-4588-8211-e6b8210f1dc8",
+     "generatedAt": "2026-06-30T11:53:55.978Z",
+     "processingMs": null,
+     "clinicalSummary": {
+      "vitals": {
+       "heart_rate": "80",
+       "pain_score": "0",
+       "temperature": "",
+       "blood_pressure": "133/80 Sitting, Right Arm",
+       "respiratory_rate": "",
+       "oxygen_saturation": ""
+      },
+      "medications": [
+       "Prenatal Vits W-Ca,Fe,Fa (Prenatal Vitamins) 28 Mg Iron-800 Mcg Tablet 1 TAB PO DAILY, #90 TAB 3 Refills"
+      ],
+      "social_history": {
+       "drugs": "Marijuana pre-pregnancy, 0 during pregnancy",
+       "alcohol": "0",
+       "tobacco": "Former smoker"
+      },
+      "chief_complaint": "pregnancy",
+      "clinical_context": "The patient, a 25-year-old G3P2 female, presented for a routine prenatal visit at 13 weeks and 3 days gestation. She reported fatigue and a history of marijuana use pre-pregnancy. Her vital signs were stable, and her A1c was 5.2. The patient desires a bilateral salpingectomy for contraception. She was advised to report any vaginal bleeding or pelvic pain and scheduled for a follow-up visit in one month.",
+      "significant_labs": {
+       "A1c": "5.2",
+       "hematocrit": "43.8%",
+       "hemoglobin": "14.5 g/dL"
+      },
+      "primary_diagnoses": [
+       "supervision of other high risk pregnancies, second trimester",
+       "obesity affecting pregnancy in second trimester"
+      ],
+      "secondary_diagnoses": [],
+      "procedures_performed": [
+       "urinalysis (automated)",
+       "pap smear"
+      ]
+     }
+    },
+    "uploadedDocs": [
+     {
+      "id": "1772-1782820381000-0",
+      "key": "clinical_documents/1772/1782820380678_Document_2.pdf",
+      "url": "https://s3prod.icdcore.com/icd-uploads-prod/clinical_documents/1772/1782820380678_Document_2.pdf",
+      "size": 57696,
+      "filename": "Document 2.pdf",
+      "mimeType": "application/pdf",
+      "reportId": "4ebda29a-dcb6-4ac1-9cab-e46c1839ce61",
+      "reportType": "CLINIC_NOTE"
+     }
+    ]
+   },
+   "created_at": "2026-06-30T01:29:51.351803+00:00",
+   "updated_at": "2026-06-30T12:01:51.327674+00:00",
+   "deleted_at": null,
+   "milestone_changed_at": "2026-06-30T11:55:04.975000+00:00",
+   "chart_status_changed_at": "2026-06-30T12:01:51.326000+00:00",
+   "service_line_id": null
+  }
+ ],
+ "chart_feedback": []
+}
