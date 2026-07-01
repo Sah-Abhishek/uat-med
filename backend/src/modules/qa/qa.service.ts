@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import * as ExcelJS from 'exceljs';
 import { QaFiltersDto, QaSubmissionsQueryDto } from './dto/qa-filters.dto';
+
+/** Hard cap on encounter-export rows so a huge window can't build an unbounded
+ * workbook. Prod holds ~3k charts total, so this is comfortably above any window. */
+const ENCOUNTER_EXPORT_LIMIT = 50_000;
 
 /**
  * Quality Assurance dashboard for Team Leads.
@@ -180,6 +185,113 @@ export class QaService {
       page,
       pageSize,
     };
+  }
+
+  /* ── Per-encounter export (xlsx) ─────────────────────────── */
+
+  /**
+   * Build an .xlsx of every submitted chart (one row per chart / encounter)
+   * matching `f`, for the AI Analytics encounter export. Same grouped-by-chart
+   * shape as {@link submissions} but unpaginated (capped at
+   * {@link ENCOUNTER_EXPORT_LIMIT}) and enriched with the AI-pipeline encounter
+   * id from `custom_fields.aiPrediction.encounterId` — the value coders see on
+   * the chart header, NOT the internal chart number (which is often blank).
+   */
+  async exportEncountersXlsx(f: QaFiltersDto): Promise<{ buffer: Buffer; rowCount: number }> {
+    const { sql: whereSql, params } = this.buildFilters(f);
+
+    const sql = `
+      WITH grouped AS (
+        SELECT
+          d.chart_id,
+          MAX(d.decided_at)                                            AS last_decided_at,
+          COUNT(*)::int                                                AS total_decisions,
+          SUM(CASE WHEN d.decision = 'ACCEPTED' THEN 1 ELSE 0 END)::int AS accepted,
+          SUM(CASE WHEN d.decision = 'REJECTED' THEN 1 ELSE 0 END)::int AS rejected,
+          SUM(CASE WHEN d.decision = 'EDITED'   THEN 1 ELSE 0 END)::int AS edited
+        FROM chart_code_decisions d
+        JOIN charts    c ON c.id = d.chart_id
+        JOIN worklists w ON w.id = c.worklist_id
+        ${whereSql}
+        GROUP BY d.chart_id
+      )
+      SELECT
+        c.custom_fields #>> '{aiPrediction,encounterId}' AS encounter_id,
+        c.chart_no,
+        c.mr_number,
+        w.worklist_number,
+        cl.name  AS client_name,
+        loc.name AS location_name,
+        ps.name  AS speciality_name,
+        c.milestone,
+        g.total_decisions,
+        g.accepted,
+        g.rejected,
+        g.edited,
+        g.last_decided_at
+      FROM grouped g
+      JOIN charts    c   ON c.id = g.chart_id
+      JOIN worklists w   ON w.id = c.worklist_id
+      LEFT JOIN clients              cl  ON cl.id = w.client_id
+      LEFT JOIN locations            loc ON loc.id = w.location_id
+      LEFT JOIN primary_specialities ps  ON ps.id = w.primary_speciality_id
+      ORDER BY g.last_decided_at DESC
+      LIMIT ${ENCOUNTER_EXPORT_LIMIT}
+    `;
+
+    const rows = await this.run<any[]>(params, sql);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Valerion AI Analytics';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Encounters', {
+      views: [{ state: 'frozen', ySplit: 1 }], // freeze header row when scrolling
+    });
+
+    ws.columns = [
+      { header: 'Encounter ID',   key: 'encounter_id',    width: 40 },
+      { header: 'Chart No',       key: 'chart_no',        width: 16 },
+      { header: 'MR Number',      key: 'mr_number',        width: 16 },
+      { header: 'Worklist',       key: 'worklist_number', width: 16 },
+      { header: 'Client',         key: 'client_name',      width: 24 },
+      { header: 'Location',       key: 'location_name',    width: 24 },
+      { header: 'Speciality',     key: 'speciality_name',  width: 22 },
+      { header: 'Milestone',      key: 'milestone',        width: 16 },
+      { header: 'Decisions',      key: 'total_decisions',  width: 11, style: { numFmt: '0' } },
+      { header: 'Accepted',       key: 'accepted',         width: 11, style: { numFmt: '0' } },
+      { header: 'Rejected',       key: 'rejected',         width: 11, style: { numFmt: '0' } },
+      { header: 'Edited',         key: 'edited',           width: 11, style: { numFmt: '0' } },
+      { header: 'Last Submitted', key: 'last_decided_at',  width: 20, style: { numFmt: 'yyyy-mm-dd hh:mm' } },
+    ];
+
+    const header = ws.getRow(1);
+    header.font = { bold: true };
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
+    header.alignment = { vertical: 'middle' };
+
+    for (const r of rows) {
+      ws.addRow({
+        encounter_id:    r.encounter_id ?? '',
+        chart_no:        r.chart_no ?? '',
+        mr_number:       r.mr_number ?? '',
+        worklist_number: r.worklist_number ?? '',
+        client_name:     r.client_name ?? '',
+        location_name:   r.location_name ?? '',
+        speciality_name: r.speciality_name ?? '',
+        milestone:       r.milestone ?? '',
+        total_decisions: Number(r.total_decisions),
+        accepted:        Number(r.accepted),
+        rejected:        Number(r.rejected),
+        edited:          Number(r.edited),
+        last_decided_at: r.last_decided_at ? new Date(r.last_decided_at) : null,
+      });
+    }
+
+    // ExcelJS types `writeBuffer` as Promise<ArrayBuffer> but returns a Node
+    // Buffer at runtime — cast keeps the StreamableFile controller happy.
+    const buffer = (await wb.xlsx.writeBuffer()) as unknown as Buffer;
+    return { buffer, rowCount: rows.length };
   }
 
   /* ── AI accuracy aggregates ──────────────────────────────── */

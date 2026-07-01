@@ -1,5 +1,6 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, HttpCode, Query, Res, StreamableFile } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 
 import { QaService } from './qa.service';
 import { QaFiltersDto, QaSubmissionsQueryDto } from './dto/qa-filters.dto';
@@ -22,6 +23,29 @@ export class QaController {
   })
   submissions(@Query() q: QaSubmissionsQueryDto) {
     return this.svc.submissions(q);
+  }
+
+  @Get('submissions/export.xlsx')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Download submitted charts (one row per chart / encounter) as an .xlsx, including the AI-pipeline encounter id (custom_fields.aiPrediction.encounterId). Same filter shape as /qa/submissions; unpaginated, capped at 50k rows. Used by the AI Analytics encounter export.',
+  })
+  async exportSubmissionsXlsx(
+    @Query() q: QaFiltersDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, rowCount } = await this.svc.exportEncountersXlsx(q);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="ai-encounters-${stamp}.xlsx"`);
+    res.setHeader('Content-Length', buffer.length.toString());
+    res.setHeader('X-Row-Count', String(rowCount));
+    res.setHeader('Access-Control-Expose-Headers', 'X-Row-Count');
+    return new StreamableFile(buffer);
   }
 
   @Get('ai-accuracy')

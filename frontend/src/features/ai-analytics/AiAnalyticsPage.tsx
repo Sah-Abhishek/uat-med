@@ -45,14 +45,13 @@ import {
   listSubSpecialities,
 } from '@/api/configurations';
 import {
-  fetchAllQaSubmissions,
+  downloadQaEncountersXlsx,
   getQaAccuracy,
   getQaActivityBreakdown,
   listQaFacilities,
   type CodeReviewType,
   type QaActivityBreakdownRow,
   type QaFilters,
-  type QaSubmissionRow,
 } from '@/api/qa';
 import { useScope } from '@/scope/store';
 import { cn } from '@/lib/utils';
@@ -174,13 +173,17 @@ export function AiAnalyticsPage() {
         from,
         to,
       };
-      const rows = await fetchAllQaSubmissions(params);
-      if (rows.length === 0) {
-        setToast({ message: `No encounters to export for ${RANGE_LABEL[r].toLowerCase()}.`, variant: 'warn' });
-        return;
-      }
-      downloadCsv(`ai-encounters-${r}-${to}.csv`, buildEncountersCsv(rows));
-      setToast({ message: `Exported ${rows.length.toLocaleString()} encounter${rows.length === 1 ? '' : 's'} (${RANGE_LABEL[r].toLowerCase()}).`, variant: 'success' });
+      const count = await downloadQaEncountersXlsx(params, `ai-encounters-${r}`);
+      const label = RANGE_LABEL[r].toLowerCase();
+      setToast({
+        message:
+          count == null
+            ? `Encounter export downloaded (${label}).`
+            : count === 0
+            ? `No encounters in this window — exported an empty sheet (${label}).`
+            : `Exported ${count.toLocaleString()} encounter${count === 1 ? '' : 's'} (${label}).`,
+        variant: count === 0 ? 'warn' : 'success',
+      });
     } catch (err) {
       console.error('Encounter export failed', err);
       setToast({ message: 'Export failed. Please try again.', variant: 'danger' });
@@ -1340,55 +1343,3 @@ function ExportMenu({
   );
 }
 
-/* ── CSV export (per-encounter rows for the activity breakdown) ────── */
-
-/** Columns for the encounter export, in order. Sub-speciality is intentionally
- * absent: the per-encounter submissions endpoint carries primary speciality
- * (via worklist), not sub-speciality. */
-const ENCOUNTER_EXPORT_COLUMNS: ReadonlyArray<{
-  header: string;
-  value: (r: QaSubmissionRow) => string | number | null;
-}> = [
-  { header: 'encounter_id', value: (r) => r.chartNo ?? r.chartId },
-  { header: 'mr_number', value: (r) => r.mrNumber },
-  { header: 'worklist', value: (r) => r.worklistNumber },
-  { header: 'client', value: (r) => r.clientName },
-  { header: 'location', value: (r) => r.locationName },
-  { header: 'speciality', value: (r) => r.specialityName },
-  { header: 'milestone', value: (r) => r.milestone },
-  { header: 'decisions', value: (r) => r.totalDecisions },
-  { header: 'accepted', value: (r) => r.accepted },
-  { header: 'rejected', value: (r) => r.rejected },
-  { header: 'edited', value: (r) => r.edited },
-  { header: 'last_submitted_at', value: (r) => (r.lastSubmittedAt ? r.lastSubmittedAt.slice(0, 10) : '') },
-];
-
-/** Quote a CSV cell only when it contains a comma, quote, or newline. */
-function csvCell(v: string | number | null | undefined): string {
-  const s = v == null ? '' : String(v);
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function buildEncountersCsv(rows: QaSubmissionRow[]): string {
-  const header = ENCOUNTER_EXPORT_COLUMNS.map((c) => c.header).join(',');
-  const body = rows
-    .map((r) => ENCOUNTER_EXPORT_COLUMNS.map((c) => csvCell(c.value(r))).join(','))
-    .join('\n');
-  return `${header}\n${body}`;
-}
-
-/** Build a CSV blob and trigger a browser download. A UTF-8 BOM is prepended so
- * Excel renders non-ASCII client/location names correctly. */
-function downloadCsv(filename: string, csv: string): void {
-  const BOM = String.fromCharCode(0xfeff);
-  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Give the browser a tick to start the download before revoking.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}

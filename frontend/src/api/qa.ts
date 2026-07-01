@@ -1,4 +1,4 @@
-import { get } from './client';
+import { api, get } from './client';
 import type { CodeDecisionDraftPayload } from './charts';
 
 export type CodeReviewType = 'PRIMARY' | 'SECONDARY' | 'PROCEDURE' | 'EM_LEVEL' | 'MODIFIER';
@@ -58,21 +58,40 @@ export const listQaSubmissions = (params: QaFilters & { page?: number; pageSize?
   get<QaSubmissionsResponse>('/qa/submissions', params);
 
 /**
- * Fetch *every* submission (per-encounter) row matching `params` by paging
- * through {@link listQaSubmissions} until the full set is collected. The server
- * caps `pageSize` at 200, so a single call can't return everything — the AI
- * Analytics encounter export needs the whole list for a date window. A hard
- * page cap guards against an unexpected runaway loop.
+ * Download the per-encounter export as an .xlsx for the given filter/date
+ * window. The backend streams the workbook (resolving the real AI-pipeline
+ * encounter id from custom_fields) and this triggers a browser download.
+ * Returns the exported row count from the `X-Row-Count` response header, or
+ * `null` when the header isn't exposed (cross-origin without CORS expose).
  */
-export async function fetchAllQaSubmissions(params: QaFilters): Promise<QaSubmissionRow[]> {
-  const pageSize = 200;
-  const all: QaSubmissionRow[] = [];
-  for (let page = 1; page <= 500; page++) {
-    const res = await listQaSubmissions({ ...params, page, pageSize });
-    all.push(...res.items);
-    if (res.items.length < pageSize || all.length >= res.total) break;
-  }
-  return all;
+export async function downloadQaEncountersXlsx(
+  params: QaFilters,
+  filenameHint = 'ai-encounters',
+): Promise<number | null> {
+  const res = await api.get('/qa/submissions/export.xlsx', { params, responseType: 'blob' });
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const safe =
+    filenameHint
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'ai-encounters';
+
+  const blob = res.data as Blob;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safe}-${stamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Give the browser a tick to start the download before revoking.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+
+  const raw = res.headers?.['x-row-count'];
+  const n = raw != null ? Number(raw) : NaN;
+  return Number.isFinite(n) ? n : null;
 }
 
 export interface QaAccuracyResponse {
