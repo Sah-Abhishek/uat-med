@@ -108,6 +108,7 @@ const FIELDS: FieldDef[] = [
   { key: 'dos',               label: 'Date of Service',    sql: 'c.dos',                                    filterable: true,  sortable: true,  type: 'date' },
   { key: 'receivedDate',      label: 'Received Date',      sql: 'wl.received_date',                         filterable: true,  sortable: true,  type: 'date' },
   { key: 'dateOfCompletion',  label: 'Date of Completion', sql: `CASE WHEN c.chart_status = 'COMPLETE' THEN c.updated_at ELSE NULL END`, filterable: true, sortable: true, type: 'date' },
+  { key: 'codingCompletedAt', label: 'Date of Coding',     sql: 'c.coding_completed_at',                     filterable: true,  sortable: true,  type: 'date' },
   { key: 'allocatedCoder',    label: 'Allocated Coder',    sql: 'uc.full_name',                             filterable: true,  sortable: true },
   { key: 'allocatedAuditor',  label: 'Allocated Auditor',  sql: 'ua.full_name',                             filterable: true,  sortable: true },
   { key: 'milestone',         label: 'Milestone',          sql: 'c.milestone',                              filterable: true,  sortable: true,  options: MILESTONE_OPTIONS },
