@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, useWatch } from 'react-hook-form';
 import {
   listCharts,
   getChartsSummary,
@@ -16,7 +16,7 @@ import {
 } from '@/api/charts';
 import { listUsers } from '@/api/users';
 import { listWorklists } from '@/api/worklists';
-import { listPrimarySpecialities, listAllSubSpecialities } from '@/api/configurations';
+import { listPrimarySpecialities, listAllSubSpecialities, listClients, listLocations } from '@/api/configurations';
 import type { ApiErrorShape, Priority } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -56,7 +56,6 @@ const AI_ROW_TINT: Record<AiStatus, string> = {
     'bg-danger-soft/80 hover:bg-danger-soft shadow-[inset_4px_0_0_0_theme(colors.danger.DEFAULT)]',
 };
 import { useAuth } from '@/auth/store';
-import { useScope } from '@/scope/store';
 import { useChartsView } from './chartsViewStore';
 import { can } from '@/permissions';
 import { SortableHeader } from '@/components/ui/SortableHeader';
@@ -486,9 +485,8 @@ export function ChartsPage() {
   // Coder / auditor / admin can pull charts to themselves.
   const canSelfAllocate = can(user, 'chart.selfAllocate');
   const qc = useQueryClient();
-  // Global Client / Location scope from the header.
-  const scopeClientId = useScope((s) => s.clientId);
-  const scopeLocationId = useScope((s) => s.locationId);
+  // Client / Location are part of the Charts filters now (see the Filter modal),
+  // not the global header scope — so they live in `filters` alongside the rest.
 
   // View-state (filters, search, tab, pagination, sort) is persisted in
   // sessionStorage via useChartsView so it survives navigating into a chart's
@@ -533,19 +531,8 @@ export function ChartsPage() {
     saveVisibleColumns(visibleColumns);
   }, [visibleColumns]);
 
-  // When the global Client / Location scope *changes*, jump back to page 1 and
-  // drop the current selection — the old rows may no longer be in view. Guarded
-  // by a ref so this doesn't fire on mount: otherwise remounting after a detour
-  // to a chart's detail page would clobber the persisted page back to 1.
-  const prevScope = useRef({ c: scopeClientId, l: scopeLocationId });
-  useEffect(() => {
-    if (prevScope.current.c === scopeClientId && prevScope.current.l === scopeLocationId) {
-      return;
-    }
-    prevScope.current = { c: scopeClientId, l: scopeLocationId };
-    setPage(1);
-    setSelected(new Set());
-  }, [scopeClientId, scopeLocationId, setPage]);
+  // Client/Location now live in `filters`; applying the Filter modal already
+  // resets to page 1 (see onApply), so no separate scope-change effect is needed.
 
   // Coders aren't allowed into the worklist detail page, so the Worklist #
   // cell renders as plain text for them and as a link for everyone else.
@@ -574,11 +561,11 @@ export function ChartsPage() {
   }, [visibleColumns]);
 
   const summary = useQuery({
-    queryKey: ['charts', 'summary', scopeClientId, scopeLocationId],
+    queryKey: ['charts', 'summary', filters.clientId, filters.locationId],
     queryFn: () =>
       getChartsSummary({
-        clientId: scopeClientId ?? undefined,
-        locationId: scopeLocationId ?? undefined,
+        clientId: (filters.clientId as number | undefined) ?? undefined,
+        locationId: (filters.locationId as number | undefined) ?? undefined,
       }),
     // Keep the AI Queued / Processing tiles moving while any chart on the
     // current page is in flight — same trigger as the list refetch below.
@@ -600,10 +587,8 @@ export function ChartsPage() {
       sortBy: sort.sortBy,
       sortDir: sort.sortDir,
       ...(tab !== 'ALL' ? { priority: tab } : {}),
-      ...(scopeClientId != null ? { clientId: scopeClientId } : {}),
-      ...(scopeLocationId != null ? { locationId: scopeLocationId } : {}),
     }),
-    [filters, page, pageSize, tab, scopeClientId, scopeLocationId, sort.sortBy, sort.sortDir],
+    [filters, page, pageSize, tab, sort.sortBy, sort.sortDir],
   );
 
   const list = useQuery({
@@ -991,7 +976,22 @@ function FilterModal({
   value: ChartListParams;
   onApply: (v: ChartListParams) => void;
 }) {
-  const { register, control, handleSubmit, reset } = useForm<ChartListParams>({ defaultValues: value });
+  const { register, control, handleSubmit, reset, setValue } = useForm<ChartListParams>({ defaultValues: value });
+
+  // Client / Location filters — moved here from the global header scope so the
+  // Charts page filters by them locally. Location options depend on the picked
+  // client (watched live so the list narrows as you choose).
+  const watchedClientId = useWatch({ control, name: 'clientId' });
+  const clients = useQuery({
+    queryKey: ['configurations', 'clients'],
+    queryFn: () => listClients(),
+    enabled: open,
+  });
+  const locations = useQuery({
+    queryKey: ['configurations', 'locations', watchedClientId],
+    queryFn: () => listLocations(watchedClientId as number),
+    enabled: open && watchedClientId != null,
+  });
 
   // Re-seed the form from the currently-applied filters every time the modal
   // opens. The Modal unmounts its inputs on close (`if (!open) return null`) but
@@ -1073,6 +1073,47 @@ function FilterModal({
         className="space-y-4"
       >
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div>
+            <Label>Client</Label>
+            <Controller
+              control={control}
+              name="clientId"
+              render={({ field }) => (
+                <FancySelect
+                  placeholder={clients.isPending ? 'Loading…' : 'Any client'}
+                  options={(clients.data?.items ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
+                  value={field.value != null ? String(field.value) : ''}
+                  onChange={(v) => {
+                    field.onChange(v ? Number(v) : undefined);
+                    // A location belongs to one client — clear it when the client changes.
+                    setValue('locationId', undefined);
+                  }}
+                />
+              )}
+            />
+          </div>
+          <div>
+            <Label>Location</Label>
+            <Controller
+              control={control}
+              name="locationId"
+              render={({ field }) => (
+                <FancySelect
+                  disabled={watchedClientId == null}
+                  placeholder={
+                    watchedClientId == null
+                      ? 'Select a client first'
+                      : locations.isPending
+                        ? 'Loading…'
+                        : 'Any location'
+                  }
+                  options={(locations.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name }))}
+                  value={field.value != null ? String(field.value) : ''}
+                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                />
+              )}
+            />
+          </div>
           <div>
             <Label>Chart #</Label>
             <Input {...register('chartNo')} />

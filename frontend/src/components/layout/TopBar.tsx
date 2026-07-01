@@ -7,7 +7,7 @@ import { useScope } from '@/scope/store';
 import { logout } from '@/api/auth';
 import { MSAL_CONFIGURED, signOutMicrosoft } from '@/auth/msal';
 import { listClients, listLocations } from '@/api/configurations';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { cn, initials } from '@/lib/utils';
 
 type ScopeId = number | 'all';
@@ -18,6 +18,10 @@ export function TopBar() {
   const refreshToken = useAuth((s) => s.refreshToken);
   const clear = useAuth((s) => s.clear);
   const navigate = useNavigate();
+  // The Charts page filters by Client/Location inside its own Filter modal, so
+  // the global header pickers are hidden there to avoid two competing scopes.
+  const { pathname } = useLocation();
+  const hideScopePickers = pathname.startsWith('/charts');
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -77,24 +81,28 @@ export function TopBar() {
     <header className="h-16 px-6 border-b border-line bg-bg flex items-center gap-4">
       <div className="flex-1" />
 
-      <ScopePicker
-        label="Client"
-        value={scopeClient}
-        onChange={(v) => setClient(v === 'all' ? null : v)}
-        options={(clients.data?.items ?? []).map((c) => ({ id: c.id, name: c.name }))}
-      />
+      {!hideScopePickers && (
+        <>
+          <ScopePicker
+            label="Client"
+            value={scopeClient}
+            onChange={(v) => setClient(v === 'all' ? null : v)}
+            options={(clients.data?.items ?? []).map((c) => ({ id: c.id, name: c.name }))}
+          />
 
-      <ScopePicker
-        label="Location"
-        value={scopeLocation}
-        onChange={(v) => setLocation(v === 'all' ? null : v)}
-        options={
-          scopeClient === 'all'
-            ? []
-            : (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }))
-        }
-        disabled={scopeClient === 'all'}
-      />
+          <ScopePicker
+            label="Location"
+            value={scopeLocation}
+            onChange={(v) => setLocation(v === 'all' ? null : v)}
+            options={
+              scopeClient === 'all'
+                ? []
+                : (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }))
+            }
+            disabled={scopeClient === 'all'}
+          />
+        </>
+      )}
 
       {/* Icon buttons */}
       <div className="flex items-center gap-1">
