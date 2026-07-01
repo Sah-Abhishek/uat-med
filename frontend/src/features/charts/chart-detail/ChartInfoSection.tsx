@@ -41,9 +41,10 @@ interface Props {
   /** Clamp Date of Service to the parent worklist's service-date range. */
   dosMin?: string;
   dosMax?: string;
-  /** True when the AI prediction returned at least one procedure (PCS) code.
-   * The PCS field is only shown when the AI produced one (or the chart already
-   * has saved PCS values). */
+  /** True when the AI prediction returned at least one ICD-10-PCS procedure code
+   * (code_type === 'procedure'). CPT procedure codes (code_type === 'cpt') do
+   * NOT count. The PCS field is only shown when the AI produced one (or the
+   * chart already has saved PCS values). */
   aiHasPcs?: boolean;
 }
 
@@ -378,10 +379,11 @@ export function ChartInfoSection({
             />
           </div>
         )}
-        {/* PCS codes only appear when the AI returned a procedure (PCS) code —
-            or when the chart already has saved PCS values, so existing data is
-            never hidden. */}
-        {visible('pcsCodes') && (aiHasPcs || draft.pcsCodes.length > 0) && (
+        {/* PCS codes field is hidden for now (product decision). Flip the
+            leading `false &&` to re-enable: it then appears only when the AI
+            returned an ICD-10-PCS procedure code (aiHasPcs) or the chart already
+            has saved PCS values, so existing data is never hidden. */}
+        {false && visible('pcsCodes') && (aiHasPcs || draft.pcsCodes.length > 0) && (
           <div className="mt-4">
             <CodeSearchListInput
               label="PCS codes"

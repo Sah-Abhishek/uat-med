@@ -925,7 +925,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
           updateCustomValue={updateCustomValue}
           dosMin={dosMin}
           dosMax={dosMax}
-          aiHasPcs={(aiCodes?.procedures?.length ?? 0) > 0}
+          aiHasPcs={(aiCodes?.procedures ?? []).some(
+            (c) => (c.codeType ?? '').toLowerCase() === 'procedure',
+          )}
         />
         <ProcessingInfoSection
           draft={draft}
