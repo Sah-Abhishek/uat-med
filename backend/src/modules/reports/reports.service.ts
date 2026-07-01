@@ -119,6 +119,7 @@ const FIELDS: FieldDef[] = [
   { key: 'primaryDiagnosis',  label: 'Primary Diagnosis',  sql: 'c.primary_diagnosis',                      filterable: true,  sortable: true },
   { key: 'secondaryDiagnoses',label: 'Secondary Dx',       sql: `CASE WHEN jsonb_typeof(c.custom_fields#>'{aiPrediction,secondary}')='array' THEN (SELECT string_agg(e->>'code', ', ') FROM jsonb_array_elements(c.custom_fields#>'{aiPrediction,secondary}') e) END`, filterable: false, sortable: false },
   { key: 'emLevel',           label: 'E/M Level',          sql: 'c.em_level',                               filterable: true,  sortable: true },
+  { key: 'coderCommentsToClient', label: 'Coder Comments to Client', sql: 'c.coder_comments_to_client',       filterable: true,  sortable: false, filterKind: 'text' },
   { key: 'qcStatus',          label: 'QC Status',          sql: `c.custom_fields#>>'{_formDraft,qcStatus}'`,             filterable: true,  sortable: false, options: QC_STATUS_OPTIONS },
   { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `c.custom_fields->>'feedbackCategory'`,     filterable: true,  sortable: false },
   { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields->>'feedbackType'`,         filterable: true,  sortable: false },
