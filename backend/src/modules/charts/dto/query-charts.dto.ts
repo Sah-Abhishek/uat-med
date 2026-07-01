@@ -57,8 +57,8 @@ export class QueryChartsDto extends PageParamsDto {
   /** Match by sub-speciality NAME (deduped across locations), used by the charts
    * "all unique sub-specialities" filter. Single value or array → IN(...). */
   @ApiPropertyOptional({ type: [String] }) @IsOptional() @Transform(toArray) @IsString({ each: true }) subSpecialityName?: string[];
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() clientId?: number;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() locationId?: number;
+  @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) clientId?: number[];
+  @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) locationId?: number[];
   @ApiPropertyOptional() @IsOptional() @IsString() chartNo?: string;
   /** AI encounter id (stored on custom_fields.aiPrediction.encounterId). Matched
    * with a case-insensitive partial ILIKE so a fragment of the UUID still finds

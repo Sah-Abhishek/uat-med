@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { useForm, Controller, useWatch } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import {
   listCharts,
   getChartsSummary,
@@ -564,8 +564,8 @@ export function ChartsPage() {
     queryKey: ['charts', 'summary', filters.clientId, filters.locationId],
     queryFn: () =>
       getChartsSummary({
-        clientId: (filters.clientId as number | undefined) ?? undefined,
-        locationId: (filters.locationId as number | undefined) ?? undefined,
+        clientId: filters.clientId,
+        locationId: filters.locationId,
       }),
     // Keep the AI Queued / Processing tiles moving while any chart on the
     // current page is in flight — same trigger as the list refetch below.
@@ -976,22 +976,36 @@ function FilterModal({
   value: ChartListParams;
   onApply: (v: ChartListParams) => void;
 }) {
-  const { register, control, handleSubmit, reset, setValue } = useForm<ChartListParams>({ defaultValues: value });
+  const { register, control, handleSubmit, reset } = useForm<ChartListParams>({ defaultValues: value });
 
-  // Client / Location filters — moved here from the global header scope so the
-  // Charts page filters by them locally. Location options depend on the picked
-  // client (watched live so the list narrows as you choose).
-  const watchedClientId = useWatch({ control, name: 'clientId' });
+  // Client / Location multi-select filters — moved here from the global header
+  // scope so the Charts page filters by them locally. Both are independent
+  // multi-selects; Location lists every client's locations (labelled by client,
+  // since names can repeat) so it works regardless of which clients are picked.
   const clients = useQuery({
     queryKey: ['configurations', 'clients'],
     queryFn: () => listClients(),
     enabled: open,
   });
-  const locations = useQuery({
-    queryKey: ['configurations', 'locations', watchedClientId],
-    queryFn: () => listLocations(watchedClientId as number),
-    enabled: open && watchedClientId != null,
+  const clientList = clients.data?.items ?? [];
+  const locationQueries = useQueries({
+    queries: clientList.map((c) => ({
+      queryKey: ['configurations', 'locations', c.id],
+      queryFn: () => listLocations(c.id),
+      enabled: open,
+    })),
   });
+  const locationsLoading = locationQueries.some((q) => q.isFetching);
+  const locationOptions = (() => {
+    const seen = new Map<string, { value: string; label: string }>();
+    locationQueries.forEach((q, i) => {
+      const client = clientList[i];
+      (q.data?.items ?? []).forEach((l) => {
+        seen.set(String(l.id), { value: String(l.id), label: client ? `${l.name} · ${client.name}` : l.name });
+      });
+    });
+    return Array.from(seen.values());
+  })();
 
   // Re-seed the form from the currently-applied filters every time the modal
   // opens. The Modal unmounts its inputs on close (`if (!open) return null`) but
@@ -1079,15 +1093,13 @@ function FilterModal({
               control={control}
               name="clientId"
               render={({ field }) => (
-                <FancySelect
+                <FancyMultiSelect
+                  searchable
+                  searchPlaceholder="Search clients…"
                   placeholder={clients.isPending ? 'Loading…' : 'Any client'}
-                  options={(clients.data?.items ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
-                  value={field.value != null ? String(field.value) : ''}
-                  onChange={(v) => {
-                    field.onChange(v ? Number(v) : undefined);
-                    // A location belongs to one client — clear it when the client changes.
-                    setValue('locationId', undefined);
-                  }}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  options={clientList.map((c) => ({ value: String(c.id), label: c.name }))}
                 />
               )}
             />
@@ -1098,18 +1110,14 @@ function FilterModal({
               control={control}
               name="locationId"
               render={({ field }) => (
-                <FancySelect
-                  disabled={watchedClientId == null}
-                  placeholder={
-                    watchedClientId == null
-                      ? 'Select a client first'
-                      : locations.isPending
-                        ? 'Loading…'
-                        : 'Any location'
-                  }
-                  options={(locations.data?.items ?? []).map((l) => ({ value: String(l.id), label: l.name }))}
-                  value={field.value != null ? String(field.value) : ''}
-                  onChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                <FancyMultiSelect
+                  searchable
+                  searchPlaceholder="Search locations…"
+                  placeholder={locationsLoading ? 'Loading…' : 'Any location'}
+                  loading={locationsLoading}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  options={locationOptions}
                 />
               )}
             />

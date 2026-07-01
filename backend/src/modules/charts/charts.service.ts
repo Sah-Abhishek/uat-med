@@ -192,9 +192,9 @@ export class ChartsService {
     // Name-based match for the "all unique sub-specialities" filter — the same
     // name can exist under many locations, so we match on the joined name.
     if (q.subSpecialityName?.length) qb.andWhere('subSpeciality.name IN (:...ssn)', { ssn: q.subSpecialityName });
-    // Global header scope (Client / Location). The worklist is already joined.
-    if (q.clientId) qb.andWhere('worklist.client_id = :cid', { cid: q.clientId });
-    if (q.locationId) qb.andWhere('worklist.location_id = :lid', { lid: q.locationId });
+    // Client / Location filters (multi-select). The worklist is already joined.
+    if (q.clientId?.length) qb.andWhere('worklist.client_id IN (:...cids)', { cids: q.clientId });
+    if (q.locationId?.length) qb.andWhere('worklist.location_id IN (:...lids)', { lids: q.locationId });
     // Narrow to a single AI-pipeline state (e.g. ERRORED) using the same
     // custom_fields predicates that drive the AI summary tiles.
     if (q.aiStatus?.length) this.applyAiStatusFilters(qb, q.aiStatus);
@@ -296,7 +296,17 @@ export class ChartsService {
     return new PaginatedResponseDto(mapped, total, q.page, q.pageSize);
   }
 
-  async summary(user: AuthenticatedUser, q: { clientId?: number; locationId?: number } = {}) {
+  async summary(
+    user: AuthenticatedUser,
+    q: { clientId?: number | number[]; locationId?: number | number[] } = {},
+  ) {
+    // Query params arrive as string / string[] / number — normalize to number[].
+    const toNums = (v: unknown): number[] =>
+      v == null || v === ''
+        ? []
+        : (Array.isArray(v) ? v : [v]).map(Number).filter((n) => Number.isFinite(n));
+    const cids = toNums(q.clientId);
+    const lids = toNums(q.locationId);
     const qb = this.charts.createQueryBuilder('c');
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
     // Auditors see all charts (mirrors list()), so no auditor-scoped filter here —
@@ -308,10 +318,10 @@ export class ChartsService {
     // worklist by default, so join it here (alias `ws` — `w` is taken by the
     // orphan-guard subquery) only when a scope is set. Chart→worklist is
     // many-to-one, so the join can't inflate the COUNTs below.
-    if (q.clientId || q.locationId) {
+    if (cids.length || lids.length) {
       qb.innerJoin('worklists', 'ws', 'ws.id = c.worklist_id');
-      if (q.clientId) qb.andWhere('ws.client_id = :cid', { cid: Number(q.clientId) });
-      if (q.locationId) qb.andWhere('ws.location_id = :lid', { lid: Number(q.locationId) });
+      if (cids.length) qb.andWhere('ws.client_id IN (:...cids)', { cids });
+      if (lids.length) qb.andWhere('ws.location_id IN (:...lids)', { lids });
     }
 
     const priorityRows = await qb.clone()

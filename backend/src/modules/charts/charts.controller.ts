@@ -49,7 +49,7 @@ export class ChartsController {
   @ApiOperation({ summary: 'Counters for priority tabs and top status cards.' })
   summary(
     @CurrentUser() user: AuthenticatedUser,
-    @Query() q: { clientId?: number; locationId?: number },
+    @Query() q: { clientId?: number | number[]; locationId?: number | number[] },
   ) {
     return this.svc.summary(user, q);
   }

@@ -35,9 +35,10 @@ export interface ChartListParams {
   /** Match by sub-speciality name (deduped across locations). Used by the charts
    * "all unique sub-specialities" filter. Single value or array → IN(...). */
   subSpecialityName?: string | string[];
-  /** Global header scope (Client / Location). */
-  clientId?: number;
-  locationId?: number;
+  /** Client / Location filters (multi-select on the Charts page). Single value
+   * or array → IN(...) on the server. */
+  clientId?: number | number[];
+  locationId?: number | number[];
   chartNo?: string;
   /** AI encounter id (matched against custom_fields.aiPrediction.encounterId on
    * the server, partial + case-insensitive). */
@@ -69,7 +70,7 @@ export const listCharts = (params: ChartListParams = {}) =>
   get<Paginated<Chart>>('/charts', params);
 
 export const getChartsSummary = (
-  params: { clientId?: number; locationId?: number } = {},
+  params: { clientId?: number | number[]; locationId?: number | number[] } = {},
 ) => get<ChartSummary>('/charts/summary', params);
 
 /* ── Detail / update ────────────────────────────────────── */
