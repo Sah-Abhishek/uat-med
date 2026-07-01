@@ -993,6 +993,18 @@ function FilterModal({
 }) {
   const { register, control, handleSubmit, reset } = useForm<ChartListParams>({ defaultValues: value });
 
+  // Re-seed the form from the currently-applied filters every time the modal
+  // opens. The Modal unmounts its inputs on close (`if (!open) return null`) but
+  // FilterModal itself stays mounted, so the form is otherwise seeded from
+  // `value` only once and then drifts: reopening would show stale selections,
+  // an external "Clear filters" wouldn't clear the dropdowns, and deselecting a
+  // remounted control could fail. Resetting on open keeps the form in lock-step
+  // with the applied filters.
+  useEffect(() => {
+    if (open) reset(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   // Speciality list for its dropdown — all primary specialities (no client
   // scope here). Fetched only while the modal is open.
   const specialities = useQuery({
