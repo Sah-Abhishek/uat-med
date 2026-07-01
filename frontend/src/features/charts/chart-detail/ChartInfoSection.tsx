@@ -41,6 +41,10 @@ interface Props {
   /** Clamp Date of Service to the parent worklist's service-date range. */
   dosMin?: string;
   dosMax?: string;
+  /** True when the AI prediction returned at least one procedure (PCS) code.
+   * The PCS field is only shown when the AI produced one (or the chart already
+   * has saved PCS values). */
+  aiHasPcs?: boolean;
 }
 
 export function ChartInfoSection({
@@ -53,6 +57,7 @@ export function ChartInfoSection({
   updateCustomValue,
   dosMin,
   dosMax,
+  aiHasPcs,
 }: Props) {
   const dim = isAuditor ? 'opacity-50 pointer-events-none grayscale' : readOnly ? 'pointer-events-none' : '';
   const [orderAlert, setOrderAlert] = useState<string | null>(null);
@@ -351,16 +356,21 @@ export function ChartInfoSection({
           readOnly={readOnly}
         />
 
-        {/* DRG values & PCS codes sit at the end as full-width blocks so their
-            multi-row code+description lists can grow long without stretching the
-            3-column grid rows above and breaking that layout. */}
+        {/* DRG value & PCS codes sit at the end as full-width blocks so a long
+            code description can grow without stretching the 3-column grid rows
+            above and breaking that layout. DRG is a single value (code +
+            description); it's stored as a one-entry array for back-compat with
+            charts saved while DRG was multi-value. */}
         {visible('drgValue') && (
           <div className="mt-4">
-            <CodeSearchListInput
+            <CodeAutocompleteField
               label="DRG Value"
               required={required('drgValue')}
-              values={draft.drgValues}
-              onChange={(next) => update('drgValues', next)}
+              code={draft.drgValues[0]?.code ?? ''}
+              description={draft.drgValues[0]?.description ?? ''}
+              onChange={(c, d) =>
+                update('drgValues', c.trim() || d.trim() ? [{ code: c, description: d }] : [])
+              }
               readOnly={readOnly}
               search={searchDrgCodes}
               queryKeyPrefix="drg-codes-search"
@@ -368,7 +378,10 @@ export function ChartInfoSection({
             />
           </div>
         )}
-        {visible('pcsCodes') && (
+        {/* PCS codes only appear when the AI returned a procedure (PCS) code —
+            or when the chart already has saved PCS values, so existing data is
+            never hidden. */}
+        {visible('pcsCodes') && (aiHasPcs || draft.pcsCodes.length > 0) && (
           <div className="mt-4">
             <CodeSearchListInput
               label="PCS codes"
