@@ -57,6 +57,24 @@ export interface QaSubmissionsResponse {
 export const listQaSubmissions = (params: QaFilters & { page?: number; pageSize?: number }) =>
   get<QaSubmissionsResponse>('/qa/submissions', params);
 
+/**
+ * Fetch *every* submission (per-encounter) row matching `params` by paging
+ * through {@link listQaSubmissions} until the full set is collected. The server
+ * caps `pageSize` at 200, so a single call can't return everything — the AI
+ * Analytics encounter export needs the whole list for a date window. A hard
+ * page cap guards against an unexpected runaway loop.
+ */
+export async function fetchAllQaSubmissions(params: QaFilters): Promise<QaSubmissionRow[]> {
+  const pageSize = 200;
+  const all: QaSubmissionRow[] = [];
+  for (let page = 1; page <= 500; page++) {
+    const res = await listQaSubmissions({ ...params, page, pageSize });
+    all.push(...res.items);
+    if (res.items.length < pageSize || all.length >= res.total) break;
+  }
+  return all;
+}
+
 export interface QaAccuracyResponse {
   kpis: {
     totalDecisions: number;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Area,
@@ -23,8 +23,10 @@ import {
   BarChart3,
   Building2,
   CheckCircle2,
+  ChevronDown,
   ChevronsUpDown,
   Clock,
+  Download,
   FileStack,
   Filter,
   Loader2,
@@ -37,18 +39,20 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { FancyMultiSelect, Label, RangeDatePicker } from '@/components/ui/Field';
-import { Modal, ModalFooter } from '@/components/ui/Primitives';
+import { Modal, ModalFooter, Toast } from '@/components/ui/Primitives';
 import {
   listPrimarySpecialities,
   listSubSpecialities,
 } from '@/api/configurations';
 import {
+  fetchAllQaSubmissions,
   getQaAccuracy,
   getQaActivityBreakdown,
   listQaFacilities,
   type CodeReviewType,
   type QaActivityBreakdownRow,
   type QaFilters,
+  type QaSubmissionRow,
 } from '@/api/qa';
 import { useScope } from '@/scope/store';
 import { cn } from '@/lib/utils';
@@ -150,6 +154,40 @@ export function AiAnalyticsPage() {
     queryFn: () => getQaActivityBreakdown(breakdownFilters),
     placeholderData: (prev) => prev,
   });
+
+  // ── Encounter export (Today / 7d / month) ──
+  // Pulls the full per-encounter list for the chosen window (same Client /
+  // Location scope + date window the breakdown uses) and downloads it as CSV.
+  // `exporting` holds the range currently being fetched so the button can show
+  // a spinner and block a second concurrent export.
+  const [exporting, setExporting] = useState<BreakdownRange | null>(null);
+  const [toast, setToast] = useState<{ message: string; variant: 'success' | 'danger' | 'warn' } | null>(null);
+
+  const handleExport = async (r: BreakdownRange) => {
+    if (exporting) return;
+    setExporting(r);
+    try {
+      const { from, to } = rangeWindow(r);
+      const params: QaFilters = {
+        ...(scopeClientId != null ? { clientId: scopeClientId } : {}),
+        ...(scopeLocationId != null ? { locationId: scopeLocationId } : {}),
+        from,
+        to,
+      };
+      const rows = await fetchAllQaSubmissions(params);
+      if (rows.length === 0) {
+        setToast({ message: `No encounters to export for ${RANGE_LABEL[r].toLowerCase()}.`, variant: 'warn' });
+        return;
+      }
+      downloadCsv(`ai-encounters-${r}-${to}.csv`, buildEncountersCsv(rows));
+      setToast({ message: `Exported ${rows.length.toLocaleString()} encounter${rows.length === 1 ? '' : 's'} (${RANGE_LABEL[r].toLowerCase()}).`, variant: 'success' });
+    } catch (err) {
+      console.error('Encounter export failed', err);
+      setToast({ message: 'Export failed. Please try again.', variant: 'danger' });
+    } finally {
+      setExporting(null);
+    }
+  };
 
   // Acceptance trend granularity (weekly / daily).
   const [trendMode, setTrendMode] = useState<'weekly' | 'daily'>('weekly');
@@ -253,6 +291,15 @@ export function AiAnalyticsPage() {
             fetching={breakdownQ.isFetching}
             range={breakdownRange}
             onRangeChange={setBreakdownRange}
+            onExport={handleExport}
+            exporting={exporting}
+          />
+
+          <Toast
+            open={toast != null}
+            message={toast?.message ?? ''}
+            variant={toast?.variant ?? 'warn'}
+            onClose={() => setToast(null)}
           />
 
           {/* ── Row 1: accuracy by code type + verdict mix ── */}
@@ -1002,12 +1049,16 @@ function ActivityBreakdownCard({
   fetching,
   range,
   onRangeChange,
+  onExport,
+  exporting,
 }: {
   rows: QaActivityBreakdownRow[];
   loading: boolean;
   fetching: boolean;
   range: BreakdownRange;
   onRangeChange: (r: BreakdownRange) => void;
+  onExport: (r: BreakdownRange) => void;
+  exporting: BreakdownRange | null;
 }) {
   const [sortBy, setSortBy] = useState<BreakdownSortKey>('decisions');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -1069,7 +1120,10 @@ function ActivityBreakdownCard({
             Where AI suggestions are being worked, and the AI's acceptance rate in each — {RANGE_LABEL[range].toLowerCase()}
           </p>
         </div>
-        <BreakdownRangeToggle value={range} onChange={onRangeChange} />
+        <div className="flex items-center gap-2 shrink-0">
+          <BreakdownRangeToggle value={range} onChange={onRangeChange} />
+          <ExportMenu onExport={onExport} exporting={exporting} />
+        </div>
       </div>
 
       {loading ? (
@@ -1218,4 +1272,123 @@ function BreakdownRangeToggle({ value, onChange }: { value: BreakdownRange; onCh
       ))}
     </div>
   );
+}
+
+/**
+ * "Export ▾" dropdown for the activity breakdown. Each item downloads the full
+ * per-encounter CSV for that window (Today / Last 7 days / This month),
+ * independent of which range the table is currently showing. Closes on
+ * outside-click; the whole control is disabled while an export is in flight.
+ */
+function ExportMenu({
+  onExport,
+  exporting,
+}: {
+  onExport: (r: BreakdownRange) => void;
+  exporting: BreakdownRange | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const busy = exporting != null;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={busy}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-ink-muted transition hover:text-ink disabled:opacity-60"
+      >
+        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+        Export
+        <ChevronDown className={cn('w-3 h-3 transition', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 z-20 min-w-[150px] overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-pop"
+        >
+          {(['today', '7d', 'month'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onExport(m);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink transition hover:bg-surface-sunken/60"
+            >
+              <Download className="w-3 h-3 text-ink-muted" />
+              {RANGE_LABEL[m]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── CSV export (per-encounter rows for the activity breakdown) ────── */
+
+/** Columns for the encounter export, in order. Sub-speciality is intentionally
+ * absent: the per-encounter submissions endpoint carries primary speciality
+ * (via worklist), not sub-speciality. */
+const ENCOUNTER_EXPORT_COLUMNS: ReadonlyArray<{
+  header: string;
+  value: (r: QaSubmissionRow) => string | number | null;
+}> = [
+  { header: 'encounter_id', value: (r) => r.chartNo ?? r.chartId },
+  { header: 'mr_number', value: (r) => r.mrNumber },
+  { header: 'worklist', value: (r) => r.worklistNumber },
+  { header: 'client', value: (r) => r.clientName },
+  { header: 'location', value: (r) => r.locationName },
+  { header: 'speciality', value: (r) => r.specialityName },
+  { header: 'milestone', value: (r) => r.milestone },
+  { header: 'decisions', value: (r) => r.totalDecisions },
+  { header: 'accepted', value: (r) => r.accepted },
+  { header: 'rejected', value: (r) => r.rejected },
+  { header: 'edited', value: (r) => r.edited },
+  { header: 'last_submitted_at', value: (r) => (r.lastSubmittedAt ? r.lastSubmittedAt.slice(0, 10) : '') },
+];
+
+/** Quote a CSV cell only when it contains a comma, quote, or newline. */
+function csvCell(v: string | number | null | undefined): string {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function buildEncountersCsv(rows: QaSubmissionRow[]): string {
+  const header = ENCOUNTER_EXPORT_COLUMNS.map((c) => c.header).join(',');
+  const body = rows
+    .map((r) => ENCOUNTER_EXPORT_COLUMNS.map((c) => csvCell(c.value(r))).join(','))
+    .join('\n');
+  return `${header}\n${body}`;
+}
+
+/** Build a CSV blob and trigger a browser download. A UTF-8 BOM is prepended so
+ * Excel renders non-ASCII client/location names correctly. */
+function downloadCsv(filename: string, csv: string): void {
+  const BOM = String.fromCharCode(0xfeff);
+  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Give the browser a tick to start the download before revoking.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
