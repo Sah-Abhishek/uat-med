@@ -50,6 +50,11 @@ interface FieldDef {
   /** Static labelled options for a `select` filter (enums). Omit → FE fetches
    *  distinct values live from /reports/field-values. */
   options?: FilterOption[];
+  /** Source dropdown options from a master table's distinct names instead of
+   *  the (possibly sparse) chart data. Use for configured pick-lists whose FK
+   *  is rarely populated on charts (hold reason, responsible party, health
+   *  plan) — otherwise the dropdown would show only values already in use. */
+  valuesFrom?: { table: string; column: string };
 }
 
 // Enum option lists mirror the Charts filter modal so the two pages read the
@@ -95,9 +100,9 @@ const FIELDS: FieldDef[] = [
   { key: 'milestone',         label: 'Milestone',          sql: 'c.milestone',                              filterable: true,  sortable: true,  options: MILESTONE_OPTIONS },
   { key: 'chartStatus',       label: 'Chart Status',       sql: 'c.chart_status',                           filterable: true,  sortable: true,  options: CHART_STATUS_OPTIONS },
   { key: 'priority',          label: 'Priority',           sql: 'c.priority',                               filterable: true,  sortable: true,  options: PRIORITY_OPTIONS },
-  { key: 'holdReason',        label: 'Hold Reason',        sql: 'hr.name',                                  filterable: true,  sortable: true },
-  { key: 'responsibleParty',  label: 'Responsible Party',  sql: 'rp.name',                                  filterable: true,  sortable: true },
-  { key: 'primaryHealthPlan', label: 'Primary Health Plan',sql: 'php.name',                                 filterable: true,  sortable: true },
+  { key: 'holdReason',        label: 'Hold Reason',        sql: 'hr.name',                                  filterable: true,  sortable: true,  valuesFrom: { table: 'hold_reasons',        column: 'name' } },
+  { key: 'responsibleParty',  label: 'Responsible Party',  sql: 'rp.name',                                  filterable: true,  sortable: true,  valuesFrom: { table: 'responsible_parties', column: 'name' } },
+  { key: 'primaryHealthPlan', label: 'Primary Health Plan',sql: 'php.name',                                 filterable: true,  sortable: true,  valuesFrom: { table: 'primary_health_plans', column: 'name' } },
   { key: 'primaryDiagnosis',  label: 'Primary Diagnosis',  sql: 'c.primary_diagnosis',                      filterable: true,  sortable: true },
   { key: 'secondaryDiagnoses',label: 'Secondary Dx',       sql: 'c.secondary_diagnoses',                    filterable: false, sortable: false },
   { key: 'emLevel',           label: 'E/M Level',          sql: 'c.em_level',                               filterable: true,  sortable: true },
@@ -145,6 +150,9 @@ export class ReportsService {
     const f = FIELD_BY_KEY.get(key);
     if (!f || !f.filterable) return [];
     if (f.options) return f.options.map((o) => o.value);
+    // Configured pick-lists source their full option set from the master table
+    // (charts rarely reference them, so deriving from chart data would be empty).
+    if (f.valuesFrom) return this.distinctFromTable(f.valuesFrom, search);
 
     const expr = f.sql;
     const qb = this.buildBaseQuery(user)
@@ -157,6 +165,33 @@ export class ReportsService {
 
     const term = search?.trim();
     if (term) qb.andWhere(`CAST(${expr} AS TEXT) ILIKE :s`, { s: `%${term}%` });
+
+    const rows = await qb.getRawMany<{ v: unknown }>();
+    return rows
+      .map((r) => normalizeCell(r.v))
+      .filter((v): v is string | number => v != null)
+      .map(String);
+  }
+
+  /**
+   * Distinct non-empty values of a single column across a whole master table
+   * (deduped across locations). Powers dropdowns for configured pick-lists.
+   * Names are the same strings the report SQL projects, so they slot straight
+   * into the IN-clause filter.
+   */
+  private async distinctFromTable(src: { table: string; column: string }, search: string | undefined): Promise<string[]> {
+    const col = `t.${src.column}`;
+    const qb = this.charts.manager.createQueryBuilder()
+      .select(col, 'v')
+      .distinct(true)
+      .from(src.table, 't')
+      .where(`${col} IS NOT NULL`)
+      .andWhere(`${col} <> ''`)
+      .orderBy(col, 'ASC')
+      .limit(1000);
+
+    const term = search?.trim();
+    if (term) qb.andWhere(`${col} ILIKE :s`, { s: `%${term}%` });
 
     const rows = await qb.getRawMany<{ v: unknown }>();
     return rows
