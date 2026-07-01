@@ -22,6 +22,21 @@ import { SaveTemplateDto } from './dto/save-template.dto';
  * Adding a new field is as simple as appending an entry here — the runQuery,
  * filtering, sorting, and Excel export all read from this single source of truth.
  */
+/**
+ * How the FE should render this field's filter control:
+ *   - text:   a free-text substring input (worklist/chart/serial/MR numbers)
+ *   - date:   a date-range picker → { from, to }
+ *   - select: a multi-select dropdown → string[] (IN-clause). Options are either
+ *             the static `options` on the field (enums) or, when omitted, the
+ *             distinct values present in the data (GET /reports/field-values).
+ */
+export type FilterKind = 'text' | 'date' | 'select';
+
+export interface FilterOption {
+  value: string;
+  label: string;
+}
+
 interface FieldDef {
   key: string;
   label: string;
@@ -30,13 +45,44 @@ interface FieldDef {
   sortable: boolean;
   /** Treat the value as a date when set; ExcelJS will format it accordingly. */
   type?: 'date' | 'number';
+  /** Override the FE filter control. Defaults: date type → 'date', else 'select'. */
+  filterKind?: FilterKind;
+  /** Static labelled options for a `select` filter (enums). Omit → FE fetches
+   *  distinct values live from /reports/field-values. */
+  options?: FilterOption[];
 }
 
+// Enum option lists mirror the Charts filter modal so the two pages read the
+// same labels. `select` fields without static options are populated live.
+const CHART_STATUS_OPTIONS: FilterOption[] = [
+  { value: 'OPEN', label: 'Open' },
+  { value: 'COMPLETE', label: 'Complete' },
+  { value: 'INCOMPLETE', label: 'Incomplete' },
+  { value: 'HOLD', label: 'Hold' },
+];
+const MILESTONE_OPTIONS: FilterOption[] = [
+  { value: 'READY_TO_CODE', label: 'Ready to Code' },
+  { value: 'CODING_IN_PROGRESS', label: 'Coding' },
+  { value: 'CODING_DONE', label: 'Coding Done' },
+  { value: 'READY_TO_AUDIT', label: 'Ready to Audit' },
+  { value: 'AUDIT_IN_PROGRESS', label: 'Auditing' },
+  { value: 'AUDIT_DONE', label: 'Audit Done' },
+  { value: 'CLOSED', label: 'Closed' },
+];
+const PRIORITY_OPTIONS: FilterOption[] = [
+  { value: 'CRITICAL', label: 'Critical' },
+  { value: 'HIGH', label: 'High' },
+  { value: 'MEDIUM', label: 'Medium' },
+  { value: 'LOW', label: 'Low' },
+  // Stored as FINALIZED; shown as "Done" everywhere in the UI.
+  { value: 'FINALIZED', label: 'Done' },
+];
+
 const FIELDS: FieldDef[] = [
-  { key: 'worklistNumber',    label: 'Worklist Number',    sql: 'wl.worklist_number',                       filterable: true,  sortable: true },
-  { key: 'serialNo',          label: 'S.No',               sql: 'c.serial_no',                              filterable: true,  sortable: true,  type: 'number' },
-  { key: 'chartNo',           label: 'Chart Number',       sql: 'c.chart_no',                               filterable: true,  sortable: true },
-  { key: 'mrNumber',          label: 'MR Number',          sql: 'c.mr_number',                              filterable: true,  sortable: true },
+  { key: 'worklistNumber',    label: 'Worklist Number',    sql: 'wl.worklist_number',                       filterable: true,  sortable: true,  filterKind: 'text' },
+  { key: 'serialNo',          label: 'S.No',               sql: 'c.serial_no',                              filterable: true,  sortable: true,  type: 'number', filterKind: 'text' },
+  { key: 'chartNo',           label: 'Chart Number',       sql: 'c.chart_no',                               filterable: true,  sortable: true,  filterKind: 'text' },
+  { key: 'mrNumber',          label: 'MR Number',          sql: 'c.mr_number',                              filterable: true,  sortable: true,  filterKind: 'text' },
   { key: 'client',            label: 'Client',             sql: 'cl.name',                                  filterable: true,  sortable: true },
   { key: 'location',          label: 'Location',           sql: 'lo.name',                                  filterable: true,  sortable: true },
   { key: 'primarySpeciality', label: 'Primary Speciality', sql: 'ps.name',                                  filterable: true,  sortable: true },
@@ -46,9 +92,9 @@ const FIELDS: FieldDef[] = [
   { key: 'dateOfCompletion',  label: 'Date of Completion', sql: `CASE WHEN c.chart_status = 'COMPLETE' THEN c.updated_at ELSE NULL END`, filterable: true, sortable: true, type: 'date' },
   { key: 'allocatedCoder',    label: 'Allocated Coder',    sql: 'uc.full_name',                             filterable: true,  sortable: true },
   { key: 'allocatedAuditor',  label: 'Allocated Auditor',  sql: 'ua.full_name',                             filterable: true,  sortable: true },
-  { key: 'milestone',         label: 'Milestone',          sql: 'c.milestone',                              filterable: true,  sortable: true },
-  { key: 'chartStatus',       label: 'Chart Status',       sql: 'c.chart_status',                           filterable: true,  sortable: true },
-  { key: 'priority',          label: 'Priority',           sql: 'c.priority',                               filterable: true,  sortable: true },
+  { key: 'milestone',         label: 'Milestone',          sql: 'c.milestone',                              filterable: true,  sortable: true,  options: MILESTONE_OPTIONS },
+  { key: 'chartStatus',       label: 'Chart Status',       sql: 'c.chart_status',                           filterable: true,  sortable: true,  options: CHART_STATUS_OPTIONS },
+  { key: 'priority',          label: 'Priority',           sql: 'c.priority',                               filterable: true,  sortable: true,  options: PRIORITY_OPTIONS },
   { key: 'holdReason',        label: 'Hold Reason',        sql: 'hr.name',                                  filterable: true,  sortable: true },
   { key: 'responsibleParty',  label: 'Responsible Party',  sql: 'rp.name',                                  filterable: true,  sortable: true },
   { key: 'primaryHealthPlan', label: 'Primary Health Plan',sql: 'php.name',                                 filterable: true,  sortable: true },
@@ -59,6 +105,11 @@ const FIELDS: FieldDef[] = [
   { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `c.custom_fields->>'feedbackCategory'`,     filterable: true,  sortable: false },
   { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields->>'feedbackType'`,         filterable: true,  sortable: false },
 ];
+
+/** Derive the FE filter control for a field (date type → date, else select). */
+function filterKindOf(f: FieldDef): FilterKind {
+  return f.filterKind ?? (f.type === 'date' ? 'date' : 'select');
+}
 
 const FIELD_BY_KEY = new Map(FIELDS.map(f => [f.key, f]));
 
@@ -73,9 +124,45 @@ export class ReportsService {
   ) {}
 
   fields() {
-    return FIELDS.map(({ key, label, filterable, sortable, type }) => ({
-      key, label, filterable, sortable, type,
+    return FIELDS.map((f) => ({
+      key: f.key,
+      label: f.label,
+      filterable: f.filterable,
+      sortable: f.sortable,
+      type: f.type,
+      filterKind: filterKindOf(f),
+      options: f.options,
     }));
+  }
+
+  /**
+   * Distinct values present in the reportable dataset for a single `select`
+   * field, honouring the caller's role scoping. Powers the multi-select filter
+   * dropdowns whose options aren't a fixed enum (client, coder, hold reason, …).
+   * Enum fields ship their static option list, so we short-circuit those.
+   */
+  async fieldValues(key: string, search: string | undefined, user: AuthenticatedUser): Promise<string[]> {
+    const f = FIELD_BY_KEY.get(key);
+    if (!f || !f.filterable) return [];
+    if (f.options) return f.options.map((o) => o.value);
+
+    const expr = f.sql;
+    const qb = this.buildBaseQuery(user)
+      .select(expr, 'v')
+      .distinct(true)
+      .andWhere(`${expr} IS NOT NULL`)
+      .andWhere(`CAST(${expr} AS TEXT) <> ''`)
+      .orderBy(expr, 'ASC')
+      .limit(500);
+
+    const term = search?.trim();
+    if (term) qb.andWhere(`CAST(${expr} AS TEXT) ILIKE :s`, { s: `%${term}%` });
+
+    const rows = await qb.getRawMany<{ v: unknown }>();
+    return rows
+      .map((r) => normalizeCell(r.v))
+      .filter((v): v is string | number => v != null)
+      .map(String);
   }
 
   /**
@@ -287,13 +374,16 @@ export class ReportsService {
       }
 
       if (typeof raw === 'object' && (('from' in raw) || ('to' in raw))) {
+        // For date fields, cast to DATE so both bounds are inclusive by calendar
+        // day even when the column carries a time component (e.g. updated_at).
+        const lhs = f.type === 'date' ? `CAST(${expr} AS DATE)` : expr;
         if (raw.from) {
           const p = `f${i++}`;
-          qb.andWhere(`${expr} >= :${p}`, { [p]: raw.from });
+          qb.andWhere(`${lhs} >= :${p}`, { [p]: raw.from });
         }
         if (raw.to) {
           const p = `f${i++}`;
-          qb.andWhere(`${expr} <= :${p}`, { [p]: raw.to });
+          qb.andWhere(`${lhs} <= :${p}`, { [p]: raw.to });
         }
         continue;
       }

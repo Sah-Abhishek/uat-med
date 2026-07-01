@@ -11,6 +11,14 @@ import type {
 
 export const getReportFields = () => get<ReportField[]>('/reports/fields');
 
+/**
+ * Distinct values present in the reportable data for a single `select` filter
+ * field (e.g. all client names, coder names). Optional `search` narrows the
+ * list server-side so large fields (diagnoses, users) stay responsive.
+ */
+export const getReportFieldValues = (key: string, search?: string) =>
+  get<string[]>('/reports/field-values', { key, ...(search ? { search } : {}) });
+
 /* ── Run query ─────────────────────────────────────────── */
 
 export interface QueryReportDto {

@@ -34,6 +34,16 @@ export class ReportsController {
   @ApiOperation({ summary: 'Catalog of available report fields for the Customize dialog.' })
   fields() { return this.svc.fields(); }
 
+  @Get('field-values')
+  @ApiOperation({ summary: 'Distinct values present for a filterable select field (dropdown options).' })
+  fieldValues(
+    @Query('key') key: string,
+    @Query('search') search: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.fieldValues(key, search, user);
+  }
+
   @Post('query')
   @HttpCode(200)
   @ApiOperation({ summary: 'Run a report query and return paginated tabular data.' })

@@ -512,11 +512,23 @@ export interface SignupRequest {
 
 /* ── Reports ─────────────────────────────────────────────── */
 
+export interface ReportFieldOption {
+  value: string;
+  label: string;
+}
+
+/** How the Reports filter bar should render a field's control. */
+export type ReportFilterKind = 'text' | 'date' | 'select';
+
 export interface ReportField {
   key: string;
   label: string;
   filterable: boolean;
   sortable: boolean;
+  type?: 'date' | 'number';
+  filterKind?: ReportFilterKind;
+  /** Static labelled options for a `select` filter (enums); absent → fetched live. */
+  options?: ReportFieldOption[];
 }
 
 export interface ReportQueryResult {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getReportFields,
+  getReportFieldValues,
   runReportQuery,
   listReportTemplates,
   createReportTemplate,
@@ -15,7 +16,7 @@ import { useAuth } from '@/auth/store';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CollapsibleCard } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, SearchInput } from '@/components/ui/Field';
+import { Input, Label, SearchInput, FancyMultiSelect, RangeDatePicker } from '@/components/ui/Field';
 import { Modal, ModalFooter, Pagination } from '@/components/ui/Primitives';
 import { formatDate, formatNumber } from '@/lib/utils';
 import {
@@ -30,11 +31,24 @@ import {
   X,
 } from 'lucide-react';
 
+/** A date-range filter — either bound may be unset. */
+type DateRange = { from: string | null; to: string | null };
+/**
+ * A single filter value. `text` fields store a string, `select` fields a
+ * string[] (→ IN clause), `date` fields a DateRange (→ from/to). The backend
+ * discriminates on the runtime shape, so no per-key type map is needed here.
+ */
+type FilterValue = string | string[] | DateRange;
+
 interface QueryState {
   columns: string[];
-  filters: Record<string, string>;
+  filters: Record<string, FilterValue>;
   sort: QueryReportDto['sort'];
   page: number;
+}
+
+function isDateRange(v: FilterValue | undefined | null): v is DateRange {
+  return typeof v === 'object' && v != null && !Array.isArray(v) && ('from' in v || 'to' in v);
 }
 
 const DEFAULT_COLUMNS = [
@@ -49,12 +63,21 @@ const DEFAULT_COLUMNS = [
 ];
 const PAGE_SIZE = 50;
 
-/** Returns true when two filter records contain the same string entries. */
-function filtersEqual(a: Record<string, string>, b: Record<string, string>) {
-  const ak = Object.keys(a).filter(k => a[k] !== '' && a[k] != null);
-  const bk = Object.keys(b).filter(k => b[k] !== '' && b[k] != null);
+/** Stable stringify of a filter value for equality checks (order-insensitive
+ *  for multi-select arrays). */
+function serializeFilterValue(v: unknown): string {
+  if (Array.isArray(v)) return JSON.stringify([...v].map(String).sort());
+  return JSON.stringify(v);
+}
+
+/** Returns true when two filter records carry the same effective (non-empty) values. */
+function filtersEqual(a: Record<string, FilterValue>, b: Record<string, FilterValue>) {
+  const ca = cleanFilters(a);
+  const cb = cleanFilters(b);
+  const ak = Object.keys(ca);
+  const bk = Object.keys(cb);
   if (ak.length !== bk.length) return false;
-  return ak.every(k => a[k] === b[k]);
+  return ak.every(k => k in cb && serializeFilterValue(ca[k]) === serializeFilterValue(cb[k]));
 }
 
 function arrayEqual<T>(a: T[], b: T[]) {
@@ -108,7 +131,7 @@ export function ReportsPage() {
   /** True when the active template's saved spec differs from the current builder state. */
   const isDirty = useMemo(() => {
     if (!activeTemplate) return false;
-    const tplFilters = (activeTemplate.filters ?? {}) as Record<string, string>;
+    const tplFilters = (activeTemplate.filters ?? {}) as Record<string, FilterValue>;
     return (
       !arrayEqual(activeTemplate.columns, state.columns) ||
       !filtersEqual(tplFilters, state.filters)
@@ -119,7 +142,7 @@ export function ReportsPage() {
     setActiveTemplate(t);
     setState({
       columns: t.columns,
-      filters: { ...((t.filters ?? {}) as Record<string, string>) },
+      filters: { ...((t.filters ?? {}) as Record<string, FilterValue>) },
       sort: [],
       page: 1,
     });
@@ -129,7 +152,7 @@ export function ReportsPage() {
     if (!activeTemplate) return;
     setState({
       columns: activeTemplate.columns,
-      filters: { ...((activeTemplate.filters ?? {}) as Record<string, string>) },
+      filters: { ...((activeTemplate.filters ?? {}) as Record<string, FilterValue>) },
       sort: [],
       page: 1,
     });
@@ -301,13 +324,32 @@ export function ReportsPage() {
   );
 }
 
-/** Strips empty strings/undefined values so the backend doesn't filter on "" (which never matches). */
-function cleanFilters(f: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
+/**
+ * Strips empty values so the backend never filters on nothing: blank text,
+ * empty multi-selects, and date ranges with neither bound set are all dropped.
+ * A range keeps only the bounds that are actually set.
+ */
+function cleanFilters(f: Record<string, FilterValue>): Record<string, string | string[] | { from?: string; to?: string }> {
+  const out: Record<string, string | string[] | { from?: string; to?: string }> = {};
   for (const [k, v] of Object.entries(f)) {
-    if (v != null && v !== '') out[k] = v;
+    if (v == null) continue;
+    if (typeof v === 'string') {
+      if (v.trim() !== '') out[k] = v;
+    } else if (Array.isArray(v)) {
+      if (v.length) out[k] = v;
+    } else if (isDateRange(v)) {
+      const range: { from?: string; to?: string } = {};
+      if (v.from) range.from = v.from;
+      if (v.to) range.to = v.to;
+      if (range.from || range.to) out[k] = range;
+    }
   }
   return out;
+}
+
+/** Count of active (non-empty) filters in a record. */
+function activeFilterCount(f: Record<string, unknown>): number {
+  return Object.keys(cleanFilters(f as Record<string, FilterValue>)).length;
 }
 
 /* ── Saved Templates section (inline table) ─────────────── */
@@ -377,9 +419,7 @@ function SavedTemplatesSection({
               templates.data?.items.map((t) => {
                 const isActive = String(t.id) === String(activeTemplateId);
                 const isOwn = String(t.ownerId) === String(currentUserId);
-                const filterCount = Object.keys((t.filters ?? {}) as object).filter(
-                  (k) => (t.filters as Record<string, unknown>)?.[k] != null && (t.filters as Record<string, unknown>)?.[k] !== '',
-                ).length;
+                const filterCount = activeFilterCount((t.filters ?? {}) as Record<string, unknown>);
                 return (
                   <tr
                     key={t.id}
@@ -497,8 +537,8 @@ function FiltersSection({
   onRun,
 }: {
   fields: ReportField[];
-  values: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
+  values: Record<string, FilterValue>;
+  onChange: (next: Record<string, FilterValue>) => void;
   onClear: () => void;
   onRun: () => void;
 }) {
@@ -506,22 +546,28 @@ function FiltersSection({
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? filterable : filterable.slice(0, 8);
 
+  // Set (or clear, when the control hands back an "empty" value) a single field.
+  const setField = (key: string, next: FilterValue | undefined) => {
+    const merged = { ...values };
+    if (next === undefined) delete merged[key];
+    else merged[key] = next;
+    onChange(merged);
+  };
+
   return (
     <CollapsibleCard
       title="Filters"
-      subtitle="Substring match, case-insensitive. Leave blank to include everything."
+      subtitle="Numbers match by substring; pick values or a date range for the rest. Leave blank to include everything."
       defaultOpen
     >
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-3">
         {visible.map((f) => (
           <div key={f.key}>
             <Label>{f.label}</Label>
-            <Input
-              value={values[f.key] ?? ''}
-              onChange={(e) =>
-                onChange({ ...values, [f.key]: e.target.value })
-              }
-              placeholder="Any"
+            <FilterControl
+              field={f}
+              value={values[f.key]}
+              onChange={(v) => setField(f.key, v)}
             />
           </div>
         ))}
@@ -541,6 +587,88 @@ function FiltersSection({
         </div>
       </div>
     </CollapsibleCard>
+  );
+}
+
+/** Renders the correct control for a field: text input, date-range picker, or
+ *  multi-select dropdown. Hands `undefined` back to the parent when cleared. */
+function FilterControl({
+  field,
+  value,
+  onChange,
+}: {
+  field: ReportField;
+  value: FilterValue | undefined;
+  onChange: (next: FilterValue | undefined) => void;
+}) {
+  const kind = field.filterKind ?? (field.type === 'date' ? 'date' : 'select');
+
+  if (kind === 'text') {
+    return (
+      <Input
+        value={typeof value === 'string' ? value : ''}
+        onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
+        placeholder="Any"
+      />
+    );
+  }
+
+  if (kind === 'date') {
+    const range = isDateRange(value) ? value : { from: null, to: null };
+    return (
+      <RangeDatePicker
+        value={range}
+        onChange={(v) => onChange(v.from || v.to ? v : undefined)}
+        placeholder="Any date"
+      />
+    );
+  }
+
+  // select — normalise a stray string (e.g. from a legacy template) to string[].
+  const selected = Array.isArray(value) ? value : value ? [String(value)] : [];
+  return <SelectFilter field={field} value={selected} onChange={onChange} />;
+}
+
+/**
+ * Multi-select dropdown for a `select` field. Enum fields carry static options;
+ * every other field pulls its distinct values live (searchable server-side so
+ * large fields — diagnoses, users — stay responsive).
+ */
+function SelectFilter({
+  field,
+  value,
+  onChange,
+}: {
+  field: ReportField;
+  value: string[];
+  onChange: (next: FilterValue | undefined) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const hasStatic = (field.options?.length ?? 0) > 0;
+
+  const q = useQuery({
+    queryKey: ['reports', 'field-values', field.key, search],
+    queryFn: () => getReportFieldValues(field.key, search || undefined),
+    enabled: !hasStatic,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+
+  const options = hasStatic
+    ? field.options!
+    : (q.data ?? []).map((v) => ({ value: v, label: v }));
+
+  return (
+    <FancyMultiSelect
+      searchable={!hasStatic}
+      onSearch={hasStatic ? undefined : setSearch}
+      loading={!hasStatic && q.isFetching}
+      searchPlaceholder={`Search ${field.label.toLowerCase()}…`}
+      placeholder={!hasStatic && q.isPending ? 'Loading…' : 'Any'}
+      value={value}
+      onChange={(v) => onChange(v.length ? v : undefined)}
+      options={options}
+    />
   );
 }
 
