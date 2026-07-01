@@ -82,6 +82,19 @@ const PRIORITY_OPTIONS: FilterOption[] = [
   // Stored as FINALIZED; shown as "Done" everywhere in the UI.
   { value: 'FINALIZED', label: 'Done' },
 ];
+/**
+ * Sentinel option value meaning "no value set". When present in a select
+ * filter's array, applyFilters matches rows where the field IS NULL or empty
+ * (rather than a literal match). Lets a dropdown offer a "Blank" choice.
+ */
+const BLANK_FILTER_VALUE = '__BLANK__';
+const QC_STATUS_OPTIONS: FilterOption[] = [
+  { value: 'Agree', label: 'Agree' },
+  { value: 'Feedback Implemented', label: 'Feedback Implemented' },
+  { value: 'Feedback Rejected', label: 'Feedback Rejected' },
+  { value: 'Feedback Provided', label: 'Feedback Provided' },
+  { value: BLANK_FILTER_VALUE, label: 'Blank' },
+];
 
 const FIELDS: FieldDef[] = [
   { key: 'worklistNumber',    label: 'Worklist Number',    sql: 'wl.worklist_number',                       filterable: true,  sortable: true,  filterKind: 'text' },
@@ -106,7 +119,7 @@ const FIELDS: FieldDef[] = [
   { key: 'primaryDiagnosis',  label: 'Primary Diagnosis',  sql: 'c.primary_diagnosis',                      filterable: true,  sortable: true },
   { key: 'secondaryDiagnoses',label: 'Secondary Dx',       sql: 'c.secondary_diagnoses',                    filterable: false, sortable: false },
   { key: 'emLevel',           label: 'E/M Level',          sql: 'c.em_level',                               filterable: true,  sortable: true },
-  { key: 'qcStatus',          label: 'QC Status',          sql: `c.custom_fields->>'qcStatus'`,             filterable: true,  sortable: false },
+  { key: 'qcStatus',          label: 'QC Status',          sql: `c.custom_fields->>'qcStatus'`,             filterable: true,  sortable: false, options: QC_STATUS_OPTIONS },
   { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `c.custom_fields->>'feedbackCategory'`,     filterable: true,  sortable: false },
   { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields->>'feedbackType'`,         filterable: true,  sortable: false },
 ];
@@ -403,8 +416,23 @@ export class ReportsService {
 
       if (Array.isArray(raw)) {
         if (!raw.length) continue;
-        const param = `f${i++}`;
-        qb.andWhere(`${expr} IN (:...${param})`, { [param]: raw });
+        // A "Blank" option (sentinel) matches NULL/empty rather than a literal;
+        // split it out so the rest still go through a plain IN-clause. Both are
+        // OR'd so "Agree" + "Blank" means "= Agree OR is unset".
+        const values = raw.map((v) => String(v));
+        const concrete = values.filter((v) => v !== BLANK_FILTER_VALUE);
+        const wantsBlank = values.includes(BLANK_FILTER_VALUE);
+        const clauses: string[] = [];
+        const params: Record<string, unknown> = {};
+        if (concrete.length) {
+          const p = `f${i++}`;
+          clauses.push(`${expr} IN (:...${p})`);
+          params[p] = concrete;
+        }
+        if (wantsBlank) {
+          clauses.push(`(${expr} IS NULL OR CAST(${expr} AS TEXT) = '')`);
+        }
+        if (clauses.length) qb.andWhere(`(${clauses.join(' OR ')})`, params);
         continue;
       }
 
