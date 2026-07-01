@@ -189,6 +189,9 @@ export class ChartsService {
     if (q.allocatedUserId?.length) qb.andWhere('(c.allocated_coder_id IN (:...au) OR c.allocated_auditor_id IN (:...au))', { au: q.allocatedUserId });
     if (q.primarySpecialityId?.length) qb.andWhere('worklist.primary_speciality_id IN (:...ps)', { ps: q.primarySpecialityId });
     if (q.subSpecialityId?.length) qb.andWhere('worklist.sub_speciality_id IN (:...ss)', { ss: q.subSpecialityId });
+    // Name-based match for the "all unique sub-specialities" filter — the same
+    // name can exist under many locations, so we match on the joined name.
+    if (q.subSpecialityName?.length) qb.andWhere('subSpeciality.name IN (:...ssn)', { ssn: q.subSpecialityName });
     // Global header scope (Client / Location). The worklist is already joined.
     if (q.clientId) qb.andWhere('worklist.client_id = :cid', { cid: q.clientId });
     if (q.locationId) qb.andWhere('worklist.location_id = :lid', { lid: q.locationId });
@@ -204,6 +207,10 @@ export class ChartsService {
     }
     if (q.receivedDateFrom) qb.andWhere('worklist.received_date >= :rdf', { rdf: q.receivedDateFrom });
     if (q.receivedDateTo) qb.andWhere('worklist.received_date <= :rdt', { rdt: q.receivedDateTo });
+    // Date of coding — compare on the calendar date so the range is inclusive of
+    // the whole "to" day regardless of the stored timestamp's time-of-day.
+    if (q.codingCompletedFrom) qb.andWhere('c.coding_completed_at::date >= :ccf', { ccf: q.codingCompletedFrom });
+    if (q.codingCompletedTo) qb.andWhere('c.coding_completed_at::date <= :cct', { cct: q.codingCompletedTo });
 
     this.applySort(qb, q.sortBy, q.sortDir);
     qb.skip((q.page - 1) * q.pageSize).take(q.pageSize);

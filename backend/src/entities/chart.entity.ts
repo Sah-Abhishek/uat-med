@@ -40,6 +40,14 @@ export class Chart {
   @Column({ name: 'chart_status_changed_at', type: 'timestamptz', nullable: true })
   chartStatusChangedAt?: Date | null;
 
+  // Stamped when the chart's coding is finished — i.e. `milestone` reaches
+  // CODING_DONE (via setMilestone). Unlike `milestoneChangedAt` (overwritten on
+  // every later transition to audit/closed), this preserves the coding-completed
+  // date so it can be filtered on. Re-stamped if a reworked chart is coded again.
+  @Column({ name: 'coding_completed_at', type: 'timestamptz', nullable: true })
+  @Index()
+  codingCompletedAt?: Date | null;
+
   @Column({ type: 'varchar', length: 16, default: Priority.MEDIUM }) @Index()
   priority: Priority;
 
@@ -82,6 +90,9 @@ export class Chart {
     if (this.milestone !== next) {
       this.milestone = next;
       this.milestoneChangedAt = new Date();
+      // Preserve the coding-completed date the moment coding finishes; keep it
+      // stable as the chart advances. Re-stamps on re-completion after rework.
+      if (next === ChartMilestone.CODING_DONE) this.codingCompletedAt = new Date();
     }
   }
 

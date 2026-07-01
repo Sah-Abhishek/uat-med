@@ -145,6 +145,11 @@ export interface SubSpecialityRecord {
 export const listSubSpecialities = (locationId: number) =>
   get<{ items: SubSpecialityRecord[] }>('/configurations/sub-specialities', { locationId });
 
+/** Every distinct sub-speciality NAME across all locations (deduped) — for the
+ * charts "all unique sub-specialities" filter, which matches by name. */
+export const listAllSubSpecialities = () =>
+  get<{ items: Array<{ name: string }> }>('/configurations/sub-specialities/all');
+
 export interface ProcessRecord {
   id: number;
   locationId: number;

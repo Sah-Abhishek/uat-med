@@ -54,6 +54,9 @@ export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) allocatedUserId?: number[];
   @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) primarySpecialityId?: number[];
   @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) subSpecialityId?: number[];
+  /** Match by sub-speciality NAME (deduped across locations), used by the charts
+   * "all unique sub-specialities" filter. Single value or array → IN(...). */
+  @ApiPropertyOptional({ type: [String] }) @IsOptional() @Transform(toArray) @IsString({ each: true }) subSpecialityName?: string[];
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() clientId?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() locationId?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() chartNo?: string;
@@ -69,4 +72,8 @@ export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateTo?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateOfServiceFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateOfServiceTo?: string;
+  /** Date-of-coding range — matched against charts.coding_completed_at (the day
+   * the chart reached CODING_DONE). Inclusive of the whole "to" day. */
+  @ApiPropertyOptional() @IsOptional() @IsDateString() codingCompletedFrom?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() codingCompletedTo?: string;
 }

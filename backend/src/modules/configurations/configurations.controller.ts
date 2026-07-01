@@ -48,6 +48,14 @@ export class ConfigurationsController {
     return this.svc.listSubSpecialitiesByLocation(Number(q.locationId));
   }
 
+  /** Every distinct sub-speciality NAME across all locations (deduped) — powers
+   * the charts "all unique sub-specialities" filter, which matches by name. */
+  @Get('sub-specialities/all')
+  @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER)
+  listAllSubSpecialities() {
+    return this.svc.listAllSubSpecialities();
+  }
+
   @Get('processes')
   @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER)
   listProcesses(@Query() q: { locationId?: string }) {

@@ -16,7 +16,7 @@ import {
 } from '@/api/charts';
 import { listUsers } from '@/api/users';
 import { listWorklists } from '@/api/worklists';
-import { listPrimarySpecialities, listSubSpecialities } from '@/api/configurations';
+import { listPrimarySpecialities, listAllSubSpecialities } from '@/api/configurations';
 import type { ApiErrorShape, Priority } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -1001,13 +1001,13 @@ function FilterModal({
     enabled: open,
   });
 
-  // Sub-specialities are location-scoped, so they come from the global header
-  // location. With no location picked there's nothing to choose from.
-  const scopeLocationId = useScope((s) => s.locationId);
+  // All unique sub-speciality names across every location (deduped) — the
+  // filter matches by name, not by a location-scoped id, so any location's
+  // charts are reachable regardless of the header scope.
   const subSpecs = useQuery({
-    queryKey: ['configurations', 'sub-specialities', scopeLocationId],
-    queryFn: () => listSubSpecialities(scopeLocationId!),
-    enabled: open && scopeLocationId != null,
+    queryKey: ['configurations', 'sub-specialities', 'all'],
+    queryFn: () => listAllSubSpecialities(),
+    enabled: open,
   });
 
   // Allocated-user dropdown. Users can be many, so search is server-driven:
@@ -1144,23 +1144,17 @@ function FilterModal({
             <Label>Sub Speciality</Label>
             <Controller
               control={control}
-              name="subSpecialityId"
+              name="subSpecialityName"
               render={({ field }) => (
                 <FancyMultiSelect
                   searchable
                   searchPlaceholder="Search sub-specialities…"
-                  placeholder={
-                    scopeLocationId == null
-                      ? 'Pick a location first'
-                      : subSpecs.isPending
-                      ? 'Loading…'
-                      : 'Any sub-speciality'
-                  }
-                  disabled={scopeLocationId == null}
+                  placeholder={subSpecs.isPending ? 'Loading…' : 'Any sub-speciality'}
+                  loading={subSpecs.isFetching}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  onChange={(v) => field.onChange(v.length ? v : undefined)}
                   options={(subSpecs.data?.items ?? []).map((s) => ({
-                    value: String(s.id),
+                    value: s.name,
                     label: s.name,
                   }))}
                 />
@@ -1242,6 +1236,14 @@ function FilterModal({
           <div>
             <Label>DOS to</Label>
             <Input type="date" {...register('dateOfServiceTo')} />
+          </div>
+          <div>
+            <Label>Coded from</Label>
+            <Input type="date" {...register('codingCompletedFrom')} />
+          </div>
+          <div>
+            <Label>Coded to</Label>
+            <Input type="date" {...register('codingCompletedTo')} />
           </div>
         </div>
 

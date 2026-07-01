@@ -32,6 +32,9 @@ export interface ChartListParams {
   allocatedUserId?: number | string | Array<number | string>;
   primarySpecialityId?: number | number[];
   subSpecialityId?: number | number[];
+  /** Match by sub-speciality name (deduped across locations). Used by the charts
+   * "all unique sub-specialities" filter. Single value or array → IN(...). */
+  subSpecialityName?: string | string[];
   /** Global header scope (Client / Location). */
   clientId?: number;
   locationId?: number;
@@ -56,6 +59,10 @@ export interface ChartListParams {
   receivedDateTo?: string;
   dateOfServiceFrom?: string;
   dateOfServiceTo?: string;
+  /** Date-of-coding range (charts.coding_completed_at) — the day the chart
+   * reached the Coding Done milestone. Inclusive of the whole "to" day. */
+  codingCompletedFrom?: string;
+  codingCompletedTo?: string;
 }
 
 export const listCharts = (params: ChartListParams = {}) =>

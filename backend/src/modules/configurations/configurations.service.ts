@@ -354,6 +354,18 @@ export class ConfigurationsService {
     };
   }
 
+  /** Every distinct active sub-speciality name across all locations, deduped and
+   * ordered — for the charts filter that matches by name (not location-scoped). */
+  async listAllSubSpecialities() {
+    const rows = await this.subSpecsRepo
+      .createQueryBuilder('s')
+      .select('DISTINCT s.name', 'name')
+      .where('s.is_active = true')
+      .orderBy('s.name', 'ASC')
+      .getRawMany<{ name: string }>();
+    return { items: rows.map((r) => ({ name: r.name })) };
+  }
+
   /** Lightweight: processes for one location. */
   async listProcessesByLocation(locationId: number) {
     const rows = await this.processesRepo.find({
