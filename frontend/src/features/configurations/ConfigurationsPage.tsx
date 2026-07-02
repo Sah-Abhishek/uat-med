@@ -20,6 +20,7 @@ import {
   updateFeedbackCategories,
   createAuditArea,
   deleteAuditArea,
+  copyFeedbackCategories,
   getAuditingConfig,
   updateAuditingConfig,
   getCodingConfig,
@@ -1402,6 +1403,7 @@ function FeedbackCategoriesEditor({
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [addAreaOpen, setAddAreaOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
 
   const { data, isPending } = useQuery({
     queryKey: ['configurations', 'feedback-categories', clientId, locationId],
@@ -1451,9 +1453,16 @@ function FeedbackCategoriesEditor({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2 text-xs text-danger">
-        <AlertTriangle className="w-3.5 h-3.5" />
-        Changes to existing feedback categories will impact all charts, including audited ones.
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs text-danger">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          Changes to existing feedback categories will impact all charts, including audited ones.
+        </div>
+        {canEdit && (
+          <Button variant="ghost" size="sm" onClick={() => setCopyOpen(true)}>
+            Copy from another scope…
+          </Button>
+        )}
       </div>
 
       {error && <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger">{error}</div>}
@@ -1526,7 +1535,125 @@ function FeedbackCategoriesEditor({
           submitting={addArea.isPending}
         />
       )}
+
+      {copyOpen && (
+        <CopyFeedbackCategoriesModal
+          targetClientId={clientId}
+          targetLocationId={locationId}
+          onClose={() => setCopyOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function CopyFeedbackCategoriesModal({
+  targetClientId,
+  targetLocationId,
+  onClose,
+}: {
+  targetClientId: number;
+  targetLocationId: number;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [sourceClient, setSourceClient] = useState<number | null>(null);
+  const [sourceLocation, setSourceLocation] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<{ areasAdded: number; reasonsAdded: number } | null>(null);
+
+  const clients = useQuery({ queryKey: ['configurations', 'clients'], queryFn: () => listClients() });
+  const locations = useQuery({
+    queryKey: ['configurations', 'locations', sourceClient],
+    queryFn: () => listLocations(sourceClient!),
+    enabled: !!sourceClient,
+  });
+
+  const m = useMutation({
+    mutationFn: () =>
+      copyFeedbackCategories({
+        source: { clientId: sourceClient!, locationId: sourceLocation! },
+        destination: { clientId: targetClientId, locationId: targetLocationId },
+      }),
+    onSuccess: (r) => {
+      setResult({ areasAdded: r.areasAdded, reasonsAdded: r.reasonsAdded });
+      qc.invalidateQueries({
+        queryKey: ['configurations', 'feedback-categories', targetClientId, targetLocationId],
+      });
+    },
+    onError: (e) => setErr((e as unknown as ApiErrorShape).message ?? 'Copy failed.'),
+  });
+
+  const isSameScope = sourceClient === targetClientId && sourceLocation === targetLocationId;
+  const canCopy = !!sourceClient && !!sourceLocation && !isSameScope;
+
+  return (
+    <Modal open onClose={onClose} title="Copy feedback categories" size="md">
+      <div className="space-y-3">
+        {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
+        {result && (
+          <div className="text-xs px-3 py-2 rounded bg-success-soft text-success">
+            Added {result.areasAdded} audit area(s) and {result.reasonsAdded} feedback category(ies). Existing ones were kept.
+          </div>
+        )}
+
+        <p className="text-xs text-ink-muted">
+          Copies the source scope's audit areas and feedback categories into this Client / Location.
+          Anything already here is kept unchanged (idempotent — safe to re-run).
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label required>Source client</Label>
+            <Select
+              value={sourceClient ?? ''}
+              onChange={(e) => {
+                setSourceClient(e.target.value ? Number(e.target.value) : null);
+                setSourceLocation(null);
+              }}
+              placeholder="Select…"
+            >
+              {clients.data?.items.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label required>Source location</Label>
+            <Select
+              value={sourceLocation ?? ''}
+              onChange={(e) => setSourceLocation(e.target.value ? Number(e.target.value) : null)}
+              disabled={!sourceClient || locations.isPending}
+              placeholder="Select…"
+            >
+              {locations.data?.items.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </Select>
+          </div>
+        </div>
+
+        {isSameScope && (
+          <p className="text-xs text-warn">Source and target are the same — pick a different scope.</p>
+        )}
+      </div>
+
+      <ModalFooter>
+        <Button variant="ghost" type="button" onClick={onClose}>Close</Button>
+        <Button
+          type="button"
+          loading={m.isPending}
+          disabled={!canCopy}
+          onClick={() => {
+            setErr(null);
+            setResult(null);
+            m.mutate();
+          }}
+        >
+          Copy categories
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 

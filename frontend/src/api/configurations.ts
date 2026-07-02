@@ -204,7 +204,7 @@ export const copyFeedbackCategories = (dto: {
   source: { clientId: number; locationId: number };
   destination: { clientId: number; locationId: number };
 }) =>
-  post<{ status: string }>(
+  post<{ status: string; areasAdded: number; reasonsAdded: number; areas: FeedbackArea[] }>(
     '/configurations/specialities/feedback-categories/copy',
     dto,
   );

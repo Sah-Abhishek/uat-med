@@ -607,9 +607,86 @@ export class ConfigurationsService {
     return { status: 'deleted' };
   }
 
-  copyFeedbackCategories(_body: any) {
-    // TODO: wire to real copy-from-location flow once Phase 3 lands.
-    return { status: 'ok' };
+  /**
+   * Copy feedback categories (audit areas + their reasons) from one Client +
+   * Location scope into another. Purely ADDITIVE and idempotent: it creates any
+   * audit area the destination is missing and adds any reason a destination area
+   * doesn't already have — it never deletes destination areas/reasons or changes
+   * their existing active/hidden toggles. Matching is by name (unique per
+   * location), so built-ins line up automatically and re-running is a no-op.
+   */
+  async copyFeedbackCategories(body: {
+    source?: { clientId?: number; locationId?: number };
+    destination?: { clientId?: number; locationId?: number };
+  }) {
+    const src = this.requireScope(body.source ?? {});
+    const dest = this.requireScope(body.destination ?? {});
+    await this.requireLocation(src.clientId, src.locationId);
+    await this.requireLocation(dest.clientId, dest.locationId);
+
+    // Copying a scope onto itself changes nothing — return its current state.
+    if (src.locationId === dest.locationId) {
+      return { status: 'ok', areasAdded: 0, reasonsAdded: 0, ...(await this.feedbackCategories(dest)) };
+    }
+
+    // Seed built-ins on both sides so their names align before matching.
+    await this.ensureBuiltinAuditAreas(src.locationId);
+    await this.ensureBuiltinAuditAreas(dest.locationId);
+
+    const [srcAreas, srcReasons, destAreas, destReasons] = await Promise.all([
+      this.auditAreasRepo.find({ where: { locationId: src.locationId } }),
+      this.auditReasonsRepo.find({ where: { locationId: src.locationId } }),
+      this.auditAreasRepo.find({ where: { locationId: dest.locationId } }),
+      this.auditReasonsRepo.find({ where: { locationId: dest.locationId } }),
+    ]);
+
+    const srcReasonsByArea = new Map<number, AuditFeedbackReason[]>();
+    for (const r of srcReasons) {
+      const aid = Number(r.auditAreaId);
+      if (!srcReasonsByArea.has(aid)) srcReasonsByArea.set(aid, []);
+      srcReasonsByArea.get(aid)!.push(r);
+    }
+    const destAreaByName = new Map<string, AuditArea>(destAreas.map((a) => [a.name, a]));
+    const destReasonNamesByArea = new Map<number, Set<string>>();
+    for (const r of destReasons) {
+      const aid = Number(r.auditAreaId);
+      if (!destReasonNamesByArea.has(aid)) destReasonNamesByArea.set(aid, new Set());
+      destReasonNamesByArea.get(aid)!.add(r.name);
+    }
+
+    let areasAdded = 0;
+    let reasonsAdded = 0;
+
+    for (const srcArea of srcAreas) {
+      let destArea = destAreaByName.get(srcArea.name);
+      if (!destArea) {
+        // Recreate the missing area faithfully (flags + active state carried over).
+        destArea = await this.auditAreasRepo.save(
+          this.auditAreasRepo.create({
+            locationId: dest.locationId,
+            name: srcArea.name,
+            isBuiltin: srcArea.isBuiltin,
+            isSystem: srcArea.isSystem,
+            isActive: srcArea.isActive,
+          }),
+        );
+        destAreaByName.set(destArea.name, destArea);
+        areasAdded++;
+      }
+
+      const have = destReasonNamesByArea.get(Number(destArea.id)) ?? new Set<string>();
+      const toAdd = (srcReasonsByArea.get(Number(srcArea.id)) ?? []).filter((r) => !have.has(r.name));
+      if (toAdd.length) {
+        await this.auditReasonsRepo.save(
+          toAdd.map((r) =>
+            this.auditReasonsRepo.create({ auditAreaId: destArea!.id, locationId: dest.locationId, name: r.name }),
+          ),
+        );
+        reasonsAdded += toAdd.length;
+      }
+    }
+
+    return { status: 'ok', areasAdded, reasonsAdded, ...(await this.feedbackCategories(dest)) };
   }
 
   /* ── Auditing (DB-backed) ─────────────────────────────── */
