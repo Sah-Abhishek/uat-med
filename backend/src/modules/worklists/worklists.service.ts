@@ -341,6 +341,9 @@ export class WorklistsService {
           if (a.role === 'CODER') {
             c.allocatedCoderId = a.assigneeId;
             c.originalCoderId ??= a.assigneeId;
+            // Fresh coder allocation → LOW priority bucket (+ stamp the date the
+            // priority sweep ages from).
+            c.markCoderAllocated();
             // First-time coder allocation lifts the chart out of "Ready to allocate"
             // into "Ready to code" so the coder can start the timer.
             if (c.milestone === ChartMilestone.READY_TO_ALLOCATE) {

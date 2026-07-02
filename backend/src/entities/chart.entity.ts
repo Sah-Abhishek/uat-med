@@ -56,6 +56,15 @@ export class Chart {
   @Column({ name: 'original_coder_id', type: 'bigint', nullable: true }) originalCoderId?: number;
   @Column({ name: 'original_auditor_id', type: 'bigint', nullable: true }) originalAuditorId?: number;
 
+  // Timestamp of the MOST RECENT coder (re)allocation — re-stamped every time a
+  // coder is assigned via any path (worklist allocate, bulk-modify, self-take).
+  // Drives the auto priority buckets: allocated today → LOW, aged past today
+  // without coding progress → MEDIUM (see ChartPriorityService). Distinct from
+  // the response-only `coderAllocatedAt`, which is the FIRST allocation and is
+  // derived from chart_allocations for the "Date of Coder Allocation" column.
+  @Column({ name: 'last_coder_allocated_at', type: 'timestamptz', nullable: true }) @Index()
+  lastCoderAllocatedAt?: Date | null;
+
   @Column({ name: 'primary_diagnosis', type: 'varchar', length: 16, nullable: true }) primaryDiagnosis?: string;
   @Column({ name: 'secondary_diagnoses', type: 'jsonb', nullable: true }) secondaryDiagnoses?: string[];
   @Column({ type: 'jsonb', nullable: true }) procedures?: Array<{ code: string; modifier?: string }>;
@@ -101,6 +110,29 @@ export class Chart {
     if (this.chartStatus !== next) {
       this.chartStatus = next;
       this.chartStatusChangedAt = new Date();
+    }
+  }
+
+  /**
+   * Record a fresh coder (re)allocation: stamp `lastCoderAllocatedAt` and drop
+   * the chart into the LOW priority bucket. Elevated/terminal buckets win — a
+   * chart already HIGH (has auditor feedback), CRITICAL (manual), or FINALIZED
+   * ("Done") keeps its priority. Authoritative rules live in ChartPriorityService.
+   */
+  markCoderAllocated(when: Date = new Date()): void {
+    this.lastCoderAllocatedAt = when;
+    if (this.priority === Priority.MEDIUM || this.priority === Priority.LOW) {
+      this.priority = Priority.LOW;
+    }
+  }
+
+  /**
+   * Record that an auditor left feedback: move the chart into the HIGH priority
+   * bucket unless it's CRITICAL (outranks HIGH) or FINALIZED (terminal).
+   */
+  markAuditorFeedback(): void {
+    if (this.priority !== Priority.CRITICAL && this.priority !== Priority.FINALIZED) {
+      this.priority = Priority.HIGH;
     }
   }
 }

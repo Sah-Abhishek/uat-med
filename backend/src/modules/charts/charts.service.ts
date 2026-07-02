@@ -945,13 +945,14 @@ async update(id: number, dto: UpdateChartDto) {
     const updatedCharts = await this.charts.findBy({ id: In(dto.chartIds) });
     if (updatedCharts.length === 0) return { updated: 0 };
     for (const c of updatedCharts) {
-      if (dto.priority) c.priority = dto.priority as Priority;
       // serviceLineId is explicitly nullable: undefined = leave as-is, null =
       // clear, number = set. So check `!== undefined`, not truthiness.
       if (dto.serviceLineId !== undefined) c.serviceLineId = dto.serviceLineId;
       if (dto.allocation && dto.allocation.action !== 'NONE') {
         if (dto.allocation.action === 'ALLOCATE_CODING' && dto.allocation.assigneeId) {
           c.allocatedCoderId = dto.allocation.assigneeId;
+          // Fresh coder allocation → LOW priority bucket (mirrors worklist-allocate).
+          c.markCoderAllocated();
           // First coder allocation lifts the chart out of "Ready to allocate"
           // into the coding queue (mirrors the worklist-allocate path).
           if (c.milestone === ChartMilestone.READY_TO_ALLOCATE) c.setMilestone(ChartMilestone.READY_TO_CODE);
@@ -962,8 +963,14 @@ async update(id: number, dto: UpdateChartDto) {
           // queue. Only from CODING_DONE — coding must complete before audit.
           if (c.milestone === ChartMilestone.CODING_DONE) c.setMilestone(ChartMilestone.READY_TO_AUDIT);
         }
-        if (dto.allocation.action === 'REALLOCATE_TO_ORIGINAL_CODER') c.allocatedCoderId = c.originalCoderId ?? c.allocatedCoderId;
+        if (dto.allocation.action === 'REALLOCATE_TO_ORIGINAL_CODER') {
+          c.allocatedCoderId = c.originalCoderId ?? c.allocatedCoderId;
+          c.markCoderAllocated();
+        }
       }
+      // Applied last so an explicit bulk priority change wins over the auto-LOW
+      // that a coder allocation in the same request would otherwise set.
+      if (dto.priority) c.priority = dto.priority as Priority;
     }
     await this.charts.save(updatedCharts);
     return { updated: updatedCharts.length };
@@ -1003,6 +1010,8 @@ async update(id: number, dto: UpdateChartDto) {
       // auditor slot on a finished chart moves CODING_DONE → READY_TO_AUDIT.
       const setsCoder = user.role !== Role.AUDITOR; // coder / teamlead / manager
       const setsAuditor = user.role !== Role.CODER; // auditor / teamlead / manager
+      // Taking the coder slot is a fresh coder allocation → LOW priority bucket.
+      if (setsCoder) c.markCoderAllocated();
       if (setsCoder && c.milestone === ChartMilestone.READY_TO_ALLOCATE) {
         c.setMilestone(ChartMilestone.READY_TO_CODE);
       }
@@ -1133,6 +1142,10 @@ async update(id: number, dto: UpdateChartDto) {
     const chart = await this.charts.findOne({ where: { id: chartId } });
     if (!chart) throw new NotFoundException();
     const f = await this.feedbacks.save(this.feedbacks.create({ chartId, auditorId, ...dto }));
+    // Auditor feedback bumps the chart into the HIGH priority bucket (unless
+    // it's CRITICAL or FINALIZED). The priority sweep enforces the same rule.
+    chart.markAuditorFeedback();
+    await this.charts.save(chart);
     return { id: f.id };
   }
 
