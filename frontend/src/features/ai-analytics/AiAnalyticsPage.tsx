@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Area,
@@ -23,7 +23,6 @@ import {
   BarChart3,
   Building2,
   CheckCircle2,
-  ChevronDown,
   ChevronsUpDown,
   Clock,
   Download,
@@ -154,27 +153,25 @@ export function AiAnalyticsPage() {
     placeholderData: (prev) => prev,
   });
 
-  // ── Encounter export (Today / 7d / month) ──
-  // Pulls the full per-encounter list for the chosen window (same Client /
-  // Location scope + date window the breakdown uses) and downloads it as CSV.
-  // `exporting` holds the range currently being fetched so the button can show
-  // a spinner and block a second concurrent export.
-  const [exporting, setExporting] = useState<BreakdownRange | null>(null);
+  // ── Encounter export (custom date range) ──
+  // Pulls the full per-encounter list for a user-picked [from,to] window (same
+  // Client / Location scope) and downloads it as an XLSX. `exporting` blocks a
+  // second concurrent export and drives the button spinner.
+  const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState<{ message: string; variant: 'success' | 'danger' | 'warn' } | null>(null);
 
-  const handleExport = async (r: BreakdownRange) => {
+  const handleExport = async (range: { from: string; to: string }) => {
     if (exporting) return;
-    setExporting(r);
+    setExporting(true);
     try {
-      const { from, to } = rangeWindow(r);
       const params: QaFilters = {
         ...(scopeClientId != null ? { clientId: scopeClientId } : {}),
         ...(scopeLocationId != null ? { locationId: scopeLocationId } : {}),
-        from,
-        to,
+        from: range.from,
+        to: range.to,
       };
-      const count = await downloadQaEncountersXlsx(params, `ai-encounters-${r}`);
-      const label = RANGE_LABEL[r].toLowerCase();
+      const count = await downloadQaEncountersXlsx(params, `ai-encounters-${range.from}_to_${range.to}`);
+      const label = `${range.from} → ${range.to}`;
       setToast({
         message:
           count == null
@@ -188,7 +185,7 @@ export function AiAnalyticsPage() {
       console.error('Encounter export failed', err);
       setToast({ message: 'Export failed. Please try again.', variant: 'danger' });
     } finally {
-      setExporting(null);
+      setExporting(false);
     }
   };
 
@@ -1060,8 +1057,8 @@ function ActivityBreakdownCard({
   fetching: boolean;
   range: BreakdownRange;
   onRangeChange: (r: BreakdownRange) => void;
-  onExport: (r: BreakdownRange) => void;
-  exporting: BreakdownRange | null;
+  onExport: (range: { from: string; to: string }) => void;
+  exporting: boolean;
 }) {
   const [sortBy, setSortBy] = useState<BreakdownSortKey>('decisions');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -1125,7 +1122,7 @@ function ActivityBreakdownCard({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <BreakdownRangeToggle value={range} onChange={onRangeChange} />
-          <ExportMenu onExport={onExport} exporting={exporting} />
+          <ExportControl onExport={onExport} exporting={exporting} />
         </div>
       </div>
 
@@ -1278,67 +1275,46 @@ function BreakdownRangeToggle({ value, onChange }: { value: BreakdownRange; onCh
 }
 
 /**
- * "Export ▾" dropdown for the activity breakdown. Each item downloads the full
- * per-encounter CSV for that window (Today / Last 7 days / This month),
- * independent of which range the table is currently showing. Closes on
- * outside-click; the whole control is disabled while an export is in flight.
+ * Custom-range export for the activity breakdown. Pick any [from,to] window in
+ * the date picker, then hit Export to download the full per-encounter XLSX for
+ * that window — independent of which range the table is showing. Defaults to the
+ * last 7 days so it's ready to use; the button is disabled until a full range is
+ * chosen and while an export is in flight.
  */
-function ExportMenu({
+function ExportControl({
   onExport,
   exporting,
 }: {
-  onExport: (r: BreakdownRange) => void;
-  exporting: BreakdownRange | null;
+  onExport: (range: { from: string; to: string }) => void;
+  exporting: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const busy = exporting != null;
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const [range, setRange] = useState<{ from: string | null; to: string | null }>(() => ({
+    from: format(subDays(new Date(), 6), 'yyyy-MM-dd'),
+    to: today,
+  }));
+  const canExport = !!range.from && !!range.to && !exporting;
 
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div className="flex items-center gap-2 shrink-0">
+      <RangeDatePicker
+        value={range}
+        onChange={setRange}
+        placeholder="Pick dates…"
+        max={today}
+        className="w-[210px]"
+      />
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        disabled={busy}
-        aria-haspopup="menu"
-        aria-expanded={open}
+        onClick={() => {
+          if (range.from && range.to) onExport({ from: range.from, to: range.to });
+        }}
+        disabled={!canExport}
         className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-ink-muted transition hover:text-ink disabled:opacity-60"
       >
-        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+        {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
         Export
-        <ChevronDown className={cn('w-3 h-3 transition', open && 'rotate-180')} />
       </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-1 z-20 min-w-[150px] overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-pop"
-        >
-          {(['today', '7d', 'month'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                onExport(m);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink transition hover:bg-surface-sunken/60"
-            >
-              <Download className="w-3 h-3 text-ink-muted" />
-              {RANGE_LABEL[m]}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
