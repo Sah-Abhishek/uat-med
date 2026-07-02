@@ -978,6 +978,12 @@ function FilterModal({
 }) {
   const { register, control, handleSubmit, reset } = useForm<ChartListParams>({ defaultValues: value });
 
+  // Hide the "Allocated user" filter from the coder profile: a CODER is already
+  // backend-restricted to their own allocated charts, so filtering by another
+  // user is meaningless (and would only ever return nothing) for them.
+  const user = useAuth((s) => s.user)!;
+  const isCoder = user.role === 'CODER';
+
   // Client / Location multi-select filters — moved here from the global header
   // scope so the Charts page filters by them locally. Both are independent
   // multi-selects; Location lists every client's locations (labelled by client,
@@ -1042,7 +1048,7 @@ function FilterModal({
   const users = useQuery({
     queryKey: ['users', 'filter', userSearch],
     queryFn: () => listUsers({ pageSize: 50, search: userSearch || undefined }),
-    enabled: open,
+    enabled: open && !isCoder,
   });
 
   // Worklists for the filter dropdown — show the worklist NUMBER (the
@@ -1159,28 +1165,30 @@ function FilterModal({
               )}
             />
           </div>
-          <div>
-            <Label>Allocated user</Label>
-            <Controller
-              control={control}
-              name="allocatedUserId"
-              render={({ field }) => (
-                <FancyMultiSelect
-                  searchable
-                  onSearch={setUserSearch}
-                  loading={users.isFetching}
-                  searchPlaceholder="Search users…"
-                  placeholder="Any user"
-                  value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
-                  options={(users.data?.items ?? []).map((u) => ({
-                    value: String(u.id),
-                    label: u.fullName,
-                  }))}
-                />
-              )}
-            />
-          </div>
+          {!isCoder && (
+            <div>
+              <Label>Allocated user</Label>
+              <Controller
+                control={control}
+                name="allocatedUserId"
+                render={({ field }) => (
+                  <FancyMultiSelect
+                    searchable
+                    onSearch={setUserSearch}
+                    loading={users.isFetching}
+                    searchPlaceholder="Search users…"
+                    placeholder="Any user"
+                    value={arr(field.value)}
+                    onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                    options={(users.data?.items ?? []).map((u) => ({
+                      value: String(u.id),
+                      label: u.fullName,
+                    }))}
+                  />
+                )}
+              />
+            </div>
+          )}
           <div>
             <Label>Primary Speciality</Label>
             <Controller
