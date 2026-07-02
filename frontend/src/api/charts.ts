@@ -69,8 +69,10 @@ export interface ChartListParams {
 export const listCharts = (params: ChartListParams = {}) =>
   get<Paginated<Chart>>('/charts', params);
 
+// Accepts the same filter params as the grid so the priority-tab counts reflect
+// the applied filters (page / pageSize / sort / priority are ignored server-side).
 export const getChartsSummary = (
-  params: { clientId?: number | number[]; locationId?: number | number[] } = {},
+  params: ChartListParams = {},
 ) => get<ChartSummary>('/charts/summary', params);
 
 /* ── Detail / update ────────────────────────────────────── */

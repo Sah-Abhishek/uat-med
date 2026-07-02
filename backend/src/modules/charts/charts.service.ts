@@ -155,24 +155,14 @@ export class ChartsService {
     return typeof eid === 'string' && eid.trim() ? eid : null;
   }
 
-  async list(q: QueryChartsDto, user: AuthenticatedUser) {
-    const qb = this.charts.createQueryBuilder('c')
-      .leftJoinAndSelect('c.worklist', 'worklist')
-      .leftJoinAndSelect('worklist.client', 'client')
-      .leftJoinAndSelect('worklist.location', 'location')
-      .leftJoinAndSelect('worklist.primarySpeciality', 'primarySpeciality')
-      .leftJoinAndSelect('worklist.subSpeciality', 'subSpeciality')
-      .leftJoinAndSelect('worklist.process', 'process')
-      .leftJoinAndSelect('c.serviceLine', 'serviceLine');
-
-    // Role-scoped visibility: coders see only their own queue. Auditors — like
-    // team-leads / managers — see every chart and self-allocate one to work on
-    // it (the startTimer guard still enforces allocation before timing).
-    if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
-
-    // Hide charts orphaned by a soft-deleted worklist (see helper).
-    this.excludeOrphanedCharts(qb);
-
+  /**
+   * Apply the Charts-grid filter predicates to a query builder. Shared by
+   * list() and summary() so the priority-tab counts reflect exactly the same
+   * filtered set the grid shows. Assumes `worklist` (and, for the name-based
+   * sub-speciality filter, `subSpeciality`) are already joined under those
+   * aliases, and that role/orphan scoping has been applied by the caller.
+   */
+  private applyChartFilters(qb: SelectQueryBuilder<Chart>, q: QueryChartsDto): SelectQueryBuilder<Chart> {
     if (q.priority) qb.andWhere('c.priority = :p', { p: q.priority });
     if (q.worklistId?.length) qb.andWhere('c.worklist_id IN (:...w)', { w: q.worklistId });
     if (q.serialFrom) qb.andWhere('c.serial_no >= :sf', { sf: q.serialFrom });
@@ -211,6 +201,28 @@ export class ChartsService {
     // the whole "to" day regardless of the stored timestamp's time-of-day.
     if (q.codingCompletedFrom) qb.andWhere('c.coding_completed_at::date >= :ccf', { ccf: q.codingCompletedFrom });
     if (q.codingCompletedTo) qb.andWhere('c.coding_completed_at::date <= :cct', { cct: q.codingCompletedTo });
+    return qb;
+  }
+
+  async list(q: QueryChartsDto, user: AuthenticatedUser) {
+    const qb = this.charts.createQueryBuilder('c')
+      .leftJoinAndSelect('c.worklist', 'worklist')
+      .leftJoinAndSelect('worklist.client', 'client')
+      .leftJoinAndSelect('worklist.location', 'location')
+      .leftJoinAndSelect('worklist.primarySpeciality', 'primarySpeciality')
+      .leftJoinAndSelect('worklist.subSpeciality', 'subSpeciality')
+      .leftJoinAndSelect('worklist.process', 'process')
+      .leftJoinAndSelect('c.serviceLine', 'serviceLine');
+
+    // Role-scoped visibility: coders see only their own queue. Auditors — like
+    // team-leads / managers — see every chart and self-allocate one to work on
+    // it (the startTimer guard still enforces allocation before timing).
+    if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
+
+    // Hide charts orphaned by a soft-deleted worklist (see helper).
+    this.excludeOrphanedCharts(qb);
+
+    this.applyChartFilters(qb, q);
 
     this.applySort(qb, q.sortBy, q.sortDir);
     qb.skip((q.page - 1) * q.pageSize).take(q.pageSize);
@@ -298,7 +310,7 @@ export class ChartsService {
 
   async summary(
     user: AuthenticatedUser,
-    q: { clientId?: number | number[]; locationId?: number | number[] } = {},
+    q: QueryChartsDto = {} as QueryChartsDto,
   ) {
     // Query params arrive as string / string[] / number — normalize to number[].
     const toNums = (v: unknown): number[] =>
@@ -324,8 +336,20 @@ export class ChartsService {
       if (lids.length) qb.andWhere('ws.location_id IN (:...lids)', { lids });
     }
 
-    const priorityRows = await qb.clone()
+    // Priority-tab counts must reflect the SAME filtered set the grid shows, so
+    // they run over a fully-filtered query (all grid filters via the shared
+    // helper) — not the client/location-only base `qb` the tiles use. The
+    // `priority` filter (the active tab) is deliberately dropped so every
+    // bucket's count is visible regardless of which tab is selected.
+    const priorityQb = this.charts.createQueryBuilder('c')
+      .leftJoin('c.worklist', 'worklist')
+      .leftJoin('worklist.subSpeciality', 'subSpeciality');
+    if (user.role === Role.CODER) priorityQb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
+    this.excludeOrphanedCharts(priorityQb);
+    this.applyChartFilters(priorityQb, { ...q, priority: undefined });
+    const priorityRows = await priorityQb
       .select('c.priority', 'priority').addSelect('COUNT(*)', 'count').groupBy('c.priority').getRawMany();
+
     const milestoneRows = await qb.clone()
       .select('c.milestone', 'milestone').addSelect('COUNT(*)', 'count').groupBy('c.milestone').getRawMany();
 
