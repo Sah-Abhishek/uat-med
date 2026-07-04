@@ -27,6 +27,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { CoderRulesModule } from './modules/coder-rules/coder-rules.module';
 import { IcdCodesModule } from './modules/icd-codes/icd-codes.module';
 import { ReferenceCodesModule } from './modules/reference-codes/reference-codes.module';
+import { EncountersModule } from './modules/encounters/encounters.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { ReferenceCodesModule } from './modules/reference-codes/reference-codes.
     BillingModule,
     IcdCodesModule,
     ReferenceCodesModule,
+    EncountersModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
