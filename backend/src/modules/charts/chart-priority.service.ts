@@ -17,8 +17,10 @@ const BOOT_DELAY_MS = 20_000;
  * Keeps the auto-managed priority buckets (LOW / MEDIUM / HIGH) in sync with
  * the rules the business defined:
  *
- *   HIGH   — the chart has ANY auditor feedback (chart_feedback row). Wins over
- *            everything below.
+ *   HIGH   — the chart has ANY auditor feedback: a chart_feedback row (the
+ *            Conversation Log channel) or an unresolved per-code DISAGREE
+ *            audit (chart_code_audits — cleared when a re-audit flips the
+ *            verdict to AGREE). Wins over everything below.
  *   LOW    — freshly coder-allocated today (last_coder_allocated_at = today).
  *   MEDIUM — allocated before today AND never worked on, i.e. the milestone
  *            hasn't advanced past READY_TO_CODE. This is the "not worked on
@@ -90,6 +92,8 @@ export class ChartPriorityService implements OnModuleInit, OnModuleDestroy {
             c2.id,
             CASE
               WHEN EXISTS (SELECT 1 FROM chart_feedback f WHERE f.chart_id = c2.id)
+                   OR EXISTS (SELECT 1 FROM chart_code_audits a
+                              WHERE a.chart_id = c2.id AND a.verdict = 'DISAGREE')
                 THEN 'HIGH'
               WHEN c2.last_coder_allocated_at::date = CURRENT_DATE
                 THEN 'LOW'

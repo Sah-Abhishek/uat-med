@@ -636,13 +636,24 @@ async update(id: number, dto: UpdateChartDto) {
   // tabs (Critical / High / Medium / Low) clean as charts get processed.
   // We only auto-advance to FINALIZED — never auto-revert — so a user who
   // intentionally re-prioritises a finished chart isn't fought by the system.
+  // Exception: a HIGH chart with unresolved DISAGREE code audits was handed
+  // back to the coder for rework (see submitCodeAudits) — keep it HIGH so the
+  // auditor's end-of-session save doesn't bury it under "Done". It finalizes
+  // on the first done-milestone save after a re-audit resolves every DISAGREE
+  // to AGREE. CLOSED is fully terminal and always finalizes.
   if (
     (c.milestone === ChartMilestone.CODING_DONE
       || c.milestone === ChartMilestone.AUDIT_DONE
       || c.milestone === ChartMilestone.CLOSED)
     && c.priority !== Priority.FINALIZED
   ) {
-    c.priority = Priority.FINALIZED;
+    const reworkPending =
+      c.priority === Priority.HIGH &&
+      c.milestone !== ChartMilestone.CLOSED &&
+      (await this.codeAudits.count({
+        where: { chartId: Number(c.id), verdict: CodeAuditVerdict.DISAGREE },
+      })) > 0;
+    if (!reworkPending) c.priority = Priority.FINALIZED;
   }
 
   return this.charts.save(c);
@@ -1668,6 +1679,23 @@ async update(id: number, dto: UpdateChartDto) {
       // their draft in the same transaction so a refresh can't resurrect it.
       // (The auditor's draft is a separate per-user row from the coder's.)
       await manager.getRepository(ChartCodeDecisionDraft).delete({ chartId, userId: user.id });
+
+      // Any disagreement sends the chart back to the coder: restore the coder
+      // slot (kept as-is when still held; falls back to the first-ever coder if
+      // a teamlead/manager self-allocate overwrote it or it was cleared) and
+      // bump priority to HIGH so it resurfaces on the coder's queue instead of
+      // staying under "Done". An all-AGREE audit changes nothing — there is no
+      // rework for the coder to do.
+      if (uniqueAudits.some((a) => a.verdict === CodeAuditVerdict.DISAGREE)) {
+        const chartsRepo = manager.getRepository(Chart);
+        const chart = await chartsRepo.findOne({ where: { id: chartId } });
+        if (chart) {
+          chart.allocatedCoderId = chart.allocatedCoderId ?? chart.originalCoderId;
+          chart.markCoderAllocated();
+          chart.markAuditorFeedback();
+          await chartsRepo.save(chart);
+        }
+      }
       return rows;
     });
 

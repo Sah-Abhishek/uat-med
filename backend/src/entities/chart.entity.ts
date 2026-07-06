@@ -128,10 +128,15 @@ export class Chart {
 
   /**
    * Record that an auditor left feedback: move the chart into the HIGH priority
-   * bucket unless it's CRITICAL (outranks HIGH) or FINALIZED (terminal).
+   * bucket unless it's CRITICAL (manual override, outranks HIGH). FINALIZED is
+   * deliberately overridden — by audit time every chart is FINALIZED (stamped
+   * at CODING_DONE), and feedback means the chart needs the coder's attention
+   * again, so it must resurface in the active HIGH bucket, not stay in "Done".
+   * ChartsService.update() re-FINALIZEs on the next done-milestone save only
+   * once no unresolved feedback remains.
    */
   markAuditorFeedback(): void {
-    if (this.priority !== Priority.CRITICAL && this.priority !== Priority.FINALIZED) {
+    if (this.priority !== Priority.CRITICAL) {
       this.priority = Priority.HIGH;
     }
   }

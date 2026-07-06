@@ -310,7 +310,7 @@ export class ChartsController {
   @Post(':id/code-audits')
   @Roles(Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(200)
-  @ApiOperation({ summary: 'Persist auditor audits submitted from the Review & Edit modal. DISAGREE requires a feedback category + note (≥20 chars). Does NOT mutate the coder decisions and is not forwarded to the AI gateway.' })
+  @ApiOperation({ summary: 'Persist auditor audits submitted from the Review & Edit modal. DISAGREE requires a feedback category + note (≥20 chars). Any DISAGREE re-allocates the chart to its coder and bumps priority to HIGH so it resurfaces on their queue. Does NOT mutate the coder decisions and is not forwarded to the AI gateway.' })
   submitCodeAudits(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SubmitCodeAuditsDto,
