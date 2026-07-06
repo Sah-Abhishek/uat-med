@@ -7,6 +7,17 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 
+/** Common dashboard filters: header Client/Location scope + the page's
+ * filter bar (location, primary speciality, worklist, received date, DOS). */
+type DashboardFilterQuery = {
+  clientId?: number;
+  locationId?: number;
+  primarySpecialityId?: number;
+  worklistId?: number;
+  receivedDate?: string;
+  dateOfService?: string;
+};
+
 @ApiTags('Dashboard')
 @ApiBearerAuth('bearerAuth')
 @Controller('dashboard')
@@ -15,31 +26,31 @@ export class DashboardController {
 
   @Get('milestones')
   @ApiOperation({ summary: 'Milestone counters (inProgress / readyToCode / readyToAllocate).' })
-  milestones(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.milestones(q); }
+  milestones(@Query() q: DashboardFilterQuery) { return this.svc.milestones(q); }
 
   @Get('status')
   @ApiOperation({ summary: 'Complete vs. incomplete chart counts.' })
-  status(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.status(q); }
+  status(@Query() q: DashboardFilterQuery) { return this.svc.status(q); }
 
   @Get('unallocated')
   @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Unallocated worklists and charts.' })
-  unallocated(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.unallocated(q); }
+  unallocated(@Query() q: DashboardFilterQuery) { return this.svc.unallocated(q); }
 
   @Get('allocation-stats')
   @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Allocation Statistics — milestone bar, completion / QC / worklist donuts, progress-to-date series.' })
-  allocationStats(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.allocationStats(q); }
+  allocationStats(@Query() q: DashboardFilterQuery) { return this.svc.allocationStats(q); }
 
   @Get('unallocated-volume')
   @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Unallocated Volume — by worklist / speciality / received-date / DOS.' })
-  unallocatedVolume(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.unallocatedVolume(q); }
+  unallocatedVolume(@Query() q: DashboardFilterQuery) { return this.svc.unallocatedVolume(q); }
 
   @Get('productivity')
   @Roles(Role.MANAGER, Role.TEAMLEAD)
   @ApiOperation({ summary: 'Productivity — daily volume, avg coding minutes, rework count.' })
-  productivity(@Query() q: { clientId?: number; locationId?: number }) { return this.svc.productivity(q); }
+  productivity(@Query() q: DashboardFilterQuery) { return this.svc.productivity(q); }
 
   @Get('throughput')
   @Roles(Role.MANAGER, Role.TEAMLEAD)

@@ -14,6 +14,13 @@ const SERIES_DAYS = 14;
 interface FilterQuery {
   clientId?: number;
   locationId?: number;
+  primarySpecialityId?: number;
+  worklistId?: number;
+  /** Worklist received date (YYYY-MM-DD, exact match). */
+  receivedDate?: string;
+  /** Date of service (YYYY-MM-DD) — matches the worklist's DOS range
+   * (date_of_service .. date_of_service_to, single-day when no `to`). */
+  dateOfService?: string;
 }
 
 @Injectable()
@@ -761,18 +768,35 @@ export class DashboardService {
   /* ── Internals ────────────────────────────────────────── */
 
   private scopeCharts<T>(qb: SelectQueryBuilder<T>, q: FilterQuery): SelectQueryBuilder<T> {
-    if (!q.clientId && !q.locationId) return qb;
+    if (q.worklistId) qb.andWhere('c.worklist_id = :wid', { wid: q.worklistId });
+    const needsWorklist =
+      q.clientId || q.locationId || q.primarySpecialityId || q.receivedDate || q.dateOfService;
+    if (!needsWorklist) return qb;
     // Re-use the existing 'w' alias if a join already exists; otherwise add it.
     const hasWorklistJoin = qb.expressionMap.aliases.some(a => a.name === 'w');
     if (!hasWorklistJoin) qb.innerJoin('worklists', 'w', 'w.id = c.worklist_id');
-    if (q.clientId)   qb.andWhere('w.client_id = :cid',   { cid: q.clientId });
-    if (q.locationId) qb.andWhere('w.location_id = :lid', { lid: q.locationId });
-    return qb;
+    return this.applyWorklistFilters(qb, q);
   }
 
   private scopeWorklists<T>(qb: SelectQueryBuilder<T>, q: FilterQuery): SelectQueryBuilder<T> {
+    if (q.worklistId) qb.andWhere('w.id = :wid', { wid: q.worklistId });
+    return this.applyWorklistFilters(qb, q);
+  }
+
+  /** Worklist-level predicates shared by both scoping helpers (alias `w`). */
+  private applyWorklistFilters<T>(qb: SelectQueryBuilder<T>, q: FilterQuery): SelectQueryBuilder<T> {
     if (q.clientId)   qb.andWhere('w.client_id = :cid',   { cid: q.clientId });
     if (q.locationId) qb.andWhere('w.location_id = :lid', { lid: q.locationId });
+    if (q.primarySpecialityId) {
+      qb.andWhere('w.primary_speciality_id = :psid', { psid: q.primarySpecialityId });
+    }
+    if (q.receivedDate) qb.andWhere('w.received_date = :rd', { rd: q.receivedDate });
+    if (q.dateOfService) {
+      qb.andWhere(
+        'w.date_of_service <= :dos AND COALESCE(w.date_of_service_to, w.date_of_service) >= :dos',
+        { dos: q.dateOfService },
+      );
+    }
     return qb;
   }
 }

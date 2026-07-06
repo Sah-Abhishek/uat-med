@@ -12,6 +12,12 @@ import type {
 export interface DashboardFilters {
   clientId?: number;
   locationId?: number;
+  primarySpecialityId?: number;
+  worklistId?: number;
+  /** Worklist received date (YYYY-MM-DD, exact match). */
+  receivedDate?: string;
+  /** Date of service (YYYY-MM-DD) — matches the worklist's DOS range. */
+  dateOfService?: string;
 }
 
 export const getMilestones = (params: DashboardFilters = {}) =>

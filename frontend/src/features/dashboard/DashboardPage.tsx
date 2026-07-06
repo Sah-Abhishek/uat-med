@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   getMilestones,
@@ -7,7 +8,10 @@ import {
   getAllocationStats,
   getUnallocatedVolume,
   getProductivity,
+  type DashboardFilters,
 } from '@/api/dashboard';
+import { listLocations, listPrimarySpecialities } from '@/api/configurations';
+import { listWorklists } from '@/api/worklists';
 import { useAuth } from '@/auth/store';
 import { useScope } from '@/scope/store';
 import { can } from '@/permissions';
@@ -37,16 +41,85 @@ import {
   VerticalBar,
 } from './Charts';
 
+/** The filter bar's fields — applied on top of the header Client/Location
+ * scope when the user hits "Filter". Empty string = not filtering. */
+interface BarFilters {
+  locationId: string;
+  primarySpecialityId: string;
+  worklistId: string;
+  receivedDate: string;
+  dateOfService: string;
+}
+const EMPTY_BAR: BarFilters = {
+  locationId: '',
+  primarySpecialityId: '',
+  worklistId: '',
+  receivedDate: '',
+  dateOfService: '',
+};
+
+/** Merge the header scope with the APPLIED bar filters into query params.
+ * A bar location (scoped to the header client) overrides the header one. */
+function buildFilters(
+  clientId: number | null | undefined,
+  locationId: number | null | undefined,
+  bar: BarFilters,
+): DashboardFilters {
+  return {
+    ...(clientId != null ? { clientId } : {}),
+    ...(locationId != null ? { locationId } : {}),
+    ...(bar.locationId ? { locationId: Number(bar.locationId) } : {}),
+    ...(bar.primarySpecialityId ? { primarySpecialityId: Number(bar.primarySpecialityId) } : {}),
+    ...(bar.worklistId ? { worklistId: Number(bar.worklistId) } : {}),
+    ...(bar.receivedDate ? { receivedDate: bar.receivedDate } : {}),
+    ...(bar.dateOfService ? { dateOfService: bar.dateOfService } : {}),
+  };
+}
+
 export function DashboardPage() {
   const user = useAuth((s) => s.user)!;
   const isTeam = can(user, 'dashboard.team');
   // Global Client / Location scope from the header.
   const clientId = useScope((s) => s.clientId);
   const locationId = useScope((s) => s.locationId);
-  const scope = {
-    ...(clientId != null ? { clientId } : {}),
-    ...(locationId != null ? { locationId } : {}),
-  };
+
+  // Filter bar: `draft` is what the controls show; `applied` is what the
+  // queries use — committed by the Filter button, cleared by Clear.
+  const [draft, setDraft] = useState<BarFilters>(EMPTY_BAR);
+  const [applied, setApplied] = useState<BarFilters>(EMPTY_BAR);
+
+  // A picked location belongs to the header client — drop it when the client
+  // changes so a stale id can't silently filter the new client's data.
+  useEffect(() => {
+    setDraft((d) => (d.locationId ? { ...d, locationId: '' } : d));
+    setApplied((a) => (a.locationId ? { ...a, locationId: '' } : a));
+  }, [clientId]);
+
+  const scope = buildFilters(clientId, locationId, applied);
+
+  // Filter-bar options (team dashboard only).
+  const locations = useQuery({
+    queryKey: ['configurations', 'locations', clientId],
+    queryFn: () => listLocations(clientId!),
+    enabled: isTeam && clientId != null,
+  });
+  const specialities = useQuery({
+    queryKey: ['configurations', 'primary-specialities', 'all'],
+    queryFn: () => listPrimarySpecialities(),
+    enabled: isTeam,
+  });
+  const worklists = useQuery({
+    queryKey: ['worklists', 'dashboard-filter', clientId, locationId],
+    queryFn: () =>
+      listWorklists({
+        pageSize: 200,
+        sortBy: 'receivedDate',
+        sortDir: 'desc',
+        ...(clientId != null ? { clientId } : {}),
+        ...(locationId != null ? { locationId } : {}),
+      }),
+    enabled: isTeam,
+  });
 
   const self = useQuery({
     queryKey: ['dashboard', 'self'],
@@ -54,19 +127,19 @@ export function DashboardPage() {
   });
 
   const milestones = useQuery({
-    queryKey: ['dashboard', 'milestones', clientId, locationId],
+    queryKey: ['dashboard', 'milestones', scope],
     queryFn: () => getMilestones(scope),
     enabled: isTeam,
   });
 
   const status = useQuery({
-    queryKey: ['dashboard', 'status', clientId, locationId],
+    queryKey: ['dashboard', 'status', scope],
     queryFn: () => getStatus(scope),
     enabled: isTeam,
   });
 
   const unallocated = useQuery({
-    queryKey: ['dashboard', 'unallocated', clientId, locationId],
+    queryKey: ['dashboard', 'unallocated', scope],
     queryFn: () => getUnallocated(scope),
     enabled: isTeam,
   });
@@ -179,54 +252,91 @@ export function DashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <div>
               <Label>Location</Label>
-              <Select placeholder="Select...">
-                <option value="">All</option>
+              <Select
+                value={draft.locationId}
+                onChange={(e) => setDraft({ ...draft, locationId: e.target.value })}
+                disabled={clientId == null}
+              >
+                <option value="">
+                  {clientId == null ? 'Select a client in the header first' : 'All'}
+                </option>
+                {(locations.data?.items ?? []).map((l) => (
+                  <option key={l.id} value={String(l.id)}>{l.name}</option>
+                ))}
               </Select>
             </div>
             <div>
               <Label>Primary Speciality</Label>
-              <Select placeholder="Select...">
+              <Select
+                value={draft.primarySpecialityId}
+                onChange={(e) => setDraft({ ...draft, primarySpecialityId: e.target.value })}
+              >
                 <option value="">All</option>
+                {(specialities.data?.items ?? []).map((s) => (
+                  <option key={s.id} value={String(s.id)}>{s.name}</option>
+                ))}
               </Select>
             </div>
             <div>
               <Label>Worklist</Label>
-              <Select placeholder="Select...">
+              <Select
+                value={draft.worklistId}
+                onChange={(e) => setDraft({ ...draft, worklistId: e.target.value })}
+              >
                 <option value="">All</option>
+                {(worklists.data?.items ?? []).map((w) => (
+                  <option key={w.id} value={String(w.id)}>{w.worklistNumber}</option>
+                ))}
               </Select>
             </div>
             <div>
               <Label>Date received</Label>
-              <Input type="date" />
+              <Input
+                type="date"
+                value={draft.receivedDate}
+                onChange={(e) => setDraft({ ...draft, receivedDate: e.target.value })}
+              />
             </div>
             <div>
               <Label>Date of service</Label>
-              <Input type="date" />
+              <Input
+                type="date"
+                value={draft.dateOfService}
+                onChange={(e) => setDraft({ ...draft, dateOfService: e.target.value })}
+              />
             </div>
           </div>
-          <div className="flex justify-end mt-5">
-            <Button leftIcon={<FilterIcon className="w-3.5 h-3.5" />}>Filter</Button>
+          <div className="flex justify-end gap-2 mt-5">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setDraft(EMPTY_BAR);
+                setApplied(EMPTY_BAR);
+              }}
+            >
+              Clear
+            </Button>
+            <Button
+              leftIcon={<FilterIcon className="w-3.5 h-3.5" />}
+              onClick={() => setApplied(draft)}
+            >
+              Filter
+            </Button>
           </div>
         </Card>
       )}
 
       {/* ── Analytics sections ──────────────────────────── */}
-      {isTeam && <AnalyticsPanels />}
+      {isTeam && <AnalyticsPanels filters={scope} />}
     </div>
   );
 }
 
 /* ── Analytics: 3 collapsible cards × N chart tiles each ─ */
 
-function AnalyticsPanels() {
-  // Scope the analytics panels by the global header Client / Location filter.
-  const clientId = useScope((s) => s.clientId);
-  const locationId = useScope((s) => s.locationId);
-  const filters = {
-    ...(clientId != null ? { clientId } : {}),
-    ...(locationId != null ? { locationId } : {}),
-  };
-
+function AnalyticsPanels({ filters }: { filters: DashboardFilters }) {
+  // Scoped by the same header Client/Location + filter-bar params as the
+  // top-of-page tiles (passed down so the whole dashboard filters as one).
   const allocation = useQuery({
     queryKey: ['dashboard', 'allocation-stats', filters],
     queryFn: () => getAllocationStats(filters),
