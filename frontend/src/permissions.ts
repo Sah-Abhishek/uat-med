@@ -19,7 +19,7 @@ export const PERMISSIONS = {
   'config.view': ['TEAMLEAD', 'MANAGER'],
   'config.edit': ['TEAMLEAD', 'MANAGER'],
   'dashboard.team': ['TEAMLEAD', 'MANAGER'],
-  'reports.run': ['TEAMLEAD', 'MANAGER'],
+  'reports.run': ['AUDITOR', 'TEAMLEAD', 'MANAGER'],
   'qa.view': ['TEAMLEAD', 'MANAGER'],
   'coderRules.manage': ['TEAMLEAD', 'MANAGER'],
   'admin.codeDecisions.view': ['TEAMLEAD', 'MANAGER'],

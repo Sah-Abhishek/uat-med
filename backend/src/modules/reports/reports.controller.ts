@@ -25,7 +25,7 @@ import { Role } from '../../common/enums/roles.enum';
 
 @ApiTags('Reports')
 @ApiBearerAuth('bearerAuth')
-@Roles(Role.TEAMLEAD, Role.MANAGER)
+@Roles(Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly svc: ReportsService) {}
