@@ -299,7 +299,9 @@ export class ChartsController {
    * coder decision, layered on top of the (untouched) coder decisions. */
 
   @Get(':id/code-audits')
-  @Roles(Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
+  // CODER included so coders can see the auditor's per-code feedback on their
+  // own work once the audit is submitted (read-only; POST stays auditor-side).
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
   @ApiOperation({ summary: "Existing auditor audits (Agree/Disagree per code) for a chart." })
   listCodeAudits(@Param('id', ParseIntPipe) id: number) {
     return this.svc.listCodeAudits(id);

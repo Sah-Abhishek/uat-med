@@ -1000,7 +1000,11 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
             hasUploadedDocs={uploadedDocs.length > 0 || !!aiPrediction}
             timerRunning={timerRunning}
             onReview={() => setReviewOpen(true)}
-            readOnly={qaReadOnly}
+            // No running timer → the modal opens as a read-only view (see
+            // ReviewEditModal props below), so the button switches to its view
+            // affordance instead of disabling. Lets a coder read the auditor's
+            // per-code feedback without re-allocating and starting a timer.
+            readOnly={qaReadOnly || !timerRunning}
           />
           <DocumentationGaps prediction={aiPrediction} />
           <PhysicianQueries prediction={aiPrediction} />
@@ -1032,9 +1036,12 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         chartId={String(chart.id)}
         clientId={worklistQ.data?.clientId}
         locationId={worklistQ.data?.locationId}
-        readOnly={qaReadOnly}
+        // Editing (coder board or audit layer) always requires a running
+        // timer; without one the modal is a read-only view. This is what lets
+        // a coder open an audited chart and see the auditor's feedback.
+        readOnly={qaReadOnly || !timerRunning}
         liveDraftUserId={liveDraftUserId}
-        audit={isAuditMode}
+        audit={isAuditMode && timerRunning}
         onSubmitted={() => setSaveToastOpen(true)}
       />
 

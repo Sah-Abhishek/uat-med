@@ -37,6 +37,7 @@ import {
   submitCodeDecisions,
   type CodeAuditDraftEntry,
   type CodeAuditInput,
+  type CodeAuditRecord,
   type CodeDecisionDraftEntry,
   type CodeDecisionDraftPayload,
   type CodeDecisionInput,
@@ -562,14 +563,16 @@ export function ReviewEditModal({
     setAddedItems((prev) => (prev.length > 0 ? prev : seededAdds));
   }, [open, decisionsQ.data, aiItems]);
 
-  /* ── Audit layer (audit mode only) ─────────────────────────────────────
+  /* ── Audit layer ───────────────────────────────────────────────────────
    * The auditor's Agree/Disagree judgments are kept in `auditState`, parallel
    * to the coder's (locked) `state`. Seeded from previously-submitted audits,
-   * then overlaid by the auditor's own in-progress draft (see draft restore). */
+   * then overlaid by the auditor's own in-progress draft (see draft restore).
+   * Fetched in EVERY mode (not just audit): outside audit mode the submitted
+   * audits render read-only, so the coder sees the auditor's feedback. */
   const auditsQ = useQuery({
     queryKey: ['chart-code-audits', chartId],
     queryFn: () => listCodeAudits(chartId),
-    enabled: open && audit && !!chartId,
+    enabled: open && !!chartId,
   });
   // Seed auditState from previously-submitted audits. Matched to board items by
   // (codeType, code) — the AI/board code, the SAME key chart_code_decisions uses
@@ -614,6 +617,24 @@ export function ReviewEditModal({
       return next;
     });
   }, [open, audit, items]);
+
+  // Submitted audits keyed by board-item key. Used OUTSIDE audit mode to show
+  // the auditor's verdict + feedback to the coder/QA viewer (read-only).
+  // Matched by (codeType, code) — the same identity the audit rows are stored
+  // under — mirroring the auditState seeding above.
+  const submittedAuditByKey = useMemo(() => {
+    const map = new Map<string, CodeAuditRecord>();
+    const rows = auditsQ.data?.items;
+    if (!rows?.length) return map;
+    const byKey = new Map(rows.map((r) => [`${r.codeType}|${normalizeCode(r.codeValue)}`, r]));
+    for (const it of items) {
+      const codeType = categoryToCodeType(it.category);
+      if (!codeType) continue;
+      const r = byKey.get(`${codeType}|${normalizeCode(it.code)}`);
+      if (r) map.set(it.key, r);
+    }
+    return map;
+  }, [auditsQ.data, items]);
 
   /* ── Draft persistence ─────────────────────────────────────────────────
    * The board's in-progress state autosaves to the server (per chart, per
@@ -1255,7 +1276,7 @@ export function ReviewEditModal({
             </span>
             {readOnly ? (
               <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-info/15 border border-info/30 text-info text-xs font-mono">
-                QA View
+                View Only
               </span>
             ) : (
               <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/10 text-warn text-xs font-mono">
@@ -1436,6 +1457,7 @@ export function ReviewEditModal({
             readOnly={coderControlsLocked}
             audit={audit}
             auditState={auditState}
+            submittedAudits={submittedAuditByKey}
             selectedAuditSt={selectedAuditSt}
             updateAudit={updateAudit}
             auditFeedbackOptionsFor={auditFeedbackOptionsFor}
@@ -2122,6 +2144,7 @@ function CodesPane({
   readOnly,
   audit,
   auditState,
+  submittedAudits,
   selectedAuditSt,
   updateAudit,
   auditFeedbackOptionsFor,
@@ -2143,6 +2166,7 @@ function CodesPane({
   readOnly: boolean;
   audit: boolean;
   auditState: Record<string, AuditState>;
+  submittedAudits: Map<string, CodeAuditRecord>;
   selectedAuditSt: AuditState | undefined;
   updateAudit: (key: string, patch: Partial<AuditState>) => void;
   auditFeedbackOptionsFor: (category: Category) => string[];
@@ -2205,10 +2229,11 @@ function CodesPane({
               setSelectedIdx={setSelectedIdx}
               audit={audit}
               auditState={auditState}
+              submittedAudits={submittedAudits}
             />
           ))
         )}
-        {groups.length > 0 && <Legend audit={audit} />}
+        {groups.length > 0 && <Legend audit={audit || submittedAudits.size > 0} />}
       </div>
 
       {/* Selected detail card */}
@@ -2226,6 +2251,7 @@ function CodesPane({
             readOnly={readOnly}
             audit={audit}
             auditSt={selectedAuditSt}
+            submittedAudit={submittedAudits.get(selected.key)}
             onUpdateAudit={(p) => updateAudit(selected.key, p)}
             auditFeedbackOptions={auditFeedbackOptionsFor(selected.category)}
             onChangeCategory={(cat) => onChangeCategory(selected.key, cat)}
@@ -2271,6 +2297,7 @@ function CategoryRow({
   setSelectedIdx,
   audit,
   auditState,
+  submittedAudits,
 }: {
   category: Category;
   list: CodeItem[];
@@ -2280,6 +2307,7 @@ function CategoryRow({
   setSelectedIdx: (i: number) => void;
   audit: boolean;
   auditState: Record<string, AuditState>;
+  submittedAudits: Map<string, CodeAuditRecord>;
 }) {
   const dot = CATEGORY_DOT[category];
   return (
@@ -2299,7 +2327,14 @@ function CategoryRow({
           // Audit mode keeps the coder's verdict color on the chip and adds a
           // small dot for the auditor's progress (agree=green, disagree=red,
           // pending=hollow) so the auditor can see what's left at a glance.
-          const av = audit ? (auditState[it.key]?.verdict ?? 'pending') : null;
+          // Outside audit mode the dot shows the SUBMITTED audit verdict, so
+          // the coder spots agreed/disagreed codes at a glance too.
+          const submitted = submittedAudits.get(it.key);
+          const av = audit
+            ? (auditState[it.key]?.verdict ?? 'pending')
+            : submitted
+              ? auditVerdictToLocal(submitted.verdict)
+              : null;
           return (
             <button
               key={it.key}
@@ -2395,6 +2430,9 @@ interface SelectedCardProps {
   readOnly: boolean;
   audit: boolean;
   auditSt: AuditState | undefined;
+  /** Submitted auditor verdict for this code — rendered read-only in every
+   * non-audit mode so the coder sees the auditor's feedback. */
+  submittedAudit: CodeAuditRecord | undefined;
   onUpdateAudit: (patch: Partial<AuditState>) => void;
   auditFeedbackOptions: string[];
   onChangeCategory: (category: Category) => void;
@@ -2415,18 +2453,36 @@ function SelectedCard(props: SelectedCardProps) {
       />
     );
   }
-  if (props.readOnly) return <ReadOnlyCard item={props.item} st={props.st} />;
-  if (props.st.decision === 'added') {
+  const auditFeedback = props.submittedAudit ? (
+    <AuditFeedbackDisplay record={props.submittedAudit} />
+  ) : null;
+  if (props.readOnly) {
     return (
-      <AddedCard
-        item={props.item}
-        st={props.st}
-        update={props.update}
-        onRemove={props.onRemove}
-      />
+      <div className="space-y-4">
+        <ReadOnlyCard item={props.item} st={props.st} />
+        {auditFeedback}
+      </div>
     );
   }
-  return <DecisionCard {...props} />;
+  if (props.st.decision === 'added') {
+    return (
+      <div className="space-y-4">
+        <AddedCard
+          item={props.item}
+          st={props.st}
+          update={props.update}
+          onRemove={props.onRemove}
+        />
+        {auditFeedback}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <DecisionCard {...props} />
+      {auditFeedback}
+    </div>
+  );
 }
 
 const CARD_SHELL = 'rounded-xl border border-line bg-surface-sunken/30 p-4';
@@ -3017,6 +3073,58 @@ function ReadOnlyCard({ item, st }: { item: CodeItem; st: CodeState }) {
             hideDropdown={st.decision === 'added'}
           />
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only display of the auditor's SUBMITTED verdict + feedback for a code.
+ * Rendered under the coder/QA cards (never in audit mode, where AuditCard owns
+ * the editable audit layer) so the coder can see the auditor's feedback. */
+function AuditFeedbackDisplay({ record }: { record: CodeAuditRecord }) {
+  const agree = record.verdict === 'AGREE';
+  return (
+    <div className="rounded-xl border border-warn/30 bg-warn-soft/20 p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-wide font-semibold text-warn">
+          Auditor Feedback
+        </p>
+        <span className="text-[10px] text-ink-muted">
+          {new Date(record.auditedAt).toLocaleDateString()}
+        </span>
+      </div>
+      <div
+        className={cn(
+          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill border text-xs font-semibold',
+          agree
+            ? 'bg-success-soft/60 text-success border-success/30'
+            : 'bg-danger-soft/60 text-danger border-danger/30',
+        )}
+      >
+        {agree ? <ThumbsUp className="w-3.5 h-3.5" /> : <ThumbsDown className="w-3.5 h-3.5" />}
+        {agree ? 'Auditor agreed' : 'Auditor disagreed'}
+      </div>
+      {!agree && (
+        <>
+          {record.feedbackCategory && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
+                Feedback Category
+              </p>
+              <div className="text-sm text-ink px-3 py-2 rounded-lg border border-line bg-surface-sunken/40">
+                {record.feedbackCategory}
+              </div>
+            </div>
+          )}
+          <div>
+            <p className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted mb-1">
+              Feedback
+            </p>
+            <div className="text-sm text-ink px-3 py-2 rounded-lg border border-line bg-surface-sunken/40 whitespace-pre-wrap leading-relaxed">
+              {record.feedbackText || <span className="text-ink-muted">— No note recorded —</span>}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
