@@ -975,7 +975,7 @@ function FilterModal({
   value: ChartListParams;
   onApply: (v: ChartListParams) => void;
 }) {
-  const { register, control, handleSubmit, reset } = useForm<ChartListParams>({ defaultValues: value });
+  const { register, control, handleSubmit, reset, watch, setValue } = useForm<ChartListParams>({ defaultValues: value });
 
   // Hide the "Allocated user" filter from the coder profile: a CODER is already
   // backend-restricted to their own allocated charts, so filtering by another
@@ -984,17 +984,26 @@ function FilterModal({
   const isCoder = user.role === 'CODER';
 
   // Client / Location multi-select filters — moved here from the global header
-  // scope so the Charts page filters by them locally. Both are independent
-  // multi-selects; Location lists every client's locations (labelled by client,
-  // since names can repeat) so it works regardless of which clients are picked.
+  // scope so the Charts page filters by them locally. Location depends on
+  // Client: the picker is disabled until at least one client is chosen and
+  // only lists the chosen clients' locations (suffixed by client name when
+  // more than one client is selected, since location names can repeat).
   const clients = useQuery({
     queryKey: ['configurations', 'clients'],
     queryFn: () => listClients(),
     enabled: open,
   });
   const clientList = clients.data?.items ?? [];
+  const rawClientSel = watch('clientId');
+  const selectedClientIds =
+    rawClientSel === undefined || rawClientSel === null
+      ? []
+      : Array.isArray(rawClientSel)
+      ? rawClientSel.map(String)
+      : [String(rawClientSel)];
+  const selectedClients = clientList.filter((c) => selectedClientIds.includes(String(c.id)));
   const locationQueries = useQueries({
-    queries: clientList.map((c) => ({
+    queries: selectedClients.map((c) => ({
       queryKey: ['configurations', 'locations', c.id],
       queryFn: () => listLocations(c.id),
       enabled: open,
@@ -1004,13 +1013,42 @@ function FilterModal({
   const locationOptions = (() => {
     const seen = new Map<string, { value: string; label: string }>();
     locationQueries.forEach((q, i) => {
-      const client = clientList[i];
+      const client = selectedClients[i];
       (q.data?.items ?? []).forEach((l) => {
-        seen.set(String(l.id), { value: String(l.id), label: client ? `${l.name} · ${client.name}` : l.name });
+        seen.set(String(l.id), {
+          value: String(l.id),
+          label: selectedClients.length > 1 && client ? `${l.name} · ${client.name}` : l.name,
+        });
       });
     });
     return Array.from(seen.values());
   })();
+
+  // Keep the location selection consistent with the client selection: no
+  // client → no location filter; deselecting a client drops its locations
+  // from the form value (only once the remaining lists have loaded, so a
+  // slow fetch can't wipe a still-valid pick).
+  const rawLocSel = watch('locationId');
+  const selectedLocationIds =
+    rawLocSel === undefined || rawLocSel === null
+      ? []
+      : Array.isArray(rawLocSel)
+      ? rawLocSel.map(String)
+      : [String(rawLocSel)];
+  useEffect(() => {
+    if (!open || selectedLocationIds.length === 0) return;
+    if (selectedClientIds.length === 0) {
+      setValue('locationId', undefined);
+      return;
+    }
+    if (locationsLoading) return;
+    const valid = new Set(locationOptions.map((o) => o.value));
+    const kept = selectedLocationIds.filter((v) => valid.has(v));
+    if (kept.length !== selectedLocationIds.length) {
+      setValue('locationId', kept.length ? kept.map(Number) : undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selectedClientIds.join(','), selectedLocationIds.join(','), locationsLoading, locationOptions.length]);
 
   // Re-seed the form from the currently-applied filters every time the modal
   // opens. The Modal unmounts its inputs on close (`if (!open) return null`) but
@@ -1118,8 +1156,15 @@ function FilterModal({
                 <FancyMultiSelect
                   searchable
                   searchPlaceholder="Search locations…"
-                  placeholder={locationsLoading ? 'Loading…' : 'Any location'}
+                  placeholder={
+                    selectedClientIds.length === 0
+                      ? 'Select a client first'
+                      : locationsLoading
+                      ? 'Loading…'
+                      : 'Any location'
+                  }
                   loading={locationsLoading}
+                  disabled={selectedClientIds.length === 0}
                   value={arr(field.value)}
                   onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
                   options={locationOptions}
