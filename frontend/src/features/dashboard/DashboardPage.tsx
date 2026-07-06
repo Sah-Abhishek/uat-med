@@ -10,7 +10,7 @@ import {
   getProductivity,
   type DashboardFilters,
 } from '@/api/dashboard';
-import { listLocations, listPrimarySpecialities } from '@/api/configurations';
+import { listClients, listLocations, listPrimarySpecialities } from '@/api/configurations';
 import { listWorklists } from '@/api/worklists';
 import { useAuth } from '@/auth/store';
 import { useScope } from '@/scope/store';
@@ -44,6 +44,7 @@ import {
 /** The filter bar's fields — applied on top of the header Client/Location
  * scope when the user hits "Filter". Empty string = not filtering. */
 interface BarFilters {
+  clientId: string;
   locationId: string;
   primarySpecialityId: string;
   worklistId: string;
@@ -51,6 +52,7 @@ interface BarFilters {
   dateOfService: string;
 }
 const EMPTY_BAR: BarFilters = {
+  clientId: '',
   locationId: '',
   primarySpecialityId: '',
   worklistId: '',
@@ -59,15 +61,20 @@ const EMPTY_BAR: BarFilters = {
 };
 
 /** Merge the header scope with the APPLIED bar filters into query params.
- * A bar location (scoped to the header client) overrides the header one. */
+ * Bar client/location override the header ones; a header location is dropped
+ * when the bar picks a DIFFERENT client (it belongs to the header client). */
 function buildFilters(
   clientId: number | null | undefined,
   locationId: number | null | undefined,
   bar: BarFilters,
 ): DashboardFilters {
+  const barClient = bar.clientId ? Number(bar.clientId) : undefined;
+  const effectiveClient = barClient ?? (clientId != null ? clientId : undefined);
+  const headerLocationApplies =
+    locationId != null && (barClient === undefined || barClient === clientId);
   return {
-    ...(clientId != null ? { clientId } : {}),
-    ...(locationId != null ? { locationId } : {}),
+    ...(effectiveClient != null ? { clientId: effectiveClient } : {}),
+    ...(headerLocationApplies ? { locationId } : {}),
     ...(bar.locationId ? { locationId: Number(bar.locationId) } : {}),
     ...(bar.primarySpecialityId ? { primarySpecialityId: Number(bar.primarySpecialityId) } : {}),
     ...(bar.worklistId ? { worklistId: Number(bar.worklistId) } : {}),
@@ -97,11 +104,20 @@ export function DashboardPage() {
 
   const scope = buildFilters(clientId, locationId, applied);
 
+  // Options follow the DRAFT client (bar pick wins over the header) so the
+  // user can choose client → location → worklist before hitting Filter.
+  const draftClientId = draft.clientId ? Number(draft.clientId) : clientId;
+
   // Filter-bar options (team dashboard only).
+  const clients = useQuery({
+    queryKey: ['configurations', 'clients'],
+    queryFn: () => listClients(),
+    enabled: isTeam,
+  });
   const locations = useQuery({
-    queryKey: ['configurations', 'locations', clientId],
-    queryFn: () => listLocations(clientId!),
-    enabled: isTeam && clientId != null,
+    queryKey: ['configurations', 'locations', draftClientId],
+    queryFn: () => listLocations(draftClientId!),
+    enabled: isTeam && draftClientId != null,
   });
   const specialities = useQuery({
     queryKey: ['configurations', 'primary-specialities', 'all'],
@@ -109,14 +125,13 @@ export function DashboardPage() {
     enabled: isTeam,
   });
   const worklists = useQuery({
-    queryKey: ['worklists', 'dashboard-filter', clientId, locationId],
+    queryKey: ['worklists', 'dashboard-filter', draftClientId],
     queryFn: () =>
       listWorklists({
         pageSize: 200,
         sortBy: 'receivedDate',
         sortDir: 'desc',
-        ...(clientId != null ? { clientId } : {}),
-        ...(locationId != null ? { locationId } : {}),
+        ...(draftClientId != null ? { clientId: draftClientId } : {}),
       }),
     enabled: isTeam,
   });
@@ -249,16 +264,32 @@ export function DashboardPage() {
       {/* ── Global filter bar ───────────────────────────── */}
       {isTeam && (
         <Card padding="default">
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div>
+              <Label>Client</Label>
+              <Select
+                value={draft.clientId}
+                // Switching client invalidates the picked location and
+                // worklist — they belong to the previous client.
+                onChange={(e) =>
+                  setDraft({ ...draft, clientId: e.target.value, locationId: '', worklistId: '' })
+                }
+              >
+                <option value="">{clientId != null ? 'Header client' : 'All'}</option>
+                {(clients.data?.items ?? []).map((c) => (
+                  <option key={c.id} value={String(c.id)}>{c.name}</option>
+                ))}
+              </Select>
+            </div>
             <div>
               <Label>Location</Label>
               <Select
                 value={draft.locationId}
                 onChange={(e) => setDraft({ ...draft, locationId: e.target.value })}
-                disabled={clientId == null}
+                disabled={draftClientId == null}
               >
                 <option value="">
-                  {clientId == null ? 'Select a client in the header first' : 'All'}
+                  {draftClientId == null ? 'Select a client first' : 'All'}
                 </option>
                 {(locations.data?.items ?? []).map((l) => (
                   <option key={l.id} value={String(l.id)}>{l.name}</option>
