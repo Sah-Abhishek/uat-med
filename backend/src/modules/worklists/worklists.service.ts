@@ -20,6 +20,24 @@ export class WorklistsService {
     private readonly ds: DataSource,
   ) {}
 
+  /**
+   * SQL predicate: the worklist is fully worked — it has charts and every one
+   * of them is completed (coding done, audit done, or closed), i.e. the
+   * Progress bar shows 100% / 0.00% pending. `total` is
+   * GREATEST(declared total_charts, live row count) — the same rule the
+   * list/detail progress math uses, so the derived COMPLETED status always
+   * agrees with the percentages the UI shows. Soft-deleted charts excluded.
+   */
+  private static readonly COMPLETED_SQL = `(
+    GREATEST(COALESCE(w.total_charts, 0),
+             (SELECT COUNT(*) FROM charts c1 WHERE c1.worklist_id = w.id AND c1.deleted_at IS NULL)) > 0
+    AND (SELECT COUNT(*) FROM charts c2
+         WHERE c2.worklist_id = w.id AND c2.deleted_at IS NULL
+           AND c2.milestone IN ('CODING_DONE','AUDIT_DONE','CLOSED'))
+        >= GREATEST(COALESCE(w.total_charts, 0),
+                    (SELECT COUNT(*) FROM charts c3 WHERE c3.worklist_id = w.id AND c3.deleted_at IS NULL))
+  )`;
+
   async list(q: QueryWorklistsDto) {
     const qb = this.worklists
       .createQueryBuilder('w')
@@ -30,7 +48,14 @@ export class WorklistsService {
       .leftJoinAndSelect('w.primarySpeciality', 'primarySpeciality')
       .leftJoinAndSelect('w.subSpeciality', 'subSpeciality')
       .leftJoinAndSelect('w.process', 'process');
-    if (q.status) qb.andWhere('w.status = :s', { s: q.status });
+    // COMPLETED is derived (see COMPLETED_SQL), so the filter matches on the
+    // predicate — and the stored statuses exclude fully-completed worklists so
+    // a worklist never shows under both "In Progress" and "Completed".
+    if (q.status === WorklistStatus.COMPLETED) {
+      qb.andWhere(WorklistsService.COMPLETED_SQL);
+    } else if (q.status) {
+      qb.andWhere('w.status = :s', { s: q.status }).andWhere(`NOT ${WorklistsService.COMPLETED_SQL}`);
+    }
     if (q.clientId) qb.andWhere('w.client_id = :c', { c: q.clientId });
     if (q.locationId) qb.andWhere('w.location_id = :l', { l: q.locationId });
     if (q.primarySpecialityId) qb.andWhere('w.primary_speciality_id = :p', { p: q.primarySpecialityId });
@@ -88,6 +113,9 @@ export class WorklistsService {
       const { client, location, primarySpeciality, subSpeciality, process, ...rest } = w;
       return {
         ...rest,
+        // Fully worked (0.00% pending) reads as COMPLETED regardless of the
+        // stored status — same math as the Progress % column.
+        status: total > 0 && c.completed >= total ? WorklistStatus.COMPLETED : w.status,
         clientName: client?.name ?? null,
         locationName: location?.name ?? null,
         specialityName: primarySpeciality?.name ?? null,
@@ -104,17 +132,21 @@ export class WorklistsService {
   }
 
   async statusSummary(q: { clientId?: number; locationId?: number } = {}) {
+    // Bucket by the DERIVED status (fully-worked worklists count as COMPLETED,
+    // not their stored status) so the tiles always agree with the list's chips.
+    const statusExpr = `CASE WHEN ${WorklistsService.COMPLETED_SQL} THEN 'COMPLETED' ELSE w.status END`;
     const qb = this.worklists
-      .createQueryBuilder('w').select('w.status', 'status').addSelect('COUNT(*)', 'count');
+      .createQueryBuilder('w').select(statusExpr, 'status').addSelect('COUNT(*)', 'count');
     // Global header scope (Client / Location).
     if (q.clientId) qb.andWhere('w.client_id = :cid', { cid: Number(q.clientId) });
     if (q.locationId) qb.andWhere('w.location_id = :lid', { lid: Number(q.locationId) });
-    const rows = await qb.groupBy('w.status').getRawMany();
-    const out = { open: 0, inProgress: 0, closed: 0 };
+    const rows = await qb.groupBy(statusExpr).getRawMany();
+    const out = { open: 0, inProgress: 0, closed: 0, completed: 0 };
     rows.forEach(r => {
       if (r.status === WorklistStatus.OPEN) out.open = Number(r.count);
       if (r.status === WorklistStatus.IN_PROGRESS) out.inProgress = Number(r.count);
       if (r.status === WorklistStatus.CLOSED) out.closed = Number(r.count);
+      if (r.status === WorklistStatus.COMPLETED) out.completed = Number(r.count);
     });
     return out;
   }
@@ -239,7 +271,11 @@ export class WorklistsService {
       dateOfService: w.dateOfService,
       dateOfServiceTo: w.dateOfServiceTo,
       receivedDate: w.receivedDate,
-      status: w.status,
+      // Derived COMPLETED when 0.00% pending — mirrors the list() mapping.
+      status:
+        total > 0 && Number(counts.completed ?? 0) >= total
+          ? WorklistStatus.COMPLETED
+          : w.status,
       totalCharts: w.totalCharts,
       netChange: w.netChange,
       documentsCount: Number(counts.documentsCount ?? 0),

@@ -14,6 +14,10 @@ export enum WorklistStatus {
   OPEN = 'OPEN',
   IN_PROGRESS = 'IN_PROGRESS',
   CLOSED = 'CLOSED',
+  /** Derived, never stored: every chart in the worklist is completed
+   * (0.00% pending). Computed at read time in WorklistsService so it can
+   * never go stale as chart milestones move. */
+  COMPLETED = 'COMPLETED',
 }
 
 export enum ChartMilestone {

@@ -238,7 +238,7 @@ export function WorklistsPage() {
       <PageHeader title="Worklists" subtitle="Worklists" />
 
       {/* ── Status tiles ───────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <IllustrationStatCard
           variant="open"
           value={summary.data?.open ?? 0}
@@ -249,6 +249,12 @@ export function WorklistsPage() {
           variant="in-progress"
           value={summary.data?.inProgress ?? 0}
           label="In Progress"
+          loading={summary.isPending}
+        />
+        <IllustrationStatCard
+          variant="complete"
+          value={summary.data?.completed ?? 0}
+          label="Completed"
           loading={summary.isPending}
         />
         <IllustrationStatCard
@@ -502,6 +508,7 @@ const STATUS_OPTIONS: Array<{ value: '' | WorklistStatus; label: string }> = [
   { value: '', label: 'All statuses' },
   { value: 'OPEN', label: 'Open' },
   { value: 'IN_PROGRESS', label: 'In Progress' },
+  { value: 'COMPLETED', label: 'Completed' },
   { value: 'CLOSED', label: 'Closed' },
 ];
 

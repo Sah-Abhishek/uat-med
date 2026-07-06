@@ -40,16 +40,18 @@ export function ChartStatusText({ status }: { status: ChartStatus }) {
   );
 }
 
-/* ── Worklist status (OPEN | IN_PROGRESS | CLOSED) ────────── */
+/* ── Worklist status (OPEN | IN_PROGRESS | CLOSED | COMPLETED) ── */
 const WORKLIST_STATUS_STYLES: Record<WorklistStatus, string> = {
   OPEN: 'bg-warn-soft text-warn',
   IN_PROGRESS: 'bg-info-soft text-info',
   CLOSED: 'bg-success-soft text-success',
+  COMPLETED: 'bg-success text-white',
 };
 const WORKLIST_STATUS_LABEL: Record<WorklistStatus, string> = {
   OPEN: 'Open',
   IN_PROGRESS: 'In Progress',
   CLOSED: 'Closed',
+  COMPLETED: 'Completed',
 };
 export function WorklistStatusChip({ status }: { status: WorklistStatus }) {
   return <span className={cn('chip', WORKLIST_STATUS_STYLES[status])}>{WORKLIST_STATUS_LABEL[status]}</span>;

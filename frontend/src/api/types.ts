@@ -74,7 +74,9 @@ export interface PaginationParams {
 
 /* ── Worklists ────────────────────────────────────────────── */
 
-export type WorklistStatus = 'OPEN' | 'IN_PROGRESS' | 'CLOSED';
+/** COMPLETED is derived server-side (all charts completed — 0.00% pending),
+ * never stored; the other three are the persisted statuses. */
+export type WorklistStatus = 'OPEN' | 'IN_PROGRESS' | 'CLOSED' | 'COMPLETED';
 
 export interface Worklist {
   id: string;
@@ -143,6 +145,7 @@ export interface WorklistStatusSummary {
   open: number;
   inProgress: number;
   closed: number;
+  completed: number;
 }
 
 /* ── Charts ───────────────────────────────────────────────── */
