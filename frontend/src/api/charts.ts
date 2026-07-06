@@ -338,6 +338,10 @@ export interface CodeAuditRecord extends CodeAuditInput {
   auditedAt: string;
 }
 
+/** Prev/next chart ids among the caller's assigned charts (detail-page nav). */
+export const getChartNeighbors = (chartId: string) =>
+  get<{ prevId: number | null; nextId: number | null }>(`/charts/${chartId}/neighbors`);
+
 export const listCodeAudits = (chartId: string) =>
   get<{ items: CodeAuditRecord[] }>(`/charts/${chartId}/code-audits`);
 

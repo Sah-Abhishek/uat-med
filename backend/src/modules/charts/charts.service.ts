@@ -672,6 +672,38 @@ async update(id: number, dto: UpdateChartDto) {
     return { id: c.id, milestone: c.milestone, chartStatus: c.chartStatus };
   }
 
+  /**
+   * Prev/next chart ids for the detail page's Previous/Next buttons, scoped
+   * to the charts assigned to the CALLER (coder slot for coders, auditor slot
+   * for auditors, either slot for teamleads/managers), ordered by id.
+   * Soft-deleted charts and charts orphaned by a deleted worklist are
+   * excluded, matching list() visibility.
+   */
+  async neighbors(id: number, user: AuthenticatedUser) {
+    await this.requireChart(id);
+    const scopedIds = () => {
+      const qb = this.charts.createQueryBuilder('c').select('c.id', 'id');
+      if (user.role === Role.CODER) {
+        qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
+      } else if (user.role === Role.AUDITOR) {
+        qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
+      } else {
+        qb.andWhere('(c.allocated_coder_id = :uid OR c.allocated_auditor_id = :uid)', {
+          uid: user.id,
+        });
+      }
+      return this.excludeOrphanedCharts(qb);
+    };
+    const [prev, next] = await Promise.all([
+      scopedIds().andWhere('c.id < :id', { id }).orderBy('c.id', 'DESC').limit(1).getRawOne<{ id: string }>(),
+      scopedIds().andWhere('c.id > :id', { id }).orderBy('c.id', 'ASC').limit(1).getRawOne<{ id: string }>(),
+    ]);
+    return {
+      prevId: prev ? Number(prev.id) : null,
+      nextId: next ? Number(next.id) : null,
+    };
+  }
+
   /** Throw the standard "another chart is in progress" 409 for an open session. */
   private async timerConflict(open: ChartTimeLog): Promise<never> {
     const other = await this.charts.findOne({ where: { id: Number(open.chartId) } });

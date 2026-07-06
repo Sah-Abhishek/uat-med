@@ -295,6 +295,16 @@ export class ChartsController {
     return this.svc.submitCodeDecisions(id, dto, user);
   }
 
+  @Get(':id/neighbors')
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
+  @ApiOperation({ summary: "Prev/next chart ids among the caller's assigned charts, for the detail page's Previous/Next navigation." })
+  neighbors(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.neighbors(id, user);
+  }
+
   /* Per-code auditor audits — the auditor's Agree/Disagree judgment of each
    * coder decision, layered on top of the (untouched) coder decisions. */
 

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import {
   getChart,
+  getChartNeighbors,
   listCodeAudits,
   listCodeDecisions,
   getCodeDecisionDraft,
@@ -85,6 +86,17 @@ export function ChartDetailPage() {
     },
   });
 
+  // Previous/Next walk the charts assigned to the CURRENT USER only (the
+  // backend scopes by role: coder slot, auditor slot, or either for TL/MGR),
+  // ordered by chart id. Buttons disable at either end of the queue.
+  const neighbors = useQuery({
+    queryKey: ['chart-neighbors', id],
+    queryFn: () => getChartNeighbors(id!),
+    enabled: !!id,
+  });
+  const prevId = neighbors.data?.prevId ?? null;
+  const nextId = neighbors.data?.nextId ?? null;
+
   if (!isPending && !chart) return <div className="p-8 text-ink-muted">Not found.</div>;
 
   return (
@@ -98,10 +110,20 @@ export function ChartDetailPage() {
       </Link>
 
       <div className="flex items-center justify-between">
-        <Button variant="primary" leftIcon={<ChevronLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/charts')}>
+        <Button
+          variant="primary"
+          leftIcon={<ChevronLeft className="w-3.5 h-3.5" />}
+          disabled={!prevId}
+          onClick={() => prevId && navigate(`/charts/${prevId}`)}
+        >
           Previous Chart
         </Button>
-        <Button variant="primary" rightIcon={<ChevronRight className="w-3.5 h-3.5" />} onClick={() => navigate('/charts')}>
+        <Button
+          variant="primary"
+          rightIcon={<ChevronRight className="w-3.5 h-3.5" />}
+          disabled={!nextId}
+          onClick={() => nextId && navigate(`/charts/${nextId}`)}
+        >
           Next Chart
         </Button>
       </div>
