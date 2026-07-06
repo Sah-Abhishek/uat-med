@@ -31,9 +31,12 @@ interface Props {
   /** QA / read-only viewer (TL dashboard). Bypasses the timer requirement
    * and renames the button to reflect that nothing can be edited. */
   readOnly?: boolean;
+  /** Submitted per-code audit counts — surfaces "auditor feedback exists" on
+   * the chart page so the coder knows to open the codes view. */
+  auditSummary?: { agreed: number; disagreed: number } | null;
 }
 
-export function AiIcdPrediction({ prediction, hasUploadedDocs, timerRunning, onReview, readOnly }: Props) {
+export function AiIcdPrediction({ prediction, hasUploadedDocs, timerRunning, onReview, readOnly, auditSummary }: Props) {
   const empty = !prediction || prediction.codes.length === 0;
 
   return (
@@ -44,6 +47,31 @@ export function AiIcdPrediction({ prediction, hasUploadedDocs, timerRunning, onR
           AI ICD Prediction
         </p>
       </div>
+
+      {auditSummary && (
+        <button
+          type="button"
+          onClick={onReview}
+          className={cn(
+            'w-full mb-3 rounded-lg border p-2.5 text-left transition',
+            auditSummary.disagreed > 0
+              ? 'border-danger/30 bg-danger-soft/40 hover:bg-danger-soft/70'
+              : 'border-success/30 bg-success-soft/40 hover:bg-success-soft/70',
+          )}
+        >
+          <p className={cn(
+            'text-[11px] font-semibold uppercase tracking-wide',
+            auditSummary.disagreed > 0 ? 'text-danger' : 'text-success',
+          )}>
+            Auditor feedback
+          </p>
+          <p className="text-xs text-ink mt-0.5">
+            {auditSummary.disagreed > 0
+              ? `${auditSummary.disagreed} code${auditSummary.disagreed === 1 ? '' : 's'} disagreed · ${auditSummary.agreed} agreed — click to view`
+              : `All ${auditSummary.agreed} audited code${auditSummary.agreed === 1 ? '' : 's'} agreed — click to view`}
+          </p>
+        </button>
+      )}
 
       {!hasUploadedDocs ? (
         <p className="text-xs text-ink-muted">Upload a document to get ICD prediction.</p>

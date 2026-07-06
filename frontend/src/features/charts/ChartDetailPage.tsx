@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import {
   getChart,
+  listCodeAudits,
   listCodeDecisions,
   getCodeDecisionDraft,
   selfAllocateCharts,
@@ -514,6 +515,22 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     ?.timerPaused;
   const isPaused = !!pausedMarker && String(pausedMarker.userId ?? '') === (user?.id ?? '');
 
+  // Submitted per-code audits — surfaced on the sidebar card so a coder
+  // opening an audited chart immediately sees that auditor feedback exists.
+  // Shares the modal's cache key (invalidated when the modal closes).
+  const codeAuditsQ = useQuery({
+    queryKey: ['chart-code-audits', String(chart.id)],
+    queryFn: () => listCodeAudits(String(chart.id)),
+  });
+  const auditSummary = useMemo(() => {
+    const rows = codeAuditsQ.data?.items ?? [];
+    if (rows.length === 0) return null;
+    return {
+      agreed: rows.filter((r) => r.verdict === 'AGREE').length,
+      disagreed: rows.filter((r) => r.verdict === 'DISAGREE').length,
+    };
+  }, [codeAuditsQ.data]);
+
   // QA takeover: a viewer (Team Lead / Coder / Auditor — not Manager, who can't
   // self-allocate) looking at a chart in read-only QA view that isn't theirs can
   // self-allocate to take it over. Doing so assigns it to them, drops ?qa=1 so
@@ -1005,6 +1022,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
             // affordance instead of disabling. Lets a coder read the auditor's
             // per-code feedback without re-allocating and starting a timer.
             readOnly={qaReadOnly || !timerRunning}
+            auditSummary={auditSummary}
           />
           <DocumentationGaps prediction={aiPrediction} />
           <PhysicianQueries prediction={aiPrediction} />

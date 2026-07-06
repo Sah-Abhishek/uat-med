@@ -2211,6 +2211,38 @@ function CodesPane({
         </div>
       </div>
 
+      {/* Auditor feedback summary — non-audit views only (in audit mode the
+          auditor is editing that layer). Jump chips take the coder straight
+          to each disagreed code so the feedback can't be missed. */}
+      {!audit && submittedAudits.size > 0 && (
+        <div className="px-5 py-3 border-b border-line bg-warn-soft/20">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide font-semibold text-warn">
+              Auditor Feedback
+            </span>
+            <span className="text-xs text-ink">
+              {[...submittedAudits.values()].filter((r) => r.verdict === 'DISAGREE').length} disagreed
+              {' · '}
+              {[...submittedAudits.values()].filter((r) => r.verdict === 'AGREE').length} agreed
+            </span>
+            {items
+              .map((it, idx) => ({ it, idx, rec: submittedAudits.get(it.key) }))
+              .filter(({ rec }) => rec?.verdict === 'DISAGREE')
+              .map(({ it, idx }) => (
+                <button
+                  key={it.key}
+                  type="button"
+                  onClick={() => setSelectedIdx(idx)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-danger/40 bg-danger-soft/50 text-danger text-[11px] font-mono font-semibold hover:bg-danger-soft transition"
+                >
+                  <ThumbsDown className="w-3 h-3" />
+                  {state[it.key]?.editedCode || it.code}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Code groups + legend */}
       <div className="px-5 py-4 space-y-3 border-b border-line">
         {groups.length === 0 ? (
