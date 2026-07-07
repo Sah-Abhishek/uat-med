@@ -133,19 +133,23 @@ export function AiAnalyticsPage() {
   const acceptancePct = data ? data.kpis.acceptanceRate * 100 : 0;
 
   // ── Activity breakdown (client × location × sub-speciality) ──
-  // Has its OWN date window (Today / last 7d / this month), independent of the
-  // page date filter, so the headline accuracy can stay as-is while you see
-  // today's activity. Still respects the global header Client/Location scope.
+  // Has its OWN date window (Today / Yesterday / last 7d / this month),
+  // independent of the page date filter, so the headline accuracy can stay
+  // as-is while you see today's activity. Still respects the global header
+  // Client/Location scope. Completing a pick in the card's date picker
+  // overrides the presets with that custom [from,to] window for the TABLE as
+  // well as the export; clicking a preset switches back.
   const [breakdownRange, setBreakdownRange] = useState<BreakdownRange>('today');
+  const [breakdownCustom, setBreakdownCustom] = useState<{ from: string; to: string } | null>(null);
   const breakdownFilters: QaFilters = useMemo(() => {
-    const { from, to } = rangeWindow(breakdownRange);
+    const { from, to } = breakdownCustom ?? rangeWindow(breakdownRange);
     return {
       ...(scopeClientId != null ? { clientId: scopeClientId } : {}),
       ...(scopeLocationId != null ? { locationId: scopeLocationId } : {}),
       from,
       to,
     };
-  }, [breakdownRange, scopeClientId, scopeLocationId]);
+  }, [breakdownRange, breakdownCustom, scopeClientId, scopeLocationId]);
 
   const breakdownQ = useQuery({
     queryKey: ['qa', 'activity-breakdown', breakdownFilters],
@@ -290,7 +294,12 @@ export function AiAnalyticsPage() {
             loading={!breakdownQ.data && breakdownQ.isPending}
             fetching={breakdownQ.isFetching}
             range={breakdownRange}
-            onRangeChange={setBreakdownRange}
+            onRangeChange={(r) => {
+              setBreakdownRange(r);
+              setBreakdownCustom(null);
+            }}
+            custom={breakdownCustom}
+            onCustomChange={setBreakdownCustom}
             onExport={handleExport}
             exporting={exporting}
           />
@@ -1055,6 +1064,8 @@ function ActivityBreakdownCard({
   fetching,
   range,
   onRangeChange,
+  custom,
+  onCustomChange,
   onExport,
   exporting,
 }: {
@@ -1063,6 +1074,9 @@ function ActivityBreakdownCard({
   fetching: boolean;
   range: BreakdownRange;
   onRangeChange: (r: BreakdownRange) => void;
+  /** Custom [from,to] window (from the date picker) — overrides `range`. */
+  custom: { from: string; to: string } | null;
+  onCustomChange: (r: { from: string; to: string }) => void;
   onExport: (range: { from: string; to: string }) => void;
   exporting: boolean;
 }) {
@@ -1123,12 +1137,13 @@ function ActivityBreakdownCard({
             Activity by client / location / sub-speciality
           </h4>
           <p className="text-[11px] text-ink-muted mt-0.5">
-            Where AI suggestions are being worked, and the AI's acceptance rate in each — {RANGE_LABEL[range].toLowerCase()}
+            Where AI suggestions are being worked, and the AI's acceptance rate in each —{' '}
+            {custom ? `${custom.from} → ${custom.to}` : RANGE_LABEL[range].toLowerCase()}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <BreakdownRangeToggle value={range} onChange={onRangeChange} />
-          <ExportControl onExport={onExport} exporting={exporting} />
+          <BreakdownRangeToggle value={range} customActive={custom != null} onChange={onRangeChange} />
+          <ExportControl onExport={onExport} exporting={exporting} onRangePicked={onCustomChange} />
         </div>
       </div>
 
@@ -1138,7 +1153,9 @@ function ActivityBreakdownCard({
         </div>
       ) : rows.length === 0 ? (
         <div className="h-[200px] flex flex-col items-center justify-center text-center text-ink-muted">
-          <p className="text-sm font-semibold text-ink">No activity {RANGE_LABEL[range].toLowerCase()}</p>
+          <p className="text-sm font-semibold text-ink">
+            No activity {custom ? `${custom.from} → ${custom.to}` : RANGE_LABEL[range].toLowerCase()}
+          </p>
           <p className="text-[11px] mt-1">Nothing was coded in this period for the current Client / Location scope.</p>
         </div>
       ) : (
@@ -1259,7 +1276,16 @@ function AcceptancePill({ pct, accepted, decisions }: { pct: number; accepted: n
   );
 }
 
-function BreakdownRangeToggle({ value, onChange }: { value: BreakdownRange; onChange: (v: BreakdownRange) => void }) {
+function BreakdownRangeToggle({
+  value,
+  customActive,
+  onChange,
+}: {
+  value: BreakdownRange;
+  /** A picker-chosen window is driving the table — no preset is highlighted. */
+  customActive?: boolean;
+  onChange: (v: BreakdownRange) => void;
+}) {
   return (
     <div className="inline-flex rounded-lg border border-line bg-surface-sunken/40 p-0.5 text-[11px] font-semibold shrink-0">
       {(['today', 'yesterday', '7d', 'month'] as const).map((m) => (
@@ -1267,10 +1293,10 @@ function BreakdownRangeToggle({ value, onChange }: { value: BreakdownRange; onCh
           key={m}
           type="button"
           onClick={() => onChange(m)}
-          aria-pressed={value === m}
+          aria-pressed={!customActive && value === m}
           className={cn(
             'px-2.5 py-1 rounded-md transition whitespace-nowrap',
-            value === m ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
+            !customActive && value === m ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
           )}
         >
           {RANGE_LABEL[m]}
@@ -1281,18 +1307,22 @@ function BreakdownRangeToggle({ value, onChange }: { value: BreakdownRange; onCh
 }
 
 /**
- * Custom-range export for the activity breakdown. Pick any [from,to] window in
- * the date picker, then hit Export to download the full per-encounter XLSX for
- * that window — independent of which range the table is showing. Defaults to the
- * last 7 days so it's ready to use; the button is disabled until a full range is
- * chosen and while an export is in flight.
+ * Custom-range picker + export for the activity breakdown. Completing a
+ * [from,to] pick re-scopes the TABLE to that window (via onRangePicked — the
+ * preset toggle un-highlights until a preset is clicked again); Export then
+ * downloads the full per-encounter XLSX for the same window. Defaults to the
+ * last 7 days (display only — it doesn't re-scope the table until the user
+ * actually picks); the Export button is disabled until a full range is chosen
+ * and while an export is in flight.
  */
 function ExportControl({
   onExport,
   exporting,
+  onRangePicked,
 }: {
   onExport: (range: { from: string; to: string }) => void;
   exporting: boolean;
+  onRangePicked: (range: { from: string; to: string }) => void;
 }) {
   const today = format(new Date(), 'yyyy-MM-dd');
   const [range, setRange] = useState<{ from: string | null; to: string | null }>(() => ({
@@ -1305,7 +1335,12 @@ function ExportControl({
     <div className="flex items-center gap-2 shrink-0">
       <RangeDatePicker
         value={range}
-        onChange={setRange}
+        onChange={(r) => {
+          setRange(r);
+          // Only a COMPLETED pick drives the table — mid-selection (from set,
+          // to pending) and the mount default change nothing.
+          if (r.from && r.to) onRangePicked({ from: r.from, to: r.to });
+        }}
         placeholder="Pick dates…"
         max={today}
         className="w-[210px]"
