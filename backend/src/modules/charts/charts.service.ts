@@ -124,7 +124,9 @@ export class ChartsService {
       qb.orderBy('c.createdAt', 'DESC').addOrderBy('c.id', 'DESC');
       return;
     }
-    qb.orderBy(col, dir).addOrderBy('c.id', 'ASC');
+    // DOS is nullable — keep undated charts at the bottom in BOTH directions
+    // (Postgres otherwise leads a DESC sort with the NULL rows).
+    qb.orderBy(col, dir, col === 'c.dos' ? 'NULLS LAST' : undefined).addOrderBy('c.id', 'ASC');
   }
 
   constructor(
@@ -201,6 +203,10 @@ export class ChartsService {
     // the whole "to" day regardless of the stored timestamp's time-of-day.
     if (q.codingCompletedFrom) qb.andWhere('c.coding_completed_at::date >= :ccf', { ccf: q.codingCompletedFrom });
     if (q.codingCompletedTo) qb.andWhere('c.coding_completed_at::date <= :cct', { cct: q.codingCompletedTo });
+    // Date of service — inclusive range on the chart's own DOS (a date column,
+    // so no cast needed). Charts without a DOS never match a range filter.
+    if (q.dateOfServiceFrom) qb.andWhere('c.dos >= :dosf', { dosf: q.dateOfServiceFrom });
+    if (q.dateOfServiceTo) qb.andWhere('c.dos <= :dost', { dost: q.dateOfServiceTo });
     return qb;
   }
 
