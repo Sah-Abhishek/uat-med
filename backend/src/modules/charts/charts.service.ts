@@ -679,11 +679,17 @@ async update(id: number, dto: UpdateChartDto) {
   }
 
   /**
-   * Prev/next chart ids for the detail page's Previous/Next buttons, scoped
-   * to the charts assigned to the CALLER (coder slot for coders, auditor slot
-   * for auditors, either slot for teamleads/managers), ordered by id.
+   * Prev/next chart ids for the detail page's Previous/Next buttons.
+   *
+   * Scope mirrors what each role sees on the Charts page: coders walk the
+   * charts in their coder slot, auditors the charts in their auditor slot,
+   * and teamleads/managers (who see every chart) walk the full list — an
+   * admin browsing unallocated charts must not dead-end on disabled buttons.
    * Soft-deleted charts and charts orphaned by a deleted worklist are
    * excluded, matching list() visibility.
+   *
+   * Direction follows the Charts list's newest-first default: "next" moves
+   * DOWN the list toward older/lower ids (7463 → 7462), "previous" moves up.
    */
   async neighbors(id: number, user: AuthenticatedUser) {
     await this.requireChart(id);
@@ -693,16 +699,12 @@ async update(id: number, dto: UpdateChartDto) {
         qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
       } else if (user.role === Role.AUDITOR) {
         qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
-      } else {
-        qb.andWhere('(c.allocated_coder_id = :uid OR c.allocated_auditor_id = :uid)', {
-          uid: user.id,
-        });
       }
       return this.excludeOrphanedCharts(qb);
     };
     const [prev, next] = await Promise.all([
-      scopedIds().andWhere('c.id < :id', { id }).orderBy('c.id', 'DESC').limit(1).getRawOne<{ id: string }>(),
       scopedIds().andWhere('c.id > :id', { id }).orderBy('c.id', 'ASC').limit(1).getRawOne<{ id: string }>(),
+      scopedIds().andWhere('c.id < :id', { id }).orderBy('c.id', 'DESC').limit(1).getRawOne<{ id: string }>(),
     ]);
     return {
       prevId: prev ? Number(prev.id) : null,
