@@ -1015,17 +1015,23 @@ function formatDuration(ms: number): string {
 
 /* ── Activity breakdown (client × location × sub-speciality) ──────── */
 
-type BreakdownRange = 'today' | '7d' | 'month';
+type BreakdownRange = 'today' | 'yesterday' | '7d' | 'month';
 
 const RANGE_LABEL: Record<BreakdownRange, string> = {
   today: 'Today',
+  yesterday: 'Yesterday',
   '7d': 'Last 7 days',
   month: 'This month',
 };
 
-/** Inclusive [from,to] YYYY-MM-DD window for a range, relative to today. */
+/** Inclusive [from,to] YYYY-MM-DD window for a range, relative to today.
+ * "Yesterday" is the single previous calendar day (from = to). */
 function rangeWindow(range: BreakdownRange): { from: string; to: string } {
   const now = new Date();
+  if (range === 'yesterday') {
+    const y = format(subDays(now, 1), 'yyyy-MM-dd');
+    return { from: y, to: y };
+  }
   const to = format(now, 'yyyy-MM-dd');
   const from =
     range === 'today'
@@ -1256,7 +1262,7 @@ function AcceptancePill({ pct, accepted, decisions }: { pct: number; accepted: n
 function BreakdownRangeToggle({ value, onChange }: { value: BreakdownRange; onChange: (v: BreakdownRange) => void }) {
   return (
     <div className="inline-flex rounded-lg border border-line bg-surface-sunken/40 p-0.5 text-[11px] font-semibold shrink-0">
-      {(['today', '7d', 'month'] as const).map((m) => (
+      {(['today', 'yesterday', '7d', 'month'] as const).map((m) => (
         <button
           key={m}
           type="button"
