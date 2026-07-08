@@ -266,6 +266,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     holdReason: Array.isArray(formDraftStash.holdReason) ? formDraftStash.holdReason : [],
     auditOption: Array.isArray(formDraftStash.auditOption) ? formDraftStash.auditOption : [],
     qcStatus: typeof formDraftStash.qcStatus === 'string' ? formDraftStash.qcStatus : '',
+    auditorQcStatus: typeof formDraftStash.auditorQcStatus === 'string' ? formDraftStash.auditorQcStatus : '',
     // Overlay refresh-restored unsaved edits (localStorage) on the server seed.
     ...(restoredLocal?.draft ?? {}),
   });
@@ -776,6 +777,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         holdReason: draft.holdReason,
         auditOption: draft.auditOption,
         qcStatus: draft.qcStatus,
+        // Auditor QC status also drives the auditor priority buckets, so it must
+        // be persisted (it was previously dropped from this blob).
+        auditorQcStatus: draft.auditorQcStatus,
       };
       // Send only the values of configured custom fields (keyed by field id)
       // plus the _formDraft blob — never the chart's full customFields. The
@@ -792,7 +796,14 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       const payload: UpdateChartDto = {
         chartNo: draft.chartNo || undefined,
         mrNumber: draft.mrNo || undefined,
-        priority: (draft.priority || chart.priority) as Priority,
+        // Priority is computed per viewer; only send it when the user actually
+        // changed the select, in which case the backend records it as a manual
+        // override (§7.3) that reverts once they touch the chart. Sending it on
+        // every save would pin the computed value permanently.
+        priority:
+          draft.priority && draft.priority !== chart.priority
+            ? (draft.priority as Priority)
+            : undefined,
         chartStatus: chartStatusForApi,
         primaryDiagnosis: draft.primaryDiagnosis || undefined,
         emLevel: draft.em || undefined,

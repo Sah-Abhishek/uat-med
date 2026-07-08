@@ -48,8 +48,21 @@ export class Chart {
   @Index()
   codingCompletedAt?: Date | null;
 
+  // Priority is COMPUTED per viewer from role × milestone × chart status × QC
+  // status × received-date (see priority-rules.ts / ChartsService) and is not
+  // read from this column for the normal buckets. The column now only carries a
+  // MANUAL OVERRIDE (User Manual §7.3): when `manualPriorityAt` is set, this
+  // value is the chart's effective bucket — a Manager/TL "Critical", a
+  // Modify-Charts choice, or a rework HIGH bump — and wins over the computed
+  // bucket until the allocated user touches the chart (see clearManualPriority).
   @Column({ type: 'varchar', length: 16, default: Priority.MEDIUM }) @Index()
   priority: Priority;
+
+  // Non-null iff `priority` above is an active manual override. Cleared the
+  // moment the allocated user touches the chart (starts the timer), reverting
+  // the chart to its computed role-based bucket.
+  @Column({ name: 'manual_priority_at', type: 'timestamptz', nullable: true })
+  manualPriorityAt?: Date | null;
 
   @Column({ name: 'allocated_coder_id', type: 'bigint', nullable: true }) @Index() allocatedCoderId?: number;
   @Column({ name: 'allocated_auditor_id', type: 'bigint', nullable: true }) @Index() allocatedAuditorId?: number;
@@ -58,9 +71,9 @@ export class Chart {
 
   // Timestamp of the MOST RECENT coder (re)allocation — re-stamped every time a
   // coder is assigned via any path (worklist allocate, bulk-modify, self-take).
-  // Drives the auto priority buckets: allocated today → LOW, aged past today
-  // without coding progress → MEDIUM (see ChartPriorityService). Distinct from
-  // the response-only `coderAllocatedAt`, which is the FIRST allocation and is
+  // Retained for auditing/analytics; priority buckets are now computed from the
+  // worklist's received-date rather than this column. Distinct from the
+  // response-only `coderAllocatedAt`, which is the FIRST allocation and is
   // derived from chart_allocations for the "Date of Coder Allocation" column.
   @Column({ name: 'last_coder_allocated_at', type: 'timestamptz', nullable: true }) @Index()
   lastCoderAllocatedAt?: Date | null;
@@ -114,30 +127,29 @@ export class Chart {
   }
 
   /**
-   * Record a fresh coder (re)allocation: stamp `lastCoderAllocatedAt` and drop
-   * the chart into the LOW priority bucket. Elevated/terminal buckets win — a
-   * chart already HIGH (has auditor feedback), CRITICAL (manual), or FINALIZED
-   * ("Done") keeps its priority. Authoritative rules live in ChartPriorityService.
+   * Record a fresh coder (re)allocation by stamping `lastCoderAllocatedAt`.
+   * Priority is no longer nudged here — it is computed per viewer from the
+   * chart's milestone/status/QC/received-date (see priority-rules.ts).
    */
   markCoderAllocated(when: Date = new Date()): void {
     this.lastCoderAllocatedAt = when;
-    if (this.priority === Priority.MEDIUM || this.priority === Priority.LOW) {
-      this.priority = Priority.LOW;
-    }
   }
 
   /**
-   * Record that an auditor left feedback: move the chart into the HIGH priority
-   * bucket unless it's CRITICAL (manual override, outranks HIGH). FINALIZED is
-   * deliberately overridden — by audit time every chart is FINALIZED (stamped
-   * at CODING_DONE), and feedback means the chart needs the coder's attention
-   * again, so it must resurface in the active HIGH bucket, not stay in "Done".
-   * ChartsService.update() re-FINALIZEs on the next done-milestone save only
-   * once no unresolved feedback remains.
+   * Pin the chart to a manual priority bucket (User Manual §7.3): a Manager/TL
+   * "Critical", a Modify-Charts choice, or a rework HIGH bump. Wins over the
+   * computed role bucket until the allocated user touches the chart.
    */
-  markAuditorFeedback(): void {
-    if (this.priority !== Priority.CRITICAL) {
-      this.priority = Priority.HIGH;
-    }
+  setManualPriority(next: Priority, when: Date = new Date()): void {
+    this.priority = next;
+    this.manualPriorityAt = when;
+  }
+
+  /**
+   * Clear a manual override so the chart reverts to its computed role-based
+   * bucket. Called when the allocated user touches the chart (starts the timer).
+   */
+  clearManualPriority(): void {
+    this.manualPriorityAt = null;
   }
 }

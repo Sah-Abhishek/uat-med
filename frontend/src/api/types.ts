@@ -164,8 +164,13 @@ export type ChartMilestone =
 
 export type ChartStatus = 'OPEN' | 'COMPLETE' | 'INCOMPLETE' | 'HOLD';
 
-// Backend enum value is FINALIZED; the UI shows it as "Done" via Chip labels.
+// Priority is computed per viewer role on the backend; a chart resolves to one
+// of these buckets. FINALIZED is retained only for legacy stored values.
 export type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'FINALIZED';
+
+// The charts-page priority "tabs": the four computed buckets plus the
+// touched-today "Done" bucket (§4.6). Sent to the API as the `priority` param.
+export type PriorityTab = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'DONE';
 
 export interface Procedure {
   code: string;
@@ -330,7 +335,10 @@ export interface ChartSummary {
     high: number;
     medium: number;
     low: number;
+    /** Retired bucket, always 0 — kept for response-shape compatibility. */
     finalized: number;
+    /** Charts the viewer touched today (§4.6 "Done" bucket). */
+    doneToday: number;
   };
   milestones: {
     readyToCode: number;

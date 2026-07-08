@@ -150,7 +150,7 @@ export function AuditInfoSection({
         <div
           className={cn(
             'grid gap-4 mt-5',
-            draft.auditorQcStatus === 'Agreed' ? 'grid-cols-2' : 'grid-cols-3',
+            draft.auditorQcStatus === 'Agree' ? 'grid-cols-2' : 'grid-cols-3',
           )}
         >
           <div>

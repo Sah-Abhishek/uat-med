@@ -17,7 +17,7 @@ import {
 import { listUsers } from '@/api/users';
 import { listWorklists } from '@/api/worklists';
 import { listPrimarySpecialities, listAllSubSpecialities, listClients, listLocations } from '@/api/configurations';
-import type { ApiErrorShape, Priority } from '@/api/types';
+import type { ApiErrorShape, Priority, PriorityTab } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -74,14 +74,15 @@ import {
   X,
 } from 'lucide-react';
 
-const PRIORITY_TABS: Array<{ key: 'ALL' | Priority; label: string }> = [
+const PRIORITY_TABS: Array<{ key: 'ALL' | PriorityTab; label: string }> = [
   { key: 'ALL', label: 'All Priorities' },
   { key: 'CRITICAL', label: 'Critical' },
   { key: 'HIGH', label: 'High' },
   { key: 'MEDIUM', label: 'Medium' },
   { key: 'LOW', label: 'Low' },
-  // Stored as FINALIZED in the DB; rendered as "Done" everywhere in the UI.
-  { key: 'FINALIZED', label: 'Done' },
+  // "Done" = charts the viewer touched today (§4.6), reset daily — not a stored
+  // priority. Distinct from the computed buckets above.
+  { key: 'DONE', label: 'Done' },
 ];
 
 // Option lists for the stylized FancySelect filters. Each leads with an "Any"
@@ -678,8 +679,12 @@ export function ChartsPage() {
     ...t,
     count:
       t.key === 'ALL'
-        ? (pc ? pc.critical + pc.high + pc.medium + pc.low + pc.finalized : undefined)
-        : pc?.[t.key.toLowerCase() as keyof typeof pc],
+        // ALL = every visible chart (each falls in exactly one computed bucket);
+        // "Done today" is a separate view, so it's not summed here.
+        ? (pc ? pc.critical + pc.high + pc.medium + pc.low : undefined)
+        : t.key === 'DONE'
+          ? pc?.doneToday
+          : pc?.[t.key.toLowerCase() as keyof typeof pc],
   }));
 
   return (
@@ -736,7 +741,7 @@ export function ChartsPage() {
             tabs={tabsWithCounts}
             value={tab}
             onChange={(k) => {
-              setTab(k as 'ALL' | Priority);
+              setTab(k as 'ALL' | PriorityTab);
               setPage(1);
               setSelected(new Set());
             }}
@@ -1580,13 +1585,15 @@ function ModifyChartsModal({
               <FancySelect
                 value={field.value ?? ''}
                 onChange={(v) => field.onChange(v)}
+                // A manual override (§7.3) reverts once the allocated user
+                // touches the chart. "Done" is a touched-today view, not an
+                // assignable priority, so it isn't offered here.
                 options={[
                   { value: '', label: 'Keep current' },
                   { value: 'CRITICAL', label: 'Critical' },
                   { value: 'HIGH', label: 'High' },
                   { value: 'MEDIUM', label: 'Medium' },
                   { value: 'LOW', label: 'Low' },
-                  { value: 'DONE', label: 'Done' },
                 ]}
               />
             )}

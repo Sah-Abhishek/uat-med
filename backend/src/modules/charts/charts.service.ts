@@ -13,6 +13,7 @@ import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
+import { priorityBucketSql, priorityRankSql, touchedTodaySql } from './priority-rules';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
@@ -111,12 +112,18 @@ export class ChartsService {
     qb: SelectQueryBuilder<Chart>,
     sortBy: string | undefined,
     sortDir: 'asc' | 'desc',
+    role: Role,
   ): void {
     const dir = sortDir === 'asc' ? 'ASC' : 'DESC';
     if (sortBy === 'serialNo') {
       qb.orderBy('worklist.worklistNumber', 'ASC')
         .addOrderBy('c.serialNo', dir)
         .addOrderBy('c.id', 'ASC');
+      return;
+    }
+    // Priority is computed per viewer role, not a plain column — sort on its rank.
+    if (sortBy === 'priority') {
+      qb.orderBy(priorityRankSql(role), dir).addOrderBy('c.id', 'ASC');
       return;
     }
     const col = sortBy ? ChartsService.SORT_COLUMNS[sortBy] : undefined;
@@ -157,6 +164,19 @@ export class ChartsService {
     return typeof eid === 'string' && eid.trim() ? eid : null;
   }
 
+  /** QC-status values are persisted by the chart-detail form under the
+   * `customFields._formDraft` blob (coder in `qcStatus`, auditor in
+   * `auditorQcStatus`) — NOT at the top level. Read both, tolerating
+   * absent/non-string values (empty string = "Blank" → null). The same
+   * `_formDraft` path is what the priority-rule SQL and reports.service read. */
+  private readFormDraftQc(cf: Record<string, any>): { coder: string | null; auditor: string | null } {
+    const fd = (cf?._formDraft ?? {}) as Record<string, any>;
+    return {
+      coder: typeof fd.qcStatus === 'string' && fd.qcStatus ? fd.qcStatus : null,
+      auditor: typeof fd.auditorQcStatus === 'string' && fd.auditorQcStatus ? fd.auditorQcStatus : null,
+    };
+  }
+
   /**
    * Apply the Charts-grid filter predicates to a query builder. Shared by
    * list() and summary() so the priority-tab counts reflect exactly the same
@@ -165,7 +185,8 @@ export class ChartsService {
    * aliases, and that role/orphan scoping has been applied by the caller.
    */
   private applyChartFilters(qb: SelectQueryBuilder<Chart>, q: QueryChartsDto): SelectQueryBuilder<Chart> {
-    if (q.priority) qb.andWhere('c.priority = :p', { p: q.priority });
+    // NOTE: the priority "tab" filter is applied by the caller (list()/summary())
+    // because it is computed per viewer-role — see applyPriorityScope().
     if (q.worklistId?.length) qb.andWhere('c.worklist_id IN (:...w)', { w: q.worklistId });
     if (q.serialFrom) qb.andWhere('c.serial_no >= :sf', { sf: q.serialFrom });
     if (q.serialTo) qb.andWhere('c.serial_no <= :st', { st: q.serialTo });
@@ -210,6 +231,34 @@ export class ChartsService {
     return qb;
   }
 
+  /**
+   * Apply the priority-tab scope for a viewer role. Requires `worklist` joined.
+   *  - a bucket (CRITICAL/HIGH/MEDIUM/LOW) → charts whose computed bucket = it
+   *  - 'DONE'  → charts the viewer touched today (bypasses bucket-visibility, as
+   *              a finished chart leaves the priority buckets but is still "done")
+   *  - empty (ALL) → when `hideUnbucketed`, only charts matching ANY bucket for
+   *              this role (User Manual §4.2 backlog visibility); otherwise all.
+   *
+   * `hideUnbucketed` is off for worklist-scoped requests so the worklist
+   * inventory view keeps showing finished charts that have left every bucket.
+   */
+  private applyPriorityScope(
+    qb: SelectQueryBuilder<Chart>,
+    role: Role,
+    tab: string | undefined,
+    viewerId: number,
+    hideUnbucketed: boolean,
+  ): void {
+    const bucket = priorityBucketSql(role);
+    if (tab === 'DONE') {
+      qb.andWhere(touchedTodaySql(), { doneViewerId: viewerId });
+    } else if (tab) {
+      qb.andWhere(`(${bucket}) = :ptab`, { ptab: tab });
+    } else if (hideUnbucketed) {
+      qb.andWhere(`(${bucket}) IS NOT NULL`);
+    }
+  }
+
   async list(q: QueryChartsDto, user: AuthenticatedUser) {
     const qb = this.charts.createQueryBuilder('c')
       .leftJoinAndSelect('c.worklist', 'worklist')
@@ -229,11 +278,24 @@ export class ChartsService {
     this.excludeOrphanedCharts(qb);
 
     this.applyChartFilters(qb, q);
+    // Priority-tab scope (computed per viewer role). The no-bucket hide (User
+    // Manual §4.2) applies to the backlog, not to a worklist inventory view.
+    const scopedToWorklist = (q.worklistId?.length ?? 0) > 0;
+    this.applyPriorityScope(qb, user.role, q.priority, Number(user.id), !scopedToWorklist);
 
-    this.applySort(qb, q.sortBy, q.sortDir);
+    // Count the fully-scoped set before pagination / the computed-priority
+    // addSelect (getManyAndCount can't be used once we need the raw column).
+    const total = await qb.clone().getCount();
+
+    this.applySort(qb, q.sortBy, q.sortDir, user.role);
     qb.skip((q.page - 1) * q.pageSize).take(q.pageSize);
 
-    const [items, total] = await qb.getManyAndCount();
+    // Pull each chart's computed priority bucket alongside the entity so the row
+    // reflects the viewer's role (all to-one joins → raw aligns 1:1 with items).
+    qb.addSelect(priorityBucketSql(user.role), 'row_priority');
+    const { entities: items, raw } = await qb.getRawAndEntities();
+    const rowPriorityAt = (i: number): Priority | null =>
+      (raw[i]?.row_priority as Priority | null) ?? null;
 
     // Batch-resolve user names for the four user FKs the table can show.
     const userIds = new Set<number>();
@@ -277,11 +339,15 @@ export class ChartsService {
       allocByChart.set(cid, entry);
     }
 
-    const mapped = items.map(({ worklist, serviceLine, ...rest }) => {
+    const mapped = items.map(({ worklist, serviceLine, ...rest }, i) => {
       const cf = (rest.customFields ?? {}) as Record<string, any>;
       const alloc = allocByChart.get(Number(rest.id)) ?? {};
       return {
         ...rest,
+        // Priority is computed per viewer role (falls back to the stored value
+        // only for the touched-today "Done" tab, where a finished chart may have
+        // left every priority bucket).
+        priority: rowPriorityAt(i) ?? rest.priority,
         // Map the `dos` column to the `dateOfService` key the frontend reads.
         dateOfService: rest.dos ?? null,
         // serviceLineId travels in `...rest`; surface the resolved name for display.
@@ -308,7 +374,10 @@ export class ChartsService {
         // column and the detail header agree.
         subSpecialityName:
           worklist?.subSpeciality?.name ?? (typeof cf.subSpeciality === 'string' ? cf.subSpeciality : null),
-        qcStatus: typeof cf.qcStatus === 'string' ? cf.qcStatus : null,
+        // QC status is persisted by the chart-detail form under the _formDraft
+        // blob, not at the top level — read it from there (matches reports.service).
+        qcStatus: this.readFormDraftQc(cf).coder,
+        auditorQcStatus: this.readFormDraftQc(cf).auditor,
       };
     });
     return new PaginatedResponseDto(mapped, total, q.page, q.pageSize);
@@ -353,14 +422,26 @@ export class ChartsService {
     if (user.role === Role.CODER) priorityQb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
     this.excludeOrphanedCharts(priorityQb);
     this.applyChartFilters(priorityQb, { ...q, priority: undefined });
-    const priorityRows = await priorityQb
-      .select('c.priority', 'priority').addSelect('COUNT(*)', 'count').groupBy('c.priority').getRawMany();
+    // Group by the computed per-viewer bucket (null = hidden, ignored below).
+    const priorityBucket = priorityBucketSql(user.role);
+    const priorityRows = await priorityQb.clone()
+      .select(priorityBucket, 'priority').addSelect('COUNT(*)', 'count').groupBy(priorityBucket).getRawMany();
+    // "Done today" (§4.6): charts this viewer touched today (timer), independent
+    // of the computed priority buckets.
+    const doneTodayRow = await priorityQb.clone()
+      .andWhere(touchedTodaySql(), { doneViewerId: Number(user.id) })
+      .select('COUNT(*)', 'count').getRawOne();
 
     const milestoneRows = await qb.clone()
       .select('c.milestone', 'milestone').addSelect('COUNT(*)', 'count').groupBy('c.milestone').getRawMany();
 
-    const pc = { critical: 0, high: 0, medium: 0, low: 0, finalized: 0 };
-    priorityRows.forEach(r => { pc[String(r.priority).toLowerCase() as keyof typeof pc] = Number(r.count); });
+    // `finalized` is retained at 0 for response-shape compatibility (the
+    // FINALIZED bucket is retired; "Done" is now `doneToday`).
+    const pc = { critical: 0, high: 0, medium: 0, low: 0, finalized: 0, doneToday: Number(doneTodayRow?.count ?? 0) };
+    priorityRows.forEach(r => {
+      const key = String(r.priority ?? '').toLowerCase();   // null bucket = hidden → skip
+      if (key && key !== 'donetoday' && key in pc) pc[key as keyof typeof pc] = Number(r.count);
+    });
 
     // Queue tiles (`readyToCode` / `readyToAudit`) are all-time counts of the
     // user's queue. "Done" tiles (`codingDoneToday` / `auditDoneToday`) are
@@ -515,6 +596,15 @@ export class ChartsService {
     });
     if (!c) throw new NotFoundException();
 
+    // Compute the priority bucket from the viewer's perspective (matches the
+    // list). Falls back to a manager view when the caller is unauthenticated.
+    const bucketRow = await this.charts.createQueryBuilder('c')
+      .leftJoin('c.worklist', 'worklist')
+      .select(priorityBucketSql(user?.role ?? Role.MANAGER), 'bucket')
+      .where('c.id = :id', { id })
+      .getRawOne<{ bucket: string | null }>();
+    const computedPriority = (bucketRow?.bucket as Priority | null) ?? null;
+
     // Resolve allocated / original coder & auditor display names (list parity).
     const userIds = [
       c.allocatedCoderId, c.allocatedAuditorId, c.originalCoderId, c.originalAuditorId,
@@ -569,6 +659,9 @@ export class ChartsService {
     const cf = (rest.customFields ?? {}) as Record<string, any>;
     return {
       ...rest,
+      // Viewer-computed priority bucket (see detail() head); the stored column
+      // only matters as a manual override, already folded into computedPriority.
+      priority: computedPriority ?? rest.priority,
       // The DB column is `dos`, but the frontend reads `dateOfService`.
       dateOfService: c.dos ?? null,
       serviceLineName: serviceLine?.name ?? null,
@@ -591,7 +684,9 @@ export class ChartsService {
       allocatedAuditorAvatarUrl: rest.allocatedAuditorId ? userMap.get(Number(rest.allocatedAuditorId))?.avatarUrl ?? null : null,
       coderAllocatedAt,
       auditorAllocatedAt,
-      qcStatus: typeof cf.qcStatus === 'string' ? cf.qcStatus : null,
+      // QC status is persisted under the _formDraft blob (see readFormDraftQc).
+      qcStatus: this.readFormDraftQc(cf).coder,
+      auditorQcStatus: this.readFormDraftQc(cf).auditor,
     };
   }
 
@@ -608,7 +703,11 @@ async update(id: number, dto: UpdateChartDto) {
   // Merge customFields rather than overwrite — preserves other keys.
   // chartStatus is funnelled through setChartStatus() so we can stamp the
   // status-change timestamp; everything else can be plain-assigned.
-  const { customFields, chartStatus: nextStatus, ...flat } = dto;
+  // `priority` is pulled out separately: a value here is an explicit user
+  // override (Modify-Charts / the detail Priority select), applied via
+  // setManualPriority so it wins over the computed bucket until the allocated
+  // user touches the chart (§7.3). The frontend sends it only when changed.
+  const { customFields, chartStatus: nextStatus, priority: nextPriority, ...flat } = dto;
   Object.assign(c, flat);
   if (customFields) {
     // Pipeline-owned keys never come from the edit form — drop them so a
@@ -636,31 +735,10 @@ async update(id: number, dto: UpdateChartDto) {
     c.setMilestone(ChartMilestone.READY_TO_AUDIT);
   }
 
-  // When a chart reaches a terminal-ish milestone (coding finished, audit
-  // finished, or fully closed) flip its priority to FINALIZED so it surfaces
-  // under the "Done" priority tab in the charts list. This keeps active-work
-  // tabs (Critical / High / Medium / Low) clean as charts get processed.
-  // We only auto-advance to FINALIZED — never auto-revert — so a user who
-  // intentionally re-prioritises a finished chart isn't fought by the system.
-  // Exception: a HIGH chart with unresolved DISAGREE code audits was handed
-  // back to the coder for rework (see submitCodeAudits) — keep it HIGH so the
-  // auditor's end-of-session save doesn't bury it under "Done". It finalizes
-  // on the first done-milestone save after a re-audit resolves every DISAGREE
-  // to AGREE. CLOSED is fully terminal and always finalizes.
-  if (
-    (c.milestone === ChartMilestone.CODING_DONE
-      || c.milestone === ChartMilestone.AUDIT_DONE
-      || c.milestone === ChartMilestone.CLOSED)
-    && c.priority !== Priority.FINALIZED
-  ) {
-    const reworkPending =
-      c.priority === Priority.HIGH &&
-      c.milestone !== ChartMilestone.CLOSED &&
-      (await this.codeAudits.count({
-        where: { chartId: Number(c.id), verdict: CodeAuditVerdict.DISAGREE },
-      })) > 0;
-    if (!reworkPending) c.priority = Priority.FINALIZED;
-  }
+  // Priority itself is no longer nudged by milestone/status here — it is
+  // computed per viewer from the chart's milestone/status/QC/received-date
+  // (see priority-rules.ts). The one exception is an explicit user override:
+  if (nextPriority) c.setManualPriority(nextPriority as Priority);
 
   return this.charts.save(c);
 }
@@ -829,13 +907,18 @@ async update(id: number, dto: UpdateChartDto) {
     // determines which transition fires.
     const canCode = user.role === Role.CODER || user.role === Role.TEAMLEAD || user.role === Role.MANAGER;
     const canAudit = user.role === Role.AUDITOR || user.role === Role.TEAMLEAD || user.role === Role.MANAGER;
+    // Starting the timer is the allocated user "touching" the chart (§7.3): drop
+    // any manual priority override so it reverts to its computed role bucket.
+    let dirty = false;
+    if (c.manualPriorityAt) { c.clearManualPriority(); dirty = true; }
     if (c.milestone === ChartMilestone.READY_TO_CODE && canCode) {
       c.setMilestone(ChartMilestone.CODING_IN_PROGRESS);
-      await this.charts.save(c);
+      dirty = true;
     } else if (c.milestone === ChartMilestone.READY_TO_AUDIT && canAudit) {
       c.setMilestone(ChartMilestone.AUDIT_IN_PROGRESS);
-      await this.charts.save(c);
+      dirty = true;
     }
+    if (dirty) await this.charts.save(c);
     return { chartId: id, startedAt: startedAt.toISOString() };
   }
 
@@ -1043,9 +1126,10 @@ async update(id: number, dto: UpdateChartDto) {
           c.markCoderAllocated();
         }
       }
-      // Applied last so an explicit bulk priority change wins over the auto-LOW
-      // that a coder allocation in the same request would otherwise set.
-      if (dto.priority) c.priority = dto.priority as Priority;
+      // A bulk priority choice is a manual override (§7.3): it pins the chart to
+      // that bucket until the allocated user touches it, then reverts to the
+      // computed default. Applied last so it wins over anything above.
+      if (dto.priority) c.setManualPriority(dto.priority as Priority);
     }
     await this.charts.save(updatedCharts);
     return { updated: updatedCharts.length };
@@ -1217,9 +1301,10 @@ async update(id: number, dto: UpdateChartDto) {
     const chart = await this.charts.findOne({ where: { id: chartId } });
     if (!chart) throw new NotFoundException();
     const f = await this.feedbacks.save(this.feedbacks.create({ chartId, auditorId, ...dto }));
-    // Auditor feedback bumps the chart into the HIGH priority bucket (unless
-    // it's CRITICAL or FINALIZED). The priority sweep enforces the same rule.
-    chart.markAuditorFeedback();
+    // Auditor feedback resurfaces the chart for the coder: pin it HIGH as a
+    // manual override (unless it's a Critical override) so it leaves any "done"
+    // state and shows on the coder's queue, reverting once the coder touches it.
+    if (chart.priority !== Priority.CRITICAL) chart.setManualPriority(Priority.HIGH);
     await this.charts.save(chart);
     return { id: f.id };
   }
@@ -1723,16 +1808,16 @@ async update(id: number, dto: UpdateChartDto) {
       // Any disagreement sends the chart back to the coder: restore the coder
       // slot (kept as-is when still held; falls back to the first-ever coder if
       // a teamlead/manager self-allocate overwrote it or it was cleared) and
-      // bump priority to HIGH so it resurfaces on the coder's queue instead of
-      // staying under "Done". An all-AGREE audit changes nothing — there is no
-      // rework for the coder to do.
+      // pin priority HIGH (manual override) so it resurfaces on the coder's
+      // queue, reverting to the computed bucket once the coder touches it. An
+      // all-AGREE audit changes nothing — there is no rework for the coder.
       if (uniqueAudits.some((a) => a.verdict === CodeAuditVerdict.DISAGREE)) {
         const chartsRepo = manager.getRepository(Chart);
         const chart = await chartsRepo.findOne({ where: { id: chartId } });
         if (chart) {
           chart.allocatedCoderId = chart.allocatedCoderId ?? chart.originalCoderId;
           chart.markCoderAllocated();
-          chart.markAuditorFeedback();
+          if (chart.priority !== Priority.CRITICAL) chart.setManualPriority(Priority.HIGH);
           await chartsRepo.save(chart);
         }
       }

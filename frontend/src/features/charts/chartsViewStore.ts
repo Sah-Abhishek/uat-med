@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ChartListParams } from '@/api/charts';
-import type { Priority } from '@/api/types';
+import type { PriorityTab } from '@/api/types';
 import type { SortState } from '@/hooks/useTableSort';
 
 /**
@@ -21,7 +21,7 @@ const STORAGE_KEY = 'charts.view.v1';
 
 export interface ChartsViewState {
   filters: ChartListParams;
-  tab: 'ALL' | Priority;
+  tab: 'ALL' | PriorityTab;
   page: number;
   pageSize: number;
   sort: SortState;
@@ -77,7 +77,7 @@ function persist(s: ChartsViewState) {
 
 interface ChartsViewStore extends ChartsViewState {
   setFilters: (filters: ChartListParams) => void;
-  setTab: (tab: 'ALL' | Priority) => void;
+  setTab: (tab: 'ALL' | PriorityTab) => void;
   setPage: (page: number) => void;
   setPageSize: (pageSize: number) => void;
   setSort: (sort: SortState) => void;

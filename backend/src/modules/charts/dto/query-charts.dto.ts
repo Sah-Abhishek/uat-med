@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { PageParamsDto } from '../../../common/dto/page-params.dto';
 import { ChartMilestone, ChartStatus, Priority } from '../../../common/enums';
@@ -47,7 +47,12 @@ export enum ReviewedFilter {
 }
 
 export class QueryChartsDto extends PageParamsDto {
-  @ApiPropertyOptional({ enum: Priority }) @IsOptional() @IsEnum(Priority) priority?: Priority;
+  /** Priority "tab": a computed bucket (CRITICAL/HIGH/MEDIUM/LOW) or the
+   * touched-today 'DONE' bucket (§4.6). FINALIZED is retired. */
+  @ApiPropertyOptional({ enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'DONE'] })
+  @IsOptional()
+  @IsIn([Priority.CRITICAL, Priority.HIGH, Priority.MEDIUM, Priority.LOW, 'DONE'])
+  priority?: Priority | 'DONE';
   @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) worklistId?: number[];
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() serialFrom?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() serialTo?: number;

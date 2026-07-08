@@ -11,6 +11,7 @@ import type {
   FeedbackStatus,
   Paginated,
   Priority,
+  PriorityTab,
   Procedure,
   SortDir,
   UploadedDocument,
@@ -23,7 +24,8 @@ export interface ChartListParams {
   pageSize?: number;
   sortBy?: string;
   sortDir?: SortDir;
-  priority?: Priority;
+  /** Priority "tab": a computed bucket or the touched-today 'DONE' bucket. */
+  priority?: PriorityTab;
   // Filter fields below accept a single value (other callers) OR an array
   // (the multi-select chart filters). The backend matches with IN(...).
   worklistId?: number | string | Array<number | string>;

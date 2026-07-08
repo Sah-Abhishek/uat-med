@@ -1,14 +1,12 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { User } from '../entities/user.entity';
-import { Chart } from '../entities/chart.entity';
 import { AuthService } from '../modules/auth/auth.service';
 import { CoderRegistrationService } from '../modules/ai-gateway/coder-registration.service';
 import { Role } from '../common/enums/roles.enum';
-import { ChartMilestone, Priority } from '../common/enums';
 
 /**
  * Seeds a bootstrap TEAMLEAD user from env vars on application start.
@@ -23,7 +21,6 @@ export class BootstrapService implements OnApplicationBootstrap {
 
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
-    @InjectRepository(Chart) private readonly charts: Repository<Chart>,
     private readonly cfg: ConfigService,
     private readonly auth: AuthService,
     private readonly coderRegistration: CoderRegistrationService,
@@ -31,7 +28,6 @@ export class BootstrapService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap(): Promise<void> {
     await this.seedBootstrapAdmin();
-    await this.backfillFinalizedPriority();
     await this.backfillCoderPublicIds();
   }
 
@@ -87,34 +83,4 @@ export class BootstrapService implements OnApplicationBootstrap {
     );
   }
 
-  /**
-   * One-shot backfill: any chart whose milestone is already CODING_DONE,
-   * AUDIT_DONE, or CLOSED and whose priority isn't yet FINALIZED gets moved
-   * into the "Done" priority bucket so the charts-list `Done` tab matches the
-   * new auto-finalize rule applied during chart save. Safe to run repeatedly
-   * — the WHERE clause is the no-op condition once everything's been flipped.
-   */
-  private async backfillFinalizedPriority(): Promise<void> {
-    const result = await this.charts.update(
-      {
-        milestone: In([
-          ChartMilestone.CODING_DONE,
-          ChartMilestone.AUDIT_DONE,
-          ChartMilestone.CLOSED,
-        ]),
-        // TypeORM's `Not(X)` would let us be explicit about "priority != FINALIZED",
-        // but the simpler approach below is to skip rows already FINALIZED via
-        // a follow-up filter. Update.affected counts only rows that changed.
-      },
-      { priority: Priority.FINALIZED },
-    );
-
-    if ((result.affected ?? 0) > 0) {
-      this.logger.warn(
-        `Backfilled priority=FINALIZED for ${result.affected} chart(s) already at coding/audit/closed milestones.`,
-      );
-    } else {
-      this.logger.log('No charts needed priority backfill.');
-    }
-  }
 }

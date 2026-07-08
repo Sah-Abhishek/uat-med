@@ -6,6 +6,7 @@ import * as ExcelJS from 'exceljs';
 import { ReportTemplate } from '../../entities/report-template.entity';
 import { Chart } from '../../entities/chart.entity';
 import { Role } from '../../common/enums/roles.enum';
+import { priorityBucketSql } from '../charts/priority-rules';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { QueryReportDto } from './dto/query-report.dto';
@@ -79,8 +80,6 @@ const PRIORITY_OPTIONS: FilterOption[] = [
   { value: 'HIGH', label: 'High' },
   { value: 'MEDIUM', label: 'Medium' },
   { value: 'LOW', label: 'Low' },
-  // Stored as FINALIZED; shown as "Done" everywhere in the UI.
-  { value: 'FINALIZED', label: 'Done' },
 ];
 /**
  * Sentinel option value meaning "no value set". When present in a select
@@ -113,7 +112,7 @@ const FIELDS: FieldDef[] = [
   { key: 'allocatedAuditor',  label: 'Allocated Auditor',  sql: 'ua.full_name',                             filterable: true,  sortable: true },
   { key: 'milestone',         label: 'Milestone',          sql: 'c.milestone',                              filterable: true,  sortable: true,  options: MILESTONE_OPTIONS },
   { key: 'chartStatus',       label: 'Chart Status',       sql: 'c.chart_status',                           filterable: true,  sortable: true,  options: CHART_STATUS_OPTIONS },
-  { key: 'priority',          label: 'Priority',           sql: 'c.priority',                               filterable: true,  sortable: true,  options: PRIORITY_OPTIONS },
+  { key: 'priority',          label: 'Priority',           sql: priorityBucketSql(Role.MANAGER, { chart: 'c', worklist: 'wl' }), filterable: true,  sortable: true,  options: PRIORITY_OPTIONS },
   { key: 'holdReason',        label: 'Hold Reason',        sql: `CASE WHEN jsonb_typeof(c.custom_fields#>'{_formDraft,holdReason}')='array' THEN (SELECT string_agg(v, ', ') FROM jsonb_array_elements_text(c.custom_fields#>'{_formDraft,holdReason}') v) END`, filterable: true,  sortable: true,  valuesFrom: { table: 'hold_reasons',        column: 'name' } },
   { key: 'responsibleParty',  label: 'Responsible Party',  sql: `CASE WHEN jsonb_typeof(c.custom_fields#>'{_formDraft,responsibleParty}')='array' THEN (SELECT string_agg(v, ', ') FROM jsonb_array_elements_text(c.custom_fields#>'{_formDraft,responsibleParty}') v) END`, filterable: true,  sortable: true,  valuesFrom: { table: 'responsible_parties', column: 'name' } },
   { key: 'primaryHealthPlan', label: 'Primary Health Plan',sql: `c.custom_fields#>>'{_formDraft,primaryHealth}'`,                                 filterable: true,  sortable: true,  valuesFrom: { table: 'primary_health_plans', column: 'name' } },
