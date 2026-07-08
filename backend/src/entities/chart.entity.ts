@@ -141,6 +141,18 @@ export class Chart {
    * computed role bucket until the allocated user touches the chart.
    */
   setManualPriority(next: Priority, when: Date = new Date()): void {
+    // Only the four real, assignable buckets can be pinned. Silently ignore
+    // retired (FINALIZED) or unknown values so a stale form that echoes back a
+    // chart's legacy stored `priority` can't resurrect it as an active override
+    // (which would render a literal, un-tabbable chip). See the priority runbook.
+    if (
+      next !== Priority.CRITICAL &&
+      next !== Priority.HIGH &&
+      next !== Priority.MEDIUM &&
+      next !== Priority.LOW
+    ) {
+      return;
+    }
     this.priority = next;
     this.manualPriorityAt = when;
   }

@@ -159,11 +159,11 @@ export class ChartsController {
   }
 
   @Post(':id/feedback')
-  @Roles(Role.AUDITOR, Role.TEAMLEAD)
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
   @HttpCode(201)
-  @ApiOperation({ summary: 'Auditor adds feedback.' })
+  @ApiOperation({ summary: 'Add a Conversation Log comment (coder, auditor, or team lead).' })
   addFeedback(@Param('id', ParseIntPipe) id: number, @Body() dto: ChartFeedbackDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.svc.addFeedback(id, dto, user.id);
+    return this.svc.addFeedback(id, dto, user);
   }
 
   @Patch('feedback/:feedbackId')

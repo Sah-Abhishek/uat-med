@@ -251,7 +251,14 @@ export class ChartsService {
   ): void {
     const bucket = priorityBucketSql(role);
     if (tab === 'DONE') {
-      qb.andWhere(touchedTodaySql(), { doneViewerId: viewerId });
+      // "Done" = charts the viewer touched today OR any COMPLETE chart (folded
+      // in so a coder's finished work stays reachable — completed charts match
+      // no active bucket by design). The role/allocation base-scope in list()
+      // keeps a coder to their own charts; managers/auditors see all as usual.
+      qb.andWhere(`(${touchedTodaySql()} OR c.chart_status = :doneComplete)`, {
+        doneViewerId: viewerId,
+        doneComplete: ChartStatus.COMPLETE,
+      });
     } else if (tab) {
       qb.andWhere(`(${bucket}) = :ptab`, { ptab: tab });
     } else if (hideUnbucketed) {
@@ -426,10 +433,13 @@ export class ChartsService {
     const priorityBucket = priorityBucketSql(user.role);
     const priorityRows = await priorityQb.clone()
       .select(priorityBucket, 'priority').addSelect('COUNT(*)', 'count').groupBy(priorityBucket).getRawMany();
-    // "Done today" (§4.6): charts this viewer touched today (timer), independent
-    // of the computed priority buckets.
+    // "Done" tab count (§4.6): charts this viewer touched today OR any COMPLETE
+    // chart — must match the applyPriorityScope('DONE') predicate exactly.
     const doneTodayRow = await priorityQb.clone()
-      .andWhere(touchedTodaySql(), { doneViewerId: Number(user.id) })
+      .andWhere(`(${touchedTodaySql()} OR c.chart_status = :doneComplete)`, {
+        doneViewerId: Number(user.id),
+        doneComplete: ChartStatus.COMPLETE,
+      })
       .select('COUNT(*)', 'count').getRawOne();
 
     const milestoneRows = await qb.clone()
@@ -1297,15 +1307,20 @@ async update(id: number, dto: UpdateChartDto) {
     }));
   }
 
-  async addFeedback(chartId: number, dto: ChartFeedbackDto, auditorId: number) {
+  async addFeedback(chartId: number, dto: ChartFeedbackDto, user: AuthenticatedUser) {
     const chart = await this.charts.findOne({ where: { id: chartId } });
     if (!chart) throw new NotFoundException();
-    const f = await this.feedbacks.save(this.feedbacks.create({ chartId, auditorId, ...dto }));
-    // Auditor feedback resurfaces the chart for the coder: pin it HIGH as a
-    // manual override (unless it's a Critical override) so it leaves any "done"
-    // state and shows on the coder's queue, reverting once the coder touches it.
-    if (chart.priority !== Priority.CRITICAL) chart.setManualPriority(Priority.HIGH);
-    await this.charts.save(chart);
+    const f = await this.feedbacks.save(this.feedbacks.create({ chartId, auditorId: user.id, ...dto }));
+    // A REVIEWER's comment (auditor / team lead) resurfaces the chart for the
+    // coder: pin it HIGH as a manual override (unless Critical) so it leaves any
+    // "done" state and shows on the coder's queue, reverting once the coder
+    // touches it. A coder's own Conversation Log comment must NOT escalate their
+    // chart, so the bump is gated to reviewers.
+    const isReviewer = user.role === Role.AUDITOR || user.role === Role.TEAMLEAD;
+    if (isReviewer && chart.priority !== Priority.CRITICAL) {
+      chart.setManualPriority(Priority.HIGH);
+      await this.charts.save(chart);
+    }
     return { id: f.id };
   }
 

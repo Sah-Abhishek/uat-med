@@ -34,18 +34,20 @@ type Aliases = { chart?: string; worklist?: string };
 // JSON is either absent (NULL) or the empty string.
 const BLANK = '__BLANK__';
 
-const EST = `'America/New_York'`;
-// The coders' local working day. Allocation happens during India business hours,
-// so the coder LOW bucket keys "allocated today" off IST, not the EST boundary.
+// All "today" boundaries use India business time (IST): the server, the users,
+// and the imported `received_date` are all India-based, and the rest of the app
+// (the dashboard "today") uses server-local midnight. The manual text says EST,
+// but that is a US template — using EST dropped India's "today" charts out of
+// the LOW/DONE buckets every morning until ~09:30 IST.
 const IST = `'Asia/Kolkata'`;
 
-/** The DB's calendar "today" in Eastern time (the manual's 00:00 EST boundary). */
-export function estTodaySql(): string {
-  return `(now() AT TIME ZONE ${EST})::date`;
+/** The DB's calendar "today" in India business time (IST). */
+export function businessTodaySql(): string {
+  return `(now() AT TIME ZONE ${IST})::date`;
 }
 
 function receivedToday(w: string): string {
-  return `${w}.received_date = ${estTodaySql()}`;
+  return `${w}.received_date = ${businessTodaySql()}`;
 }
 
 /** The chart was allocated to a coder during the current India-time (IST) day. */
@@ -225,8 +227,8 @@ export function priorityRankSql(role: Role, aliases: Aliases = {}): string {
 }
 
 /**
- * "Done today" (§4.6): the viewer started a timer on this chart during the
- * current Eastern-time day. Bind `:doneViewerId` to the viewer's user id.
+ * "Touched today" (§4.6): the viewer started a timer on this chart during the
+ * current India-time (IST) day. Bind `:doneViewerId` to the viewer's user id.
  * Requires the charts table aliased (default `c`).
  */
 export function touchedTodaySql(aliases: Aliases = {}): string {
@@ -235,6 +237,6 @@ export function touchedTodaySql(aliases: Aliases = {}): string {
     SELECT 1 FROM chart_time_logs t
     WHERE t.chart_id = ${c}.id
       AND t.user_id = :doneViewerId
-      AND (t.started_at AT TIME ZONE ${EST})::date = ${estTodaySql()}
+      AND (t.started_at AT TIME ZONE ${IST})::date = ${businessTodaySql()}
   )`;
 }
