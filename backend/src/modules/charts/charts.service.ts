@@ -1355,9 +1355,19 @@ async update(id: number, dto: UpdateChartDto) {
     return { id: f.id };
   }
 
-  async updateFeedback(feedbackId: number, dto: UpdateFeedbackDto) {
+  async updateFeedback(feedbackId: number, dto: UpdateFeedbackDto, user: AuthenticatedUser) {
     const f = await this.feedbacks.findOne({ where: { id: feedbackId } });
     if (!f) throw new NotFoundException();
+    // Editing the comment TEXT is restricted to its author — the Conversation
+    // Log lets a user fix their own comment, not rewrite someone else's. The
+    // author is stored in `auditorId` (the column holds whoever created the row,
+    // regardless of role). Status-only updates (e.g. a coder's feedback
+    // response on a reviewer's row) are intentionally NOT author-gated.
+    if (dto.comments !== undefined && Number(f.auditorId) !== Number(user.id)) {
+      throw new ForbiddenException({
+        error: { code: 'forbidden', message: 'You can only edit your own comment.' },
+      });
+    }
     Object.assign(f, dto);
     return this.feedbacks.save(f);
   }

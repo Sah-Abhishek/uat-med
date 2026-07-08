@@ -108,6 +108,11 @@ const FIELDS: FieldDef[] = [
   { key: 'receivedDate',      label: 'Received Date',      sql: 'wl.received_date',                         filterable: true,  sortable: true,  type: 'date' },
   { key: 'dateOfCompletion',  label: 'Date of Completion', sql: `CASE WHEN c.chart_status = 'COMPLETE' THEN c.updated_at ELSE NULL END`, filterable: true, sortable: true, type: 'date' },
   { key: 'codingCompletedAt', label: 'Date of Coding',     sql: 'c.coding_completed_at',                     filterable: true,  sortable: true,  type: 'date' },
+  // Audit Done date — the day the chart reached the AUDIT_DONE milestone. Mirrors
+  // the "Audit Done Today" summary tile (milestone = AUDIT_DONE, milestone_changed_at).
+  // Blank once the chart moves on to CLOSED, since milestone_changed_at then reflects
+  // that later transition rather than the audit-done moment.
+  { key: 'auditDoneDate',     label: 'Audit Done Date',    sql: `CASE WHEN c.milestone = 'AUDIT_DONE' THEN c.milestone_changed_at ELSE NULL END`, filterable: true, sortable: true, type: 'date' },
   { key: 'allocatedCoder',    label: 'Allocated Coder',    sql: 'uc.full_name',                             filterable: true,  sortable: true },
   { key: 'allocatedAuditor',  label: 'Allocated Auditor',  sql: 'ua.full_name',                             filterable: true,  sortable: true },
   { key: 'milestone',         label: 'Milestone',          sql: 'c.milestone',                              filterable: true,  sortable: true,  options: MILESTONE_OPTIONS },
@@ -118,8 +123,14 @@ const FIELDS: FieldDef[] = [
   { key: 'primaryHealthPlan', label: 'Primary Health Plan',sql: `c.custom_fields#>>'{_formDraft,primaryHealth}'`,                                 filterable: true,  sortable: true,  valuesFrom: { table: 'primary_health_plans', column: 'name' } },
   { key: 'facility',          label: 'Facility',           sql: `c.custom_fields#>>'{_formDraft,facility}'`,             filterable: true,  sortable: true,  filterKind: 'select' },
   { key: 'primaryDiagnosis',  label: 'Primary Diagnosis',  sql: 'c.primary_diagnosis',                      filterable: true,  sortable: true },
-  { key: 'secondaryDiagnoses',label: 'Secondary Dx',       sql: `CASE WHEN jsonb_typeof(c.custom_fields#>'{aiPrediction,secondary}')='array' THEN (SELECT string_agg(e->>'code', ', ') FROM jsonb_array_elements(c.custom_fields#>'{aiPrediction,secondary}') e) END`, filterable: false, sortable: false },
+  // Sdx — the chart's secondary diagnosis codes (aggregated). Filterable by
+  // substring so "I10" matches any chart carrying that code among its secondaries.
+  { key: 'secondaryDiagnoses',label: 'Secondary Dx (Sdx)', sql: `CASE WHEN jsonb_typeof(c.custom_fields#>'{aiPrediction,secondary}')='array' THEN (SELECT string_agg(e->>'code', ', ') FROM jsonb_array_elements(c.custom_fields#>'{aiPrediction,secondary}') e) END`, filterable: true, sortable: false, filterKind: 'text' },
   { key: 'emLevel',           label: 'E/M Level',          sql: 'c.em_level',                               filterable: true,  sortable: true },
+  // Modifier — the chart's final modifier codes, from submitted code decisions
+  // (code_type = MODIFIER). Uses the edited code when the decision was EDITED,
+  // else the original value; rejected modifiers are excluded. Substring filter.
+  { key: 'modifier',          label: 'Modifier',           sql: `(SELECT string_agg(DISTINCT COALESCE(NULLIF(cd.edited_code, ''), cd.code_value), ', ') FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.code_type = 'MODIFIER' AND cd.decision <> 'REJECTED')`, filterable: true, sortable: false, filterKind: 'text' },
   { key: 'coderCommentsToClient', label: 'Coder Comments to Client', sql: 'c.coder_comments_to_client',       filterable: true,  sortable: false, filterKind: 'text' },
   { key: 'facilityEM',        label: 'Facility E/M',       sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE cfc.name='Facility E/M' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'text' },
   { key: 'infusion',          label: 'Infusion',           sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE cfc.name='Infusion' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'text' },

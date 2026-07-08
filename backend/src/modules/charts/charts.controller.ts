@@ -167,10 +167,14 @@ export class ChartsController {
   }
 
   @Patch('feedback/:feedbackId')
-  @Roles(Role.CODER, Role.TEAMLEAD)
-  @ApiOperation({ summary: 'Coder responds to feedback (Agree / Reject / Implement).' })
-  updateFeedback(@Param('feedbackId', ParseIntPipe) feedbackId: number, @Body() dto: UpdateFeedbackDto) {
-    return this.svc.updateFeedback(feedbackId, dto);
+  @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Edit a Conversation Log comment (author only) or record a coder feedback response (Agree / Reject / Implement).' })
+  updateFeedback(
+    @Param('feedbackId', ParseIntPipe) feedbackId: number,
+    @Body() dto: UpdateFeedbackDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.updateFeedback(feedbackId, dto, user);
   }
 
   /**
