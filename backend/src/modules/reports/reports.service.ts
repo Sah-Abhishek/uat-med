@@ -140,6 +140,13 @@ const FIELDS: FieldDef[] = [
   { key: 'coderCommentsToClient', label: 'Coder Comments to Client', sql: 'c.coder_comments_to_client',       filterable: true,  sortable: false, filterKind: 'text' },
   { key: 'facilityEM',        label: 'Facility E/M',       sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE cfc.name='Facility E/M' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'text' },
   { key: 'infusion',          label: 'Infusion',           sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE cfc.name='Infusion' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'text' },
+  // POS (Place of Service) and Provider Name are per-location configured custom
+  // fields (like Facility E/M / Infusion), stored in custom_fields keyed by the
+  // config id. Match the config name case-insensitively so "Provider Name" and
+  // "Provider name" (both casings exist across locations) resolve. Rendered as
+  // live-distinct dropdowns (POS is a small set; Provider Name a bounded roster).
+  { key: 'pos',               label: 'POS',                sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE LOWER(cfc.name)='pos' AND cfc.location_id=wl.location_id LIMIT 1)`,           filterable: true,  sortable: true,  filterKind: 'select' },
+  { key: 'providerName',      label: 'Provider Name',      sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE LOWER(cfc.name)='provider name' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'select' },
   { key: 'qcStatus',          label: 'QC Status',          sql: `c.custom_fields#>>'{_formDraft,qcStatus}'`,             filterable: true,  sortable: false, options: QC_STATUS_OPTIONS },
   { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `c.custom_fields->>'feedbackCategory'`,     filterable: true,  sortable: false },
   { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields->>'feedbackType'`,         filterable: true,  sortable: false },
