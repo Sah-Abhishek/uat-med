@@ -20,7 +20,7 @@ import type { ApiErrorShape, AttendanceStatus, Role, User } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, Select } from '@/components/ui/Field';
+import { Input, Label, Select, FancySelect } from '@/components/ui/Field';
 import { Avatar, ConfirmModal, Modal, ModalFooter, Tabs } from '@/components/ui/Primitives';
 import { useAuth } from '@/auth/store';
 import { can } from '@/permissions';
@@ -394,9 +394,10 @@ function EditUserModal({
 
   // Seed the form from the loaded user. Re-runs whenever the modal opens or
   // the user payload refetches so we don't show stale draft values.
-  const { register, handleSubmit, reset, watch } = useForm<UpdateUserDto>({
+  const { register, handleSubmit, reset, watch, setValue } = useForm<UpdateUserDto>({
     defaultValues: toDefaults(user),
   });
+  const roleValue = watch('role');
   useEffect(() => {
     if (open) reset(toDefaults(user));
   }, [open, user, reset]);
@@ -488,11 +489,11 @@ function EditUserModal({
           {canEditRole && (
             <div>
               <Label>Role</Label>
-              <Select {...register('role')}>
-                {ROLES.map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </Select>
+              <FancySelect
+                value={roleValue ?? user.role}
+                onChange={(v) => setValue('role', v as Role, { shouldDirty: true })}
+                options={ROLES.map((r) => ({ value: r, label: r }))}
+              />
               <p className="mt-1 text-[11px] text-ink-muted">
                 Updates this user's permissions across the app.
               </p>
