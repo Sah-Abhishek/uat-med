@@ -16,7 +16,7 @@ import {
   listLocations,
   listPrimarySpecialities,
 } from '@/api/configurations';
-import type { ApiErrorShape, AttendanceStatus, User } from '@/api/types';
+import type { ApiErrorShape, AttendanceStatus, Role, User } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -27,10 +27,13 @@ import { can } from '@/permissions';
 import { cn, formatDate } from '@/lib/utils';
 import { ArrowLeft, UserX, UserCheck, Loader2, Pencil, KeyRound, Eye, EyeOff, RefreshCw, Copy, Check } from 'lucide-react';
 
+const ROLES: Role[] = ['TEAMLEAD', 'MANAGER', 'AUDITOR', 'CODER'];
+
 export function UserProfilePage() {
   const { id } = useParams<{ id: string }>();
   const viewer = useAuth((s) => s.user)!;
   const canAdmin = can(viewer, 'user.deactivate');
+  const canChangeRole = can(viewer, 'user.changeRole');
 
   const [tab, setTab] = useState<'details' | 'attendance'>('details');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -180,6 +183,9 @@ export function UserProfilePage() {
         onClose={() => setEditOpen(false)}
         user={user}
         canEditAdminFields={canAdmin}
+        // Admins can retag anyone but themselves — self-demotion would
+        // silently strip the caller's own admin access.
+        canEditRole={canChangeRole && user.id !== viewer.id}
       />
 
       <ResetPasswordModal
@@ -375,11 +381,13 @@ function EditUserModal({
   onClose,
   user,
   canEditAdminFields,
+  canEditRole,
 }: {
   open: boolean;
   onClose: () => void;
   user: User;
   canEditAdminFields: boolean;
+  canEditRole: boolean;
 }) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -434,6 +442,9 @@ function EditUserModal({
             designation: d.designation?.trim() || undefined,
             dateOfBirth: d.dateOfBirth || undefined,
             dateOfJoining: d.dateOfJoining || undefined,
+            // Only send role when the viewer is allowed to change it, so a
+            // self-edit or non-admin never touches it.
+            role: canEditRole ? d.role : undefined,
             clientId: d.clientId ? Number(d.clientId) : undefined,
             locationId: d.locationId ? Number(d.locationId) : undefined,
             primarySpecialityId: d.primarySpecialityId ? Number(d.primarySpecialityId) : undefined,
@@ -474,6 +485,19 @@ function EditUserModal({
             <Label>Date of joining</Label>
             <Input type="date" {...register('dateOfJoining')} />
           </div>
+          {canEditRole && (
+            <div>
+              <Label>Role</Label>
+              <Select {...register('role')}>
+                {ROLES.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </Select>
+              <p className="mt-1 text-[11px] text-ink-muted">
+                Updates this user's permissions across the app.
+              </p>
+            </div>
+          )}
         </div>
 
         {canEditAdminFields && (
@@ -530,6 +554,7 @@ function toDefaults(user: User): UpdateUserDto {
     designation: user.designation ?? '',
     dateOfBirth: user.dateOfBirth ?? '',
     dateOfJoining: user.dateOfJoining ?? '',
+    role: user.role,
     clientId: user.clientId ?? undefined,
     locationId: user.locationId ?? undefined,
     primarySpecialityId: user.primarySpecialityId ?? undefined,

@@ -6,7 +6,6 @@ import {
   listUsers,
   getUserStats,
   createUser,
-  updateUser,
   deactivateUser,
   activateUser,
   listSignupRequests,
@@ -52,7 +51,6 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
-  Pencil,
 } from 'lucide-react';
 
 const ROLES: Role[] = ['TEAMLEAD', 'MANAGER', 'AUDITOR', 'CODER'];
@@ -72,7 +70,6 @@ export function UsersPage() {
   const user = useAuth((s) => s.user)!;
   const canCreate = can(user, 'user.create');
   const canDeactivate = can(user, 'user.deactivate');
-  const canChangeRole = can(user, 'user.changeRole');
 
   const [tab, setTab] = useState<UserStatus>('ACTIVE');
   const [page, setPage] = useState(1);
@@ -83,7 +80,6 @@ export function UsersPage() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null);
-  const [roleTarget, setRoleTarget] = useState<{ id: string; name: string; role: Role } | null>(null);
   const pageSize = 20;
 
   const stats = useQuery({ queryKey: ['users', 'stats'], queryFn: getUserStats });
@@ -303,13 +299,9 @@ export function UsersPage() {
                         u={u}
                         tab={tab}
                         canDeactivate={canDeactivate}
-                        // Admins can retag anyone but themselves — self-demotion
-                        // would silently strip the caller's own admin access.
-                        canChangeRole={canChangeRole && u.id !== user.id}
                         clientNameById={clientNameById}
                         specialityNameById={specialityNameById}
                         onDeactivate={() => setDeactivateTarget({ id: u.id, name: u.fullName })}
-                        onChangeRole={() => setRoleTarget({ id: u.id, name: u.fullName, role: u.role })}
                       />
                     ))
                   )}
@@ -338,13 +330,6 @@ export function UsersPage() {
         <DeactivateModal
           target={deactivateTarget}
           onClose={() => setDeactivateTarget(null)}
-        />
-      )}
-
-      {roleTarget && (
-        <ChangeRoleModal
-          target={roleTarget}
-          onClose={() => setRoleTarget(null)}
         />
       )}
     </div>
@@ -511,20 +496,16 @@ function UserRow({
   u,
   tab,
   canDeactivate,
-  canChangeRole,
   clientNameById,
   specialityNameById,
   onDeactivate,
-  onChangeRole,
 }: {
   u: User;
   tab: UserStatus;
   canDeactivate: boolean;
-  canChangeRole: boolean;
   clientNameById: Map<number, string>;
   specialityNameById: Map<number, string>;
   onDeactivate: () => void;
-  onChangeRole: () => void;
 }) {
   const isAttending = u.status === 'ACTIVE';
   const specialityLabel =
@@ -553,19 +534,7 @@ function UserRow({
         </div>
       </td>
       <td className="table-cell">
-        {canChangeRole ? (
-          <button
-            type="button"
-            onClick={onChangeRole}
-            title="Change role"
-            className="group inline-flex items-center gap-1.5 rounded-pill border border-line px-2.5 py-1 text-ink capitalize hover:border-primary/50 hover:bg-surface-sunken transition"
-          >
-            {u.role.toLowerCase()}
-            <Pencil className="w-3 h-3 text-ink-subtle group-hover:text-primary transition" />
-          </button>
-        ) : (
-          <span className="text-ink capitalize">{u.role.toLowerCase()}</span>
-        )}
+        <span className="text-ink capitalize">{u.role.toLowerCase()}</span>
       </td>
       <td className="table-cell text-ink-muted">{specialityLabel}</td>
       <td className="table-cell text-ink-muted">{clientLabel}</td>
@@ -1150,67 +1119,6 @@ function DeactivateModal({
       confirmLabel="Deactivate"
       loading={m.isPending}
     />
-  );
-}
-
-/* ── Change role modal ─────────────────────────────────── */
-function ChangeRoleModal({
-  target,
-  onClose,
-}: {
-  target: { id: string; name: string; role: Role };
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const [role, setRole] = useState<Role>(target.role);
-  const [error, setError] = useState<string | null>(null);
-
-  const m = useMutation({
-    mutationFn: () => updateUser(target.id, { role }),
-    onSuccess: () => {
-      // Invalidating ['users'] also refreshes the role-count tiles and stats,
-      // whose query keys are prefixed with 'users'.
-      qc.invalidateQueries({ queryKey: ['users'] });
-      onClose();
-    },
-    onError: (err) => setError((err as unknown as ApiErrorShape).message),
-  });
-
-  return (
-    <Modal open onClose={onClose} title="Change role" subtitle={target.name} size="sm">
-      <div className="space-y-4">
-        {error && (
-          <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger border border-danger/30">
-            {error}
-          </div>
-        )}
-        <div>
-          <Label required>Role</Label>
-          <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            {ROLES.map((r) => (
-              <option key={r} value={r}>{r}</option>
-            ))}
-          </Select>
-          <p className="mt-1 text-[11px] text-ink-muted">
-            Updates this user's permissions across the app immediately.
-          </p>
-        </div>
-        <ModalFooter>
-          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          <Button
-            type="button"
-            loading={m.isPending}
-            disabled={role === target.role}
-            onClick={() => {
-              setError(null);
-              m.mutate();
-            }}
-          >
-            Save role
-          </Button>
-        </ModalFooter>
-      </div>
-    </Modal>
   );
 }
 
