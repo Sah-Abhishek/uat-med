@@ -560,8 +560,12 @@ export interface ReportTemplate {
   name: string;
   columns: string[];
   filters: Record<string, unknown>;
+  /** Filterable field keys this template exposes in the Filters section. */
+  filterKeys: string[];
   sort: Array<{ key: string; dir: SortDir }>;
   ownerId: string;
+  /** Full name of the user who created the template (for the "owner — name" label). */
+  ownerName: string | null;
   isShared: boolean;
   createdAt: string;
   updatedAt: string;

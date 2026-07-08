@@ -11,5 +11,9 @@ export class SaveTemplateDto {
   @ApiPropertyOptional({ type: Object }) @IsOptional() @IsObject()
   filters?: Record<string, any>;
 
+  /** Filterable field keys this template exposes in the Filters section. */
+  @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @IsString({ each: true })
+  filterKeys?: string[];
+
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isShared?: boolean;
 }

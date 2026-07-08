@@ -43,6 +43,9 @@ type FilterValue = string | string[] | DateRange;
 interface QueryState {
   columns: string[];
   filters: Record<string, FilterValue>;
+  /** Which filter controls the Filters section shows. `null` = a fresh report
+   *  (show all filters); a template load sets it to the template's saved set. */
+  filterKeys: string[] | null;
   sort: QueryReportDto['sort'];
   page: number;
 }
@@ -63,25 +66,24 @@ const DEFAULT_COLUMNS = [
 ];
 const PAGE_SIZE = 50;
 
-/** Stable stringify of a filter value for equality checks (order-insensitive
- *  for multi-select arrays). */
-function serializeFilterValue(v: unknown): string {
-  if (Array.isArray(v)) return JSON.stringify([...v].map(String).sort());
-  return JSON.stringify(v);
-}
-
-/** Returns true when two filter records carry the same effective (non-empty) values. */
-function filtersEqual(a: Record<string, FilterValue>, b: Record<string, FilterValue>) {
-  const ca = cleanFilters(a);
-  const cb = cleanFilters(b);
-  const ak = Object.keys(ca);
-  const bk = Object.keys(cb);
-  if (ak.length !== bk.length) return false;
-  return ak.every(k => k in cb && serializeFilterValue(ca[k]) === serializeFilterValue(cb[k]));
-}
-
 function arrayEqual<T>(a: T[], b: T[]) {
   return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** Order-insensitive equality for a set of keys (used for filter-key sets). */
+function setEqual(a: string[], b: string[]) {
+  if (a.length !== b.length) return false;
+  const sb = new Set(b);
+  return a.every((k) => sb.has(k));
+}
+
+/** Drop filter values whose control is no longer shown, so a hidden filter
+ *  can't keep silently constraining the query. */
+function pruneFilters(filters: Record<string, FilterValue>, keys: string[]): Record<string, FilterValue> {
+  const allow = new Set(keys);
+  const out: Record<string, FilterValue> = {};
+  for (const [k, v] of Object.entries(filters)) if (allow.has(k)) out[k] = v;
+  return out;
 }
 
 export function ReportsPage() {
@@ -89,15 +91,23 @@ export function ReportsPage() {
   const [state, setState] = useState<QueryState>({
     columns: DEFAULT_COLUMNS,
     filters: {},
+    filterKeys: null,
     sort: [],
     page: 1,
   });
   const [activeTemplate, setActiveTemplate] = useState<ReportTemplate | null>(null);
   const [customizeOpen, setCustomizeOpen] = useState(false);
-  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const fields = useQuery({ queryKey: ['reports', 'fields'], queryFn: getReportFields });
+
+  // Every filterable field, in catalog order — the default Filters set for a
+  // fresh report (state.filterKeys === null). A loaded template narrows this.
+  const allFilterKeys = useMemo(
+    () => (fields.data ?? []).filter((f) => f.filterable).map((f) => f.key),
+    [fields.data],
+  );
+  const effectiveFilterKeys = state.filterKeys ?? allFilterKeys;
 
   const query = useQuery({
     queryKey: ['reports', 'query', state],
@@ -128,21 +138,23 @@ export function ReportsPage() {
     onError: (e) => setDownloadError((e as unknown as ApiErrorShape).message ?? 'Excel export failed.'),
   });
 
-  /** True when the active template's saved spec differs from the current builder state. */
+  /** True when the active template's saved spec (columns + filter set) differs
+   *  from the current builder state. Filter VALUES aren't part of a template. */
   const isDirty = useMemo(() => {
     if (!activeTemplate) return false;
-    const tplFilters = (activeTemplate.filters ?? {}) as Record<string, FilterValue>;
     return (
       !arrayEqual(activeTemplate.columns, state.columns) ||
-      !filtersEqual(tplFilters, state.filters)
+      !setEqual(activeTemplate.filterKeys ?? [], state.filterKeys ?? [])
     );
-  }, [activeTemplate, state.columns, state.filters]);
+  }, [activeTemplate, state.columns, state.filterKeys]);
 
   function loadTemplate(t: ReportTemplate) {
     setActiveTemplate(t);
+    // Show only the template's fields + filters; filter values start blank.
     setState({
       columns: t.columns,
-      filters: { ...((t.filters ?? {}) as Record<string, FilterValue>) },
+      filters: {},
+      filterKeys: t.filterKeys ?? [],
       sort: [],
       page: 1,
     });
@@ -152,7 +164,8 @@ export function ReportsPage() {
     if (!activeTemplate) return;
     setState({
       columns: activeTemplate.columns,
-      filters: { ...((activeTemplate.filters ?? {}) as Record<string, FilterValue>) },
+      filters: {},
+      filterKeys: activeTemplate.filterKeys ?? [],
       sort: [],
       page: 1,
     });
@@ -160,7 +173,7 @@ export function ReportsPage() {
 
   function newReport() {
     setActiveTemplate(null);
-    setState({ columns: DEFAULT_COLUMNS, filters: {}, sort: [], page: 1 });
+    setState({ columns: DEFAULT_COLUMNS, filters: {}, filterKeys: null, sort: [], page: 1 });
   }
 
   return (
@@ -193,7 +206,7 @@ export function ReportsPage() {
           template={activeTemplate}
           isDirty={isDirty}
           onDiscard={discardChanges}
-          onUpdate={() => setSaveTemplateOpen(true)}
+          onUpdate={() => setCustomizeOpen(true)}
           onClose={newReport}
         />
       )}
@@ -201,6 +214,8 @@ export function ReportsPage() {
       {/* ── Filters ────────────────────────────────────────── */}
       <FiltersSection
         fields={fields.data ?? []}
+        filterKeys={effectiveFilterKeys}
+        scopedToTemplate={state.filterKeys !== null}
         values={state.filters}
         onChange={(filters) => setState(s => ({ ...s, filters, page: 1 }))}
         onClear={() => setState(s => ({ ...s, filters: {}, page: 1 }))}
@@ -232,14 +247,7 @@ export function ReportsPage() {
               leftIcon={<Settings2 className="w-3.5 h-3.5" />}
               onClick={() => setCustomizeOpen(true)}
             >
-              Customize columns
-            </Button>
-            <Button
-              variant="soft"
-              leftIcon={<BookmarkPlus className="w-3.5 h-3.5" />}
-              onClick={() => setSaveTemplateOpen(true)}
-            >
-              {activeTemplate && isDirty ? 'Save changes' : 'Save as template'}
+              {activeTemplate && isDirty ? 'Customize / Save changes' : 'Customize / Save template'}
             </Button>
             <Button
               leftIcon={<FileSpreadsheet className="w-3.5 h-3.5" />}
@@ -305,20 +313,23 @@ export function ReportsPage() {
         />
       </Card>
 
-      <CustomizeColumnsModal
+      <CustomizeTemplateModal
         open={customizeOpen}
         onClose={() => setCustomizeOpen(false)}
         fields={fields.data ?? []}
         currentColumns={state.columns}
-        onApply={(cols) => setState((s) => ({ ...s, columns: cols, page: 1 }))}
-      />
-
-      <SaveTemplateModal
-        open={saveTemplateOpen}
-        onClose={() => setSaveTemplateOpen(false)}
-        state={state}
+        currentFilterKeys={effectiveFilterKeys}
         activeTemplate={activeTemplate}
-        onSaved={(t) => setActiveTemplate(t)}
+        currentUserId={currentUser?.id}
+        canManageAny={currentUser?.role === 'TEAMLEAD' || currentUser?.role === 'MANAGER'}
+        onApply={(cols, fks) =>
+          setState((s) => ({ ...s, columns: cols, filterKeys: fks, filters: pruneFilters(s.filters, fks), page: 1 }))
+        }
+        onSaved={(t) => {
+          setActiveTemplate(t);
+          const fks = t.filterKeys ?? [];
+          setState((s) => ({ ...s, columns: t.columns, filterKeys: fks, filters: pruneFilters(s.filters, fks), page: 1 }));
+        }}
       />
     </div>
   );
@@ -345,11 +356,6 @@ function cleanFilters(f: Record<string, FilterValue>): Record<string, string | s
     }
   }
   return out;
-}
-
-/** Count of active (non-empty) filters in a record. */
-function activeFilterCount(f: Record<string, unknown>): number {
-  return Object.keys(cleanFilters(f as Record<string, FilterValue>)).length;
 }
 
 /* ── Saved Templates section (inline table) ─────────────── */
@@ -394,10 +400,9 @@ function SavedTemplatesSection({
         <table className="w-full">
           <thead>
             <tr>
-              <th className="table-head">Name</th>
+              <th className="table-head">Template</th>
               <th className="table-head">Columns</th>
               <th className="table-head">Filters</th>
-              <th className="table-head">Visibility</th>
               <th className="table-head">Updated</th>
               <th className="table-head w-32 text-right pr-6">Actions</th>
             </tr>
@@ -405,13 +410,13 @@ function SavedTemplatesSection({
           <tbody>
             {templates.isPending ? (
               <tr>
-                <td colSpan={6} className="py-10 text-center">
+                <td colSpan={5} className="py-10 text-center">
                   <Loader2 className="w-4 h-4 animate-spin inline text-ink-muted" />
                 </td>
               </tr>
             ) : (templates.data?.items.length ?? 0) === 0 ? (
               <tr>
-                <td colSpan={6} className="py-10 text-center text-sm text-ink-muted">
+                <td colSpan={5} className="py-10 text-center text-sm text-ink-muted">
                   No saved templates yet. Configure filters + columns and click <span className="font-semibold">Save as template</span>.
                 </td>
               </tr>
@@ -419,7 +424,7 @@ function SavedTemplatesSection({
               templates.data?.items.map((t) => {
                 const isActive = String(t.id) === String(activeTemplateId);
                 const isOwn = String(t.ownerId) === String(currentUserId);
-                const filterCount = activeFilterCount((t.filters ?? {}) as Record<string, unknown>);
+                const filterCount = t.filterKeys?.length ?? 0;
                 return (
                   <tr
                     key={t.id}
@@ -431,7 +436,13 @@ function SavedTemplatesSection({
                     <td className="table-cell font-semibold text-ink">
                       <div className="flex items-center gap-2">
                         {isActive && <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />}
-                        <span className="truncate">{t.name}</span>
+                        <span className="truncate">
+                          <span className="font-normal text-ink-muted">
+                            {t.ownerName ?? 'Unknown'}
+                            {isOwn && ' (you)'} —{' '}
+                          </span>
+                          {t.name}
+                        </span>
                       </div>
                     </td>
                     <td className="table-cell text-ink-muted text-xs">
@@ -439,18 +450,6 @@ function SavedTemplatesSection({
                     </td>
                     <td className="table-cell text-ink-muted text-xs">
                       {filterCount === 0 ? '—' : `${filterCount} filter${filterCount === 1 ? '' : 's'}`}
-                    </td>
-                    <td className="table-cell">
-                      <span
-                        className={
-                          'chip ' +
-                          (t.isShared
-                            ? 'bg-info-soft text-info'
-                            : 'bg-surface-sunken text-ink-muted')
-                        }
-                      >
-                        {t.isShared ? 'Shared' : 'Private'}
-                      </span>
                     </td>
                     <td className="table-cell text-ink-muted text-xs">
                       {formatDate(t.updatedAt)}
@@ -531,18 +530,29 @@ function ActiveTemplateBanner({
 /* ── Filters card ───────────────────────────────────────── */
 function FiltersSection({
   fields,
+  filterKeys,
+  scopedToTemplate,
   values,
   onChange,
   onClear,
   onRun,
 }: {
   fields: ReportField[];
+  /** The filter controls to show, in order (a template's set, or all filters). */
+  filterKeys: string[];
+  /** True when a template is scoping the set (affects the empty-state copy). */
+  scopedToTemplate: boolean;
   values: Record<string, FilterValue>;
   onChange: (next: Record<string, FilterValue>) => void;
   onClear: () => void;
   onRun: () => void;
 }) {
-  const filterable = useMemo(() => fields.filter((f) => f.filterable), [fields]);
+  // Resolve the requested keys to field defs (filterable only), preserving order.
+  const byKey = useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
+  const filterable = useMemo(
+    () => filterKeys.map((k) => byKey.get(k)).filter((f): f is ReportField => !!f && f.filterable),
+    [filterKeys, byKey],
+  );
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? filterable : filterable.slice(0, 8);
 
@@ -560,18 +570,26 @@ function FiltersSection({
       subtitle="Numbers match by substring; pick values or a date range for the rest. Leave blank to include everything."
       defaultOpen
     >
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-3">
-        {visible.map((f) => (
-          <div key={f.key}>
-            <Label>{f.label}</Label>
-            <FilterControl
-              field={f}
-              value={values[f.key]}
-              onChange={(v) => setField(f.key, v)}
-            />
-          </div>
-        ))}
-      </div>
+      {filterable.length === 0 ? (
+        <p className="text-sm text-ink-muted pt-3">
+          {scopedToTemplate
+            ? 'This template has no filters. Open “Customize / Save” to add some.'
+            : 'No filters available.'}
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-3">
+          {visible.map((f) => (
+            <div key={f.key}>
+              <Label>{f.label}</Label>
+              <FilterControl
+                field={f}
+                value={values[f.key]}
+                onChange={(v) => setField(f.key, v)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="flex items-center justify-between mt-5">
         <div>
@@ -672,154 +690,76 @@ function SelectFilter({
   );
 }
 
-/* ── Customize Columns modal ────────────────────────────── */
-function CustomizeColumnsModal({
+/* ── Customize & Save template modal (two-pane: fields + filters) ── */
+function CustomizeTemplateModal({
   open,
   onClose,
   fields,
   currentColumns,
+  currentFilterKeys,
+  activeTemplate,
+  currentUserId,
+  canManageAny,
   onApply,
+  onSaved,
 }: {
   open: boolean;
   onClose: () => void;
   fields: ReportField[];
   currentColumns: string[];
-  onApply: (cols: string[]) => void;
-}) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(currentColumns));
-  const [search, setSearch] = useState('');
-
-  useEffect(() => {
-    if (open) setSelected(new Set(currentColumns));
-  }, [open, currentColumns]);
-
-  const filtered = useMemo(
-    () => fields.filter((f) => f.label.toLowerCase().includes(search.toLowerCase())),
-    [fields, search],
-  );
-
-  function toggle(key: string) {
-    const next = new Set(selected);
-    next.has(key) ? next.delete(key) : next.add(key);
-    setSelected(next);
-  }
-
-  function selectAll() {
-    setSelected(new Set(fields.map((f) => f.key)));
-  }
-  function selectNone() {
-    setSelected(new Set());
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Customize columns" subtitle="Pick the fields to include in the table and the Excel export." size="lg">
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <SearchInput placeholder="Search fields…" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <Button size="sm" variant="ghost" onClick={selectAll}>All</Button>
-          <Button size="sm" variant="ghost" onClick={selectNone}>None</Button>
-        </div>
-        <div className="max-h-[400px] overflow-y-auto border border-line rounded-lg">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-surface-sunken">
-              <tr>
-                <th className="table-head">Field</th>
-                <th className="table-head w-24 text-center">Show</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((f) => (
-                <tr key={f.key} className="hover:bg-surface-sunken/40 transition">
-                  <td className="px-4 py-2 border-b border-line/60">
-                    <p className="text-ink font-medium">{f.label}</p>
-                    <p className="text-[10px] text-ink-subtle font-mono">{f.key}</p>
-                  </td>
-                  <td className="px-4 py-2 border-b border-line/60 text-center">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(f.key)}
-                      onChange={() => toggle(f.key)}
-                      className="accent-primary w-4 h-4"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="text-[11px] text-ink-muted">{selected.size} of {fields.length} columns selected</p>
-        <ModalFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button
-            disabled={selected.size === 0}
-            onClick={() => {
-              // Preserve the user's current column order; append newly-checked fields
-              // in catalog order, drop any that were unchecked.
-              const ordered = [
-                ...currentColumns.filter((k) => selected.has(k)),
-                ...fields.filter((f) => selected.has(f.key) && !currentColumns.includes(f.key)).map((f) => f.key),
-              ];
-              onApply(ordered);
-              onClose();
-            }}
-          >
-            Apply
-          </Button>
-        </ModalFooter>
-      </div>
-    </Modal>
-  );
-}
-
-/* ── Save / Update template modal ───────────────────────── */
-function SaveTemplateModal({
-  open,
-  onClose,
-  state,
-  activeTemplate,
-  onSaved,
-}: {
-  open: boolean;
-  onClose: () => void;
-  state: QueryState;
+  currentFilterKeys: string[];
   activeTemplate: ReportTemplate | null;
+  currentUserId: string | undefined;
+  canManageAny: boolean;
+  /** Apply the chosen fields + filters to the current view without saving. */
+  onApply: (columns: string[], filterKeys: string[]) => void;
   onSaved: (t: ReportTemplate) => void;
 }) {
   const qc = useQueryClient();
+  const filterableFields = useMemo(() => fields.filter((f) => f.filterable), [fields]);
+
+  const [selectedCols, setSelectedCols] = useState<Set<string>>(new Set(currentColumns));
+  const [selectedFilters, setSelectedFilters] = useState<Set<string>>(new Set(currentFilterKeys));
+  const [colSearch, setColSearch] = useState('');
+  const [filterSearch, setFilterSearch] = useState('');
   const [name, setName] = useState('');
-  const [isShared, setIsShared] = useState(false);
   const [mode, setMode] = useState<'update' | 'new'>('new');
   const [err, setErr] = useState<string | null>(null);
 
-  // Reset form to a sensible default each time the modal opens.
+  // Only the creator (or an admin) may overwrite an existing template.
+  const canUpdateActive =
+    !!activeTemplate && (String(activeTemplate.ownerId) === String(currentUserId) || canManageAny);
+
   useEffect(() => {
     if (!open) return;
+    setSelectedCols(new Set(currentColumns));
+    setSelectedFilters(new Set(currentFilterKeys));
+    setColSearch('');
+    setFilterSearch('');
     setErr(null);
-    if (activeTemplate) {
-      setName(activeTemplate.name);
-      setIsShared(activeTemplate.isShared);
-      setMode('update');
-    } else {
-      setName('');
-      setIsShared(false);
-      setMode('new');
-    }
-  }, [open, activeTemplate]);
+    setName(activeTemplate ? activeTemplate.name : '');
+    setMode(canUpdateActive ? 'update' : 'new');
+  }, [open, currentColumns, currentFilterKeys, activeTemplate, canUpdateActive]);
+
+  // Column order = keep the current order, then append newly-checked fields in
+  // catalog order. Filter set follows catalog order among filterable fields.
+  const orderedColumns = [
+    ...currentColumns.filter((k) => selectedCols.has(k)),
+    ...fields.filter((f) => selectedCols.has(f.key) && !currentColumns.includes(f.key)).map((f) => f.key),
+  ];
+  const orderedFilterKeys = filterableFields.filter((f) => selectedFilters.has(f.key)).map((f) => f.key);
+
+  const colFiltered = fields.filter((f) => f.label.toLowerCase().includes(colSearch.toLowerCase()));
+  const filterFiltered = filterableFields.filter((f) => f.label.toLowerCase().includes(filterSearch.toLowerCase()));
+
+  const dto = () => ({ name: name.trim(), columns: orderedColumns, filters: {}, filterKeys: orderedFilterKeys });
 
   const create = useMutation({
-    mutationFn: () =>
-      createReportTemplate({
-        name,
-        columns: state.columns,
-        filters: cleanFilters(state.filters),
-        isShared,
-      }),
+    mutationFn: () => createReportTemplate(dto()),
     onSuccess: async () => {
-      const list = await qc.fetchQuery({
-        queryKey: ['reports', 'templates'],
-        queryFn: () => listReportTemplates(1, 50),
-      });
-      const created = list.items.find((t) => t.name === name);
+      const list = await qc.fetchQuery({ queryKey: ['reports', 'templates'], queryFn: () => listReportTemplates(1, 50) });
+      // Disambiguate same-named templates across users by matching the owner too.
+      const created = list.items.find((t) => t.name === name.trim() && String(t.ownerId) === String(currentUserId));
       if (created) onSaved(created);
       qc.invalidateQueries({ queryKey: ['reports', 'templates'] });
       onClose();
@@ -828,13 +768,7 @@ function SaveTemplateModal({
   });
 
   const update = useMutation({
-    mutationFn: () =>
-      updateReportTemplate(activeTemplate!.id, {
-        name,
-        columns: state.columns,
-        filters: cleanFilters(state.filters),
-        isShared,
-      }),
+    mutationFn: () => updateReportTemplate(activeTemplate!.id, dto()),
     onSuccess: (t) => {
       onSaved(t);
       qc.invalidateQueries({ queryKey: ['reports', 'templates'] });
@@ -844,27 +778,62 @@ function SaveTemplateModal({
   });
 
   const submitting = create.isPending || update.isPending;
-  const canUpdate = !!activeTemplate;
+  const noColumns = selectedCols.size === 0;
+
+  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, key: string) => {
+    const next = new Set(set);
+    next.has(key) ? next.delete(key) : next.add(key);
+    setter(next);
+  };
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={canUpdate ? 'Save template' : 'Save as template'}
-      subtitle="Templates remember the columns and filters you've configured."
-      size="sm"
+      title="Customize & save template"
+      subtitle="Pick the table columns and the filters this report exposes, then apply or save."
+      size="xl"
     >
       <div className="space-y-4">
         {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
 
-        {canUpdate && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Fields → table columns */}
+          <CheckboxPane
+            title="Fields (table columns)"
+            hint="Shown as columns in the results table and the Excel export."
+            search={colSearch}
+            onSearch={setColSearch}
+            items={colFiltered}
+            selected={selectedCols}
+            onToggle={(k) => toggle(selectedCols, setSelectedCols, k)}
+            onAll={() => setSelectedCols(new Set(fields.map((f) => f.key)))}
+            onNone={() => setSelectedCols(new Set())}
+            countLabel={`${selectedCols.size} of ${fields.length} selected`}
+          />
+          {/* Filters → Filters section */}
+          <CheckboxPane
+            title="Filters"
+            hint="Shown as filter controls in the Filters section."
+            search={filterSearch}
+            onSearch={setFilterSearch}
+            items={filterFiltered}
+            selected={selectedFilters}
+            onToggle={(k) => toggle(selectedFilters, setSelectedFilters, k)}
+            onAll={() => setSelectedFilters(new Set(filterableFields.map((f) => f.key)))}
+            onNone={() => setSelectedFilters(new Set())}
+            countLabel={`${selectedFilters.size} of ${filterableFields.length} selected`}
+          />
+        </div>
+
+        {canUpdateActive && (
           <div className="flex gap-2 p-1 bg-surface-sunken rounded-lg text-xs font-medium">
             <button
               type="button"
               onClick={() => setMode('update')}
               className={`flex-1 py-2 rounded-md transition ${mode === 'update' ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted'}`}
             >
-              Update "{activeTemplate.name}"
+              Update "{activeTemplate!.name}"
             </button>
             <button
               type="button"
@@ -877,45 +846,106 @@ function SaveTemplateModal({
         )}
 
         <div>
-          <Label required>Template name</Label>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Weekly closed charts"
-          />
+          <Label>Template name</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Weekly closed charts" />
+          <p className="mt-1 text-[11px] text-ink-muted">
+            Saved templates are visible to everyone, shown as “{`your name — ${name.trim() || 'template'}`}”.
+          </p>
         </div>
 
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={isShared}
-            onChange={(e) => setIsShared(e.target.checked)}
-            className="accent-primary"
-          />
-          Share with team (visible to all coders, auditors, leads)
-        </label>
-
-        <p className="text-[11px] text-ink-muted">
-          Saving {state.columns.length} column{state.columns.length === 1 ? '' : 's'}
-          {' and '}
-          {Object.values(cleanFilters(state.filters)).length} filter{Object.values(cleanFilters(state.filters)).length === 1 ? '' : 's'}.
-        </p>
+        {noColumns && <p className="text-[11px] text-danger">Select at least one field for the table.</p>}
 
         <ModalFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
-            disabled={!name.trim()}
+            variant="soft"
+            disabled={noColumns}
+            onClick={() => {
+              onApply(orderedColumns, orderedFilterKeys);
+              onClose();
+            }}
+          >
+            Apply without saving
+          </Button>
+          <Button
+            disabled={noColumns || !name.trim()}
             loading={submitting}
+            leftIcon={<Save className="w-3.5 h-3.5" />}
             onClick={() => {
               setErr(null);
-              if (canUpdate && mode === 'update') update.mutate();
+              if (canUpdateActive && mode === 'update') update.mutate();
               else create.mutate();
             }}
           >
-            {canUpdate && mode === 'update' ? 'Update template' : 'Save template'}
+            {canUpdateActive && mode === 'update' ? 'Update template' : 'Save template'}
           </Button>
         </ModalFooter>
       </div>
     </Modal>
+  );
+}
+
+/* ── Reusable checkbox pane for the customize modal ─────── */
+function CheckboxPane({
+  title,
+  hint,
+  search,
+  onSearch,
+  items,
+  selected,
+  onToggle,
+  onAll,
+  onNone,
+  countLabel,
+}: {
+  title: string;
+  hint: string;
+  search: string;
+  onSearch: (v: string) => void;
+  items: ReportField[];
+  selected: Set<string>;
+  onToggle: (key: string) => void;
+  onAll: () => void;
+  onNone: () => void;
+  countLabel: string;
+}) {
+  return (
+    <div className="border border-line rounded-lg flex flex-col min-h-0">
+      <div className="px-3 pt-3 pb-2 border-b border-line">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-ink">{title}</p>
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" onClick={onAll}>All</Button>
+            <Button size="sm" variant="ghost" onClick={onNone}>None</Button>
+          </div>
+        </div>
+        <p className="text-[11px] text-ink-muted mb-2">{hint}</p>
+        <SearchInput placeholder="Search…" value={search} onChange={(e) => onSearch(e.target.value)} />
+      </div>
+      <div className="max-h-[340px] overflow-y-auto p-1">
+        {items.length === 0 ? (
+          <p className="px-3 py-4 text-center text-xs text-ink-muted">No matches</p>
+        ) : (
+          items.map((f) => (
+            <label
+              key={f.key}
+              className="flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-surface-sunken/60 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(f.key)}
+                onChange={() => onToggle(f.key)}
+                className="accent-primary w-4 h-4 shrink-0"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm text-ink truncate">{f.label}</span>
+                <span className="block text-[10px] text-ink-subtle font-mono truncate">{f.key}</span>
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+      <div className="px-3 py-2 border-t border-line text-[11px] text-ink-muted">{countLabel}</div>
+    </div>
   );
 }

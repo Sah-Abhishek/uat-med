@@ -13,6 +13,10 @@ export class ReportTemplate {
 
   @Column({ type: 'jsonb' }) columns: string[];
   @Column({ type: 'jsonb' }) filters: Record<string, any>;
+  /** Which filter controls this template exposes in the Filters section (a list
+   *  of filterable field keys). Distinct from `filters`, which holds any saved
+   *  values; templates currently save the control set, not the values. */
+  @Column({ name: 'filter_keys', type: 'jsonb', default: () => "'[]'" }) filterKeys: string[];
   @Column({ name: 'is_shared', type: 'boolean', default: false }) isShared: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' }) createdAt: Date;

@@ -351,12 +351,29 @@ export class ReportsService {
 
   /* ── Templates ───────────────────────────────────────── */
 
-  async listTemplates(page: number, pageSize: number, user: AuthenticatedUser) {
-    const qb = this.templates.createQueryBuilder('t')
-      .where('t.owner_id = :uid OR t.is_shared = true', { uid: user.id })
-      .orderBy('t.updated_at', 'DESC')
-      .skip((page - 1) * pageSize).take(pageSize);
-    const [items, total] = await qb.getManyAndCount();
+  async listTemplates(page: number, pageSize: number, _user: AuthenticatedUser) {
+    // Every template is shared: visible and loadable by all report users. The
+    // owner relation is loaded so the list can label each as "<owner> — <name>".
+    // (findAndCount handles the to-one join + pagination cleanly, avoiding the
+    // query-builder distinct path that trips on a raw order-by column.)
+    const [rows, total] = await this.templates.findAndCount({
+      relations: { owner: true },
+      order: { updatedAt: 'DESC' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    });
+    const items = rows.map((t) => ({
+      id: String(t.id),
+      ownerId: String(t.ownerId),
+      ownerName: t.owner?.fullName ?? null,
+      name: t.name,
+      columns: t.columns,
+      filters: t.filters,
+      filterKeys: t.filterKeys ?? [],
+      isShared: true,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    }));
     return new PaginatedResponseDto(items, total, page, pageSize);
   }
 
@@ -366,27 +383,33 @@ export class ReportsService {
       name: dto.name,
       columns: dto.columns,
       filters: dto.filters ?? {},
-      isShared: dto.isShared ?? false,
+      filterKeys: dto.filterKeys ?? [],
+      // All templates are shared with every user now.
+      isShared: true,
     }));
     return { id: t.id };
   }
 
-  async getTemplate(id: number, user: AuthenticatedUser) {
-    const t = await this.templates.findOne({ where: { id } });
+  async getTemplate(id: number, _user: AuthenticatedUser) {
+    // All templates are shared, so any report user may load one.
+    const t = await this.templates.findOne({ where: { id }, relations: { owner: true } });
     if (!t) throw new NotFoundException();
-    if (!t.isShared && t.ownerId !== user.id && user.role !== Role.TEAMLEAD && user.role !== Role.MANAGER) {
-      throw new ForbiddenException();
-    }
     return t;
   }
 
   async updateTemplate(id: number, dto: SaveTemplateDto, user: AuthenticatedUser) {
     const t = await this.templates.findOne({ where: { id } });
     if (!t) throw new NotFoundException();
+    // Editing stays restricted to the creator (and admins); everyone else can
+    // only load/use the template.
     if (t.ownerId !== user.id && user.role !== Role.TEAMLEAD && user.role !== Role.MANAGER) {
       throw new ForbiddenException();
     }
-    Object.assign(t, dto);
+    t.name = dto.name;
+    t.columns = dto.columns;
+    t.filters = dto.filters ?? {};
+    t.filterKeys = dto.filterKeys ?? t.filterKeys ?? [];
+    t.isShared = true;
     return this.templates.save(t);
   }
 

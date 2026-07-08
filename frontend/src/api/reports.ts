@@ -41,6 +41,8 @@ export interface SaveTemplateDto {
   name: string;
   columns: string[];
   filters?: Record<string, unknown>;
+  /** Filterable field keys the template exposes in the Filters section. */
+  filterKeys?: string[];
   isShared?: boolean;
 }
 
