@@ -297,12 +297,13 @@ export class ChartsController {
 
   @Get(':id/neighbors')
   @Roles(Role.CODER, Role.AUDITOR, Role.TEAMLEAD, Role.MANAGER)
-  @ApiOperation({ summary: "Prev/next chart ids among the caller's assigned charts, for the detail page's Previous/Next navigation." })
+  @ApiOperation({ summary: "Prev/next chart ids in the Charts grid's current filter/search/sort order (spans pages), for the detail page's Previous/Next navigation." })
   neighbors(
     @Param('id', ParseIntPipe) id: number,
+    @Query() q: QueryChartsDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.svc.neighbors(id, user);
+    return this.svc.neighbors(id, q, user);
   }
 
   /* Per-code auditor audits — the auditor's Agree/Disagree judgment of each

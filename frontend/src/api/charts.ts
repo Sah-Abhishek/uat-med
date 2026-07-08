@@ -340,9 +340,11 @@ export interface CodeAuditRecord extends CodeAuditInput {
   auditedAt: string;
 }
 
-/** Prev/next chart ids among the caller's assigned charts (detail-page nav). */
-export const getChartNeighbors = (chartId: string) =>
-  get<{ prevId: number | null; nextId: number | null }>(`/charts/${chartId}/neighbors`);
+/** Prev/next chart ids for detail-page nav. Pass the Charts grid's current
+ *  filters/search/sort/priority so neighbors follow the on-screen table order
+ *  (spanning page boundaries), not chart id. */
+export const getChartNeighbors = (chartId: string, params: ChartListParams = {}) =>
+  get<{ prevId: number | null; nextId: number | null }>(`/charts/${chartId}/neighbors`, params);
 
 export const listCodeAudits = (chartId: string) =>
   get<{ items: CodeAuditRecord[] }>(`/charts/${chartId}/code-audits`);

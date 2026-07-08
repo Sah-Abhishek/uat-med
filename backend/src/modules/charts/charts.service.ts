@@ -783,34 +783,51 @@ async update(id: number, dto: UpdateChartDto) {
   /**
    * Prev/next chart ids for the detail page's Previous/Next buttons.
    *
-   * Scope mirrors what each role sees on the Charts page: coders walk the
-   * charts in their coder slot, auditors the charts in their auditor slot,
-   * and teamleads/managers (who see every chart) walk the full list — an
-   * admin browsing unallocated charts must not dead-end on disabled buttons.
-   * Soft-deleted charts and charts orphaned by a deleted worklist are
-   * excluded, matching list() visibility.
-   *
-   * Direction follows the Charts list's newest-first default: "next" moves
-   * DOWN the list toward older/lower ids (7463 → 7462), "previous" moves up.
+   * These follow the Charts grid's on-screen order rather than chart id: the
+   * caller passes the grid's current filters/search/sort/priority-tab and we
+   * return the chart immediately above ("previous") and below ("next") the
+   * current one in that exact ordered, filtered set — spanning page boundaries.
+   * See the method body for the scope/ordering details.
    */
-  async neighbors(id: number, user: AuthenticatedUser) {
+  async neighbors(id: number, q: QueryChartsDto, user: AuthenticatedUser) {
     await this.requireChart(id);
-    const scopedIds = () => {
-      const qb = this.charts.createQueryBuilder('c').select('c.id', 'id');
-      if (user.role === Role.CODER) {
-        qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
-      } else if (user.role === Role.AUDITOR) {
-        qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
-      }
-      return this.excludeOrphanedCharts(qb);
-    };
-    const [prev, next] = await Promise.all([
-      scopedIds().andWhere('c.id > :id', { id }).orderBy('c.id', 'ASC').limit(1).getRawOne<{ id: string }>(),
-      scopedIds().andWhere('c.id < :id', { id }).orderBy('c.id', 'DESC').limit(1).getRawOne<{ id: string }>(),
-    ]);
+
+    // Walk the SAME ordered result set the Charts grid is showing. The caller
+    // replays the grid's current filters/search/sort/priority-tab, so we build
+    // an identically-scoped, identically-ordered query (reusing list()'s filter
+    // /priority/sort helpers) and read off the chart directly above and below
+    // the current one. Because we order the whole filtered set — not one page —
+    // "next"/"previous" span page boundaries automatically.
+    const qb = this.charts
+      .createQueryBuilder('c')
+      // Plain joins (no select): the filter/sort helpers reference these aliases,
+      // but we only need the ordered id list, not the relation data.
+      .leftJoin('c.worklist', 'worklist')
+      .leftJoin('worklist.client', 'client')
+      .leftJoin('worklist.location', 'location')
+      .leftJoin('worklist.primarySpeciality', 'primarySpeciality')
+      .leftJoin('worklist.subSpeciality', 'subSpeciality')
+      .leftJoin('worklist.process', 'process');
+
+    // Role scope must match list(): only coders are pinned to their own queue;
+    // auditors / team-leads / managers step through every chart the grid shows.
+    if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
+
+    this.excludeOrphanedCharts(qb);
+    this.applyChartFilters(qb, q);
+    const scopedToWorklist = (q.worklistId?.length ?? 0) > 0;
+    this.applyPriorityScope(qb, user.role, q.priority, Number(user.id), !scopedToWorklist);
+    this.applySort(qb, q.sortBy, q.sortDir, user.role);
+
+    const rows = await qb.select('c.id', 'id').getRawMany<{ id: string }>();
+    const ids = rows.map((r) => Number(r.id));
+    const idx = ids.indexOf(id);
+    // Current chart not in the filtered set (filters changed, or a deep-link
+    // outside the current view) → no defined neighbors; buttons disable.
+    if (idx === -1) return { prevId: null, nextId: null };
     return {
-      prevId: prev ? Number(prev.id) : null,
-      nextId: next ? Number(next.id) : null,
+      prevId: idx > 0 ? ids[idx - 1] : null,
+      nextId: idx < ids.length - 1 ? ids[idx + 1] : null,
     };
   }
 

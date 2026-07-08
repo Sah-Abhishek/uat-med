@@ -29,6 +29,7 @@ import { getFeedbackCategories } from '@/api/configurations';
 import type { AuditAreaRow } from './chart-detail/shared';
 import type { AiEncounterResult, ApiErrorShape, Chart, ChartStatus, Priority, UploadedDocument } from '@/api/types';
 import { useAuth } from '@/auth/store';
+import { useChartsView } from './chartsViewStore';
 import { Button } from '@/components/ui/Button';
 import { ConfirmModal, Toast } from '@/components/ui/Primitives';
 import { IcdBotWidget } from '@/components/IcdBotWidget';
@@ -86,12 +87,28 @@ export function ChartDetailPage() {
     },
   });
 
-  // Previous/Next walk the charts assigned to the CURRENT USER only (the
-  // backend scopes by role: coder slot, auditor slot, or either for TL/MGR),
-  // ordered by chart id. Buttons disable at either end of the queue.
+  // Previous/Next walk the SAME ordered list the Charts grid is showing. We
+  // replay the grid's persisted filters, search, sort and priority tab (from
+  // useChartsView) so "next" is the row below this chart and "previous" the row
+  // above — exactly as they appear in the table, spanning page boundaries. If
+  // this chart isn't in that filtered set, both ends come back null and the
+  // buttons disable. (page/pageSize are intentionally omitted — neighbors walk
+  // the whole result set, not a single page.)
+  const chartFilters = useChartsView((s) => s.filters);
+  const chartTab = useChartsView((s) => s.tab);
+  const chartSort = useChartsView((s) => s.sort);
+  const neighborParams = useMemo(
+    () => ({
+      ...chartFilters,
+      ...(chartTab !== 'ALL' ? { priority: chartTab } : {}),
+      sortBy: chartSort.sortBy,
+      sortDir: chartSort.sortDir,
+    }),
+    [chartFilters, chartTab, chartSort.sortBy, chartSort.sortDir],
+  );
   const neighbors = useQuery({
-    queryKey: ['chart-neighbors', id],
-    queryFn: () => getChartNeighbors(id!),
+    queryKey: ['chart-neighbors', id, neighborParams],
+    queryFn: () => getChartNeighbors(id!, neighborParams),
     enabled: !!id,
   });
   const prevId = neighbors.data?.prevId ?? null;
