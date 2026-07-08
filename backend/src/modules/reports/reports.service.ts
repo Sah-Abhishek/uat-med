@@ -54,8 +54,10 @@ interface FieldDef {
   /** Source dropdown options from a master table's distinct names instead of
    *  the (possibly sparse) chart data. Use for configured pick-lists whose FK
    *  is rarely populated on charts (hold reason, responsible party, health
-   *  plan) — otherwise the dropdown would show only values already in use. */
-  valuesFrom?: { table: string; column: string };
+   *  plan) — otherwise the dropdown would show only values already in use.
+   *  `activeColumn` (e.g. 'is_active') limits options to non-soft-deleted rows,
+   *  matching the config pickers so a configured-but-unused value still shows. */
+  valuesFrom?: { table: string; column: string; activeColumn?: string };
 }
 
 // Enum option lists mirror the Charts filter modal so the two pages read the
@@ -100,10 +102,14 @@ const FIELDS: FieldDef[] = [
   { key: 'serialNo',          label: 'S.No',               sql: 'c.serial_no',                              filterable: true,  sortable: true,  type: 'number', filterKind: 'text' },
   { key: 'chartNo',           label: 'Chart Number',       sql: 'c.chart_no',                               filterable: true,  sortable: true,  filterKind: 'text' },
   { key: 'mrNumber',          label: 'MR Number',          sql: 'c.mr_number',                              filterable: true,  sortable: true,  filterKind: 'text' },
-  { key: 'client',            label: 'Client',             sql: 'cl.name',                                  filterable: true,  sortable: true },
-  { key: 'location',          label: 'Location',           sql: 'lo.name',                                  filterable: true,  sortable: true },
-  { key: 'primarySpeciality', label: 'Primary Speciality', sql: 'ps.name',                                  filterable: true,  sortable: true },
-  { key: 'process',           label: 'Process',            sql: 'pr.name',                                  filterable: true,  sortable: true },
+  // Reference pick-lists: source options from the master table (active rows)
+  // so every configured value shows in the dropdown, even ones with no charts
+  // yet. Otherwise a client/location/etc. that isn't referenced by any chart
+  // would silently drop out of the filter.
+  { key: 'client',            label: 'Client',             sql: 'cl.name',                                  filterable: true,  sortable: true,  valuesFrom: { table: 'clients',              column: 'name', activeColumn: 'is_active' } },
+  { key: 'location',          label: 'Location',           sql: 'lo.name',                                  filterable: true,  sortable: true,  valuesFrom: { table: 'locations',            column: 'name', activeColumn: 'is_active' } },
+  { key: 'primarySpeciality', label: 'Primary Speciality', sql: 'ps.name',                                  filterable: true,  sortable: true,  valuesFrom: { table: 'primary_specialities', column: 'name', activeColumn: 'is_active' } },
+  { key: 'process',           label: 'Process',            sql: 'pr.name',                                  filterable: true,  sortable: true,  valuesFrom: { table: 'processes',            column: 'name', activeColumn: 'is_active' } },
   { key: 'dos',               label: 'Date of Service',    sql: 'c.dos',                                    filterable: true,  sortable: true,  type: 'date' },
   { key: 'receivedDate',      label: 'Received Date',      sql: 'wl.received_date',                         filterable: true,  sortable: true,  type: 'date' },
   { key: 'dateOfCompletion',  label: 'Date of Completion', sql: `CASE WHEN c.chart_status = 'COMPLETE' THEN c.updated_at ELSE NULL END`, filterable: true, sortable: true, type: 'date' },
@@ -207,7 +213,7 @@ export class ReportsService {
    * Names are the same strings the report SQL projects, so they slot straight
    * into the IN-clause filter.
    */
-  private async distinctFromTable(src: { table: string; column: string }, search: string | undefined): Promise<string[]> {
+  private async distinctFromTable(src: { table: string; column: string; activeColumn?: string }, search: string | undefined): Promise<string[]> {
     const col = `t.${src.column}`;
     const qb = this.charts.manager.createQueryBuilder()
       .select(col, 'v')
@@ -217,6 +223,9 @@ export class ReportsService {
       .andWhere(`${col} <> ''`)
       .orderBy(col, 'ASC')
       .limit(1000);
+
+    // Hide soft-deleted / deactivated rows, matching the config pickers.
+    if (src.activeColumn) qb.andWhere(`t.${src.activeColumn} = true`);
 
     const term = search?.trim();
     if (term) qb.andWhere(`${col} ILIKE :s`, { s: `%${term}%` });
@@ -404,12 +413,14 @@ export class ReportsService {
       .leftJoin('primary_health_plans','php', 'php.id = c.primary_health_plan_id')
       .where('c.deleted_at IS NULL');
 
-    // Role scoping: coder/auditor can never reach this endpoint via FE, but
-    // belt-and-braces here in case the controller guard is loosened.
+    // Role scoping. Coders only ever see charts in their own coder slot.
+    // Auditors — like team-leads / managers — see every chart here, mirroring
+    // the Charts grid (where auditors also see everything). Scoping them to
+    // their own allocations narrowed both the result set and the filter
+    // dropdowns (e.g. Client showing only the clients in their queue), so no
+    // auditor restriction is applied. Team-leads / managers are unscoped.
     if (user.role === Role.CODER) {
       qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
-    } else if (user.role === Role.AUDITOR) {
-      qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
     }
     return qb;
   }
