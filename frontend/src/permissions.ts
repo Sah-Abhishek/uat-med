@@ -15,6 +15,7 @@ export const PERMISSIONS = {
   'chart.feedback.respond': ['CODER'],
   'user.create': ['TEAMLEAD', 'MANAGER'],
   'user.deactivate': ['TEAMLEAD', 'MANAGER'],
+  'user.changeRole': ['TEAMLEAD', 'MANAGER'],
   'user.list': ['TEAMLEAD', 'MANAGER'],
   'config.view': ['TEAMLEAD', 'MANAGER'],
   'config.edit': ['TEAMLEAD', 'MANAGER'],
