@@ -70,8 +70,8 @@ const PRIORITY_LABEL: Record<Priority, string> = {
   HIGH: 'High',
   MEDIUM: 'Medium',
   LOW: 'Low',
-  // Backend value is FINALIZED; users know this state as "Done".
-  FINALIZED: 'Done',
+  // §4.7 Finalized bucket (Managers): Coding/Audit Done + Complete.
+  FINALIZED: 'Finalized',
 };
 export function PriorityChip({ priority }: { priority: Priority }) {
   return (

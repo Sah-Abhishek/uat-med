@@ -13,7 +13,7 @@ import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
-import { priorityBucketSql, priorityRankSql, touchedTodaySql } from './priority-rules';
+import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, type ComputedBucket } from './priority-rules';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
@@ -251,16 +251,18 @@ export class ChartsService {
   ): void {
     const bucket = priorityBucketSql(role);
     if (tab === 'DONE') {
-      // "Done" = charts the viewer touched today OR any COMPLETE chart (folded
-      // in so a coder's finished work stays reachable — completed charts match
-      // no active bucket by design). The role/allocation base-scope in list()
-      // keeps a coder to their own charts; managers/auditors see all as usual.
-      qb.andWhere(`(${touchedTodaySql()} OR c.chart_status = :doneComplete)`, {
-        doneViewerId: viewerId,
-        doneComplete: ChartStatus.COMPLETE,
-      });
+      // "Done" (§4.6) = the viewer touched the chart today and it is not back in
+      // their "ready" milestone. The role/allocation base-scope in list() keeps
+      // a coder to their own charts; managers/auditors see all as usual.
+      qb.andWhere(doneSql(role), { doneViewerId: viewerId });
+    } else if (tab === 'FINALIZED') {
+      // "Finalized" (§4.7, Managers only) = Coding/Audit Done + Complete.
+      qb.andWhere(finalizedSql());
     } else if (tab) {
-      qb.andWhere(`(${bucket}) = :ptab`, { ptab: tab });
+      // A specific computed bucket: match by membership (not the single highest
+      // bucket) so the manual's legitimate two-bucket overlap surfaces the chart
+      // under each tab it qualifies for.
+      qb.andWhere(bucketMembershipSql(role, tab as ComputedBucket));
     } else if (hideUnbucketed) {
       qb.andWhere(`(${bucket}) IS NOT NULL`);
     }
@@ -353,8 +355,9 @@ export class ChartsService {
         ...rest,
         // Priority is computed per viewer role (falls back to the stored value
         // only for the touched-today "Done" tab, where a finished chart may have
-        // left every priority bucket).
-        priority: rowPriorityAt(i) ?? rest.priority,
+        // left every priority bucket). In the Finalized tab every row is, by
+        // definition, finalized — show that chip rather than the empty bucket.
+        priority: q.priority === 'FINALIZED' ? Priority.FINALIZED : (rowPriorityAt(i) ?? rest.priority),
         // Map the `dos` column to the `dateOfService` key the frontend reads.
         dateOfService: rest.dos ?? null,
         // serviceLineId travels in `...rest`; surface the resolved name for display.
@@ -429,29 +432,40 @@ export class ChartsService {
     if (user.role === Role.CODER) priorityQb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
     this.excludeOrphanedCharts(priorityQb);
     this.applyChartFilters(priorityQb, { ...q, priority: undefined });
-    // Group by the computed per-viewer bucket (null = hidden, ignored below).
-    const priorityBucket = priorityBucketSql(user.role);
-    const priorityRows = await priorityQb.clone()
-      .select(priorityBucket, 'priority').addSelect('COUNT(*)', 'count').groupBy(priorityBucket).getRawMany();
-    // "Done" tab count (§4.6): charts this viewer touched today OR any COMPLETE
-    // chart — must match the applyPriorityScope('DONE') predicate exactly.
+    // Per-bucket counts use membership (not a GROUP BY the single highest
+    // bucket) so the manual's legitimate two-bucket overlap is counted under
+    // each tab; `allBucketed` is the distinct count for the "All" tab (each
+    // chart once). Finalized (§4.7) is a Managers-only bucket.
+    const sum = (cond: string) => `SUM(CASE WHEN ${cond} THEN 1 ELSE 0 END)`;
+    const isManagerView = user.role === Role.MANAGER;
+    const countRow = await priorityQb.clone()
+      .select(sum(bucketMembershipSql(user.role, 'CRITICAL')), 'critical')
+      .addSelect(sum(bucketMembershipSql(user.role, 'HIGH')), 'high')
+      .addSelect(sum(bucketMembershipSql(user.role, 'MEDIUM')), 'medium')
+      .addSelect(sum(bucketMembershipSql(user.role, 'LOW')), 'low')
+      .addSelect(sum(`(${priorityBucketSql(user.role)}) IS NOT NULL`), 'allbucketed')
+      .addSelect(isManagerView ? sum(finalizedSql()) : '0', 'finalized')
+      .getRawOne();
+    // "Done" tab count (§4.6): must match the applyPriorityScope('DONE')
+    // predicate exactly.
     const doneTodayRow = await priorityQb.clone()
-      .andWhere(`(${touchedTodaySql()} OR c.chart_status = :doneComplete)`, {
-        doneViewerId: Number(user.id),
-        doneComplete: ChartStatus.COMPLETE,
-      })
+      .andWhere(doneSql(user.role), { doneViewerId: Number(user.id) })
       .select('COUNT(*)', 'count').getRawOne();
 
     const milestoneRows = await qb.clone()
       .select('c.milestone', 'milestone').addSelect('COUNT(*)', 'count').groupBy('c.milestone').getRawMany();
 
-    // `finalized` is retained at 0 for response-shape compatibility (the
-    // FINALIZED bucket is retired; "Done" is now `doneToday`).
-    const pc = { critical: 0, high: 0, medium: 0, low: 0, finalized: 0, doneToday: Number(doneTodayRow?.count ?? 0) };
-    priorityRows.forEach(r => {
-      const key = String(r.priority ?? '').toLowerCase();   // null bucket = hidden → skip
-      if (key && key !== 'donetoday' && key in pc) pc[key as keyof typeof pc] = Number(r.count);
-    });
+    const pc = {
+      critical: Number(countRow?.critical ?? 0),
+      high: Number(countRow?.high ?? 0),
+      medium: Number(countRow?.medium ?? 0),
+      low: Number(countRow?.low ?? 0),
+      // Distinct count of charts in at least one active bucket (the "All" tab).
+      allBucketed: Number(countRow?.allbucketed ?? 0),
+      // §4.7 Finalized (Managers only; 0 for other roles).
+      finalized: Number(countRow?.finalized ?? 0),
+      doneToday: Number(doneTodayRow?.count ?? 0),
+    };
 
     // Queue tiles (`readyToCode` / `readyToAudit`) are all-time counts of the
     // user's queue. "Done" tiles (`codingDoneToday` / `auditDoneToday`) are

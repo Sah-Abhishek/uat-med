@@ -2,33 +2,36 @@ import { Role } from '../../common/enums/roles.enum';
 
 /**
  * Faithful implementation of the User Manual's role-specific chart-priority
- * buckets (§4.3 Coder, §4.4 Auditor, §4.5 Manager/Team-Lead).
+ * buckets (§4.3 Coder, §4.4 Auditor, §4.5 Manager/Team-Lead), the Done bucket
+ * (§4.6) and the Finalized bucket (§4.7).
  *
  * Priority is NOT stored — it is computed on read from four inputs:
  *   Milestone × Chart Status × QC Status × Received-Date (today vs not),
- * evaluated against the viewing user's role. `priorityBucketSql(role)` returns a
- * single SQL scalar expression yielding the chart's bucket
- * ('CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW') or NULL when the chart matches no
- * bucket for that role (→ hidden from that role, per the manual's "will not
- * view" tables). Everything else — the chip value, the tab filter, the tab
- * counts, and priority sort — derives from this one expression, so the matrix
- * lives in exactly one place.
+ * evaluated against the viewing user's role.
  *
- * Precedence within a role: CRITICAL > HIGH > MEDIUM > LOW (first match wins).
- * A chart therefore surfaces under exactly one bucket (its highest); the manual
- * tolerates High/Medium overlap for managers, which we resolve to the highest
- * bucket for a clean single-chip / summing-count UX.
+ * Two shapes are emitted from the same matrix:
+ *   • priorityBucketSql(role)   — a single scalar ('CRITICAL'|'HIGH'|'MEDIUM'
+ *     |'LOW'|NULL) giving the chart's *highest* bucket, used for the row chip
+ *     and the priority sort (a row shows one chip / sorts at one rank).
+ *   • bucketMembershipSql(role, bucket) — a boolean asking "does this chart
+ *     belong to THIS bucket?", used by the tab filter and the tab counts. Per
+ *     the manual, a chart may legitimately belong to two buckets at once
+ *     (Auditor Medium+Low, Manager High+Medium); membership honours that, so a
+ *     chart can surface under — and be counted in — both tabs.
  *
  * CRITICAL is never a computed condition — it is the manual override
  * (`manual_priority_at IS NOT NULL` → the stored `priority`), which also carries
  * a manager's Modify-Charts HIGH/MEDIUM/LOW choice until the allocated user
- * touches the chart (§7.3, handled in ChartsService).
+ * touches the chart (§7.3, handled in ChartsService). While a chart is manually
+ * pinned it belongs ONLY to its pinned bucket; otherwise it belongs to every
+ * computed bucket it satisfies (unless the role's exclusion rule hides it).
  *
  * All values below are compile-time code constants (enum strings), never user
  * input, so inlining them into SQL is safe.
  */
 
 type Aliases = { chart?: string; worklist?: string };
+export type ComputedBucket = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 // Sentinel inside a QC value list meaning "Blank" (QC not set): the persisted
 // JSON is either absent (NULL) or the empty string.
@@ -38,7 +41,8 @@ const BLANK = '__BLANK__';
 // and the imported `received_date` are all India-based, and the rest of the app
 // (the dashboard "today") uses server-local midnight. The manual text says EST,
 // but that is a US template — using EST dropped India's "today" charts out of
-// the LOW/DONE buckets every morning until ~09:30 IST.
+// the LOW/DONE buckets every morning until ~09:30 IST. (Product decision
+// 2026-07-08: keep IST.)
 const IST = `'Asia/Kolkata'`;
 
 /** The DB's calendar "today" in India business time (IST). */
@@ -46,34 +50,22 @@ export function businessTodaySql(): string {
   return `(now() AT TIME ZONE ${IST})::date`;
 }
 
+/** Received on the current India-time (IST) day. */
 function receivedToday(w: string): string {
   return `${w}.received_date = ${businessTodaySql()}`;
 }
 
-/** The chart was allocated to a coder during the current India-time (IST) day. */
-function allocatedToday(c: string): string {
-  return `(${c}.last_coder_allocated_at AT TIME ZONE ${IST})::date = (now() AT TIME ZONE ${IST})::date`;
-}
-
-/** Allocated on any day *before* today (IST). Charts with no allocation
- * timestamp count as before-today (they were assigned before the column existed). */
-function allocatedBeforeToday(c: string): string {
-  return `NOT (${allocatedToday(c)})`;
-}
-
-/** "Worked on": a timer has been started on the chart at least once. */
-function workedOn(c: string): string {
-  return `EXISTS (SELECT 1 FROM chart_time_logs t WHERE t.chart_id = ${c}.id)`;
-}
-
-/** "Not worked on": no timer has ever been started on the chart by anyone. */
-function neverWorkedOn(c: string): string {
-  return `NOT ${workedOn(c)}`;
+/** Received on any day other than today (a NULL received-date counts as "not
+ * today" so it can still qualify for the "Not Today" buckets). */
+function receivedNotToday(w: string): string {
+  return `(${w}.received_date IS NULL OR ${w}.received_date <> ${businessTodaySql()})`;
 }
 
 // QC status is persisted by the chart-detail form under custom_fields._formDraft
-// (coder in `qcStatus`, auditor in `auditorQcStatus`). The manager view reads
-// the latest QC state (auditor's if set, else coder's).
+// (coder in `qcStatus`, auditor in `auditorQcStatus`). The manual models a
+// single "QC Status" per chart, so every role reads the *effective* QC — the
+// auditor's value if set (it is the later step in the review lifecycle),
+// otherwise the coder's.
 function coderQc(c: string): string {
   return `${c}.custom_fields#>>'{_formDraft,qcStatus}'`;
 }
@@ -99,7 +91,7 @@ function qcIn(expr: string, vals: string[]): string {
 
 const and = (...cs: string[]): string => `(${cs.join(' AND ')})`;
 
-// --- Milestone / status enum strings (mirror common/enums) ---
+// --- Milestone / status / QC enum strings (mirror common/enums) ---
 const M = {
   READY_TO_ALLOCATE: 'READY_TO_ALLOCATE',
   READY_TO_CODE: 'READY_TO_CODE',
@@ -117,40 +109,54 @@ const QC = {
   PROVIDED: 'Feedback Provided',
 } as const;
 
+type RoleConds = { high: string; medium: string; low: string; excluded: string };
+
 /**
- * Returns { high, medium, low } SQL boolean conditions for the given role.
- * Each is a self-contained predicate over the milestone/status/QC/received
- * columns. A missing/"any" QC clause is simply omitted.
+ * Returns the { high, medium, low } computed conditions plus the role's
+ * `excluded` predicate (charts the manual says are never shown to this role in
+ * any bucket). Each is a self-contained SQL boolean over the milestone / status
+ * / QC / received-date columns. Managers/Team-Leads have no exclusions.
  */
-function roleConditions(role: Role, c: string, w: string): { high: string; medium: string; low: string } {
+function roleConditions(role: Role, c: string, w: string): RoleConds {
   const ms = (vals: string[]) => inList(`${c}.milestone`, vals);
   const cs = (vals: string[]) => inList(`${c}.chart_status`, vals);
-  const today = receivedToday(w);
+  const qc = effectiveQc(c);
 
   switch (role) {
-    case Role.CODER: {
-      return {
-        // HIGH (product override 2026-07-08): the auditor has provided feedback
-        // on the chart — the coder must act on it.
-        high: qcIn(auditorQc(c), [QC.PROVIDED]),
-        // MEDIUM (product override 2026-07-08): either the chart was allocated
-        // before today and has not been worked on (aging backlog), OR it has
-        // been worked on and left INCOMPLETE.
-        medium: `(${and(allocatedBeforeToday(c), neverWorkedOn(c))} OR ${and(workedOn(c), cs([S.INCOMPLETE]))})`,
-        // LOW (product override 2026-07-08): allocated today, not yet worked on
-        // (no timer ever started), and chart status still OPEN.
-        low: and(
-          cs([S.OPEN]),
-          allocatedToday(c),
-          neverWorkedOn(c),
-        ),
-      };
-    }
-    case Role.AUDITOR: {
-      const qc = auditorQc(c);
+    // §4.3 Coder. (Visibility to the coder's own allocation is enforced in
+    // ChartsService; audit-stage milestones never appear in these buckets.)
+    case Role.CODER:
       return {
         high: and(
-          ms([M.READY_TO_CODE, M.READY_TO_AUDIT, M.CODING_DONE, M.AUDIT_IN_PROGRESS, M.AUDIT_DONE]),
+          ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS]),
+          cs([S.INCOMPLETE, S.COMPLETE]),
+          qcIn(qc, [QC.IMPLEMENTED, QC.REJECTED, QC.PROVIDED, QC.AGREE]),
+        ),
+        medium: and(
+          ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS, M.CODING_DONE]),
+          cs([S.OPEN, S.INCOMPLETE]),
+          qcIn(qc, [QC.AGREE, BLANK, QC.IMPLEMENTED]),
+          receivedNotToday(w),
+        ),
+        low: and(
+          ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS]),
+          cs([S.OPEN]),
+          qcIn(qc, [BLANK]),
+          receivedToday(w),
+        ),
+        // Coding Done + Complete + QC (Implemented/Agree/Blank) → never shown.
+        excluded: and(
+          ms([M.CODING_DONE]),
+          cs([S.COMPLETE]),
+          qcIn(qc, [QC.IMPLEMENTED, QC.AGREE, BLANK]),
+        ),
+      };
+
+    // §4.4 Auditor. Auditors see all charts regardless of allocation.
+    case Role.AUDITOR:
+      return {
+        high: and(
+          ms([M.READY_TO_CODE, M.READY_TO_AUDIT, M.AUDIT_DONE, M.CODING_DONE, M.AUDIT_IN_PROGRESS]),
           cs([S.INCOMPLETE, S.COMPLETE]),
           qcIn(qc, [QC.IMPLEMENTED, QC.REJECTED, QC.PROVIDED]),
         ),
@@ -160,18 +166,24 @@ function roleConditions(role: Role, c: string, w: string): { high: string; mediu
           qcIn(qc, [BLANK]),
         ),
         low: and(
-          ms([M.CODING_DONE, M.AUDIT_IN_PROGRESS, M.AUDIT_DONE]),
+          ms([M.CODING_DONE, M.AUDIT_DONE, M.AUDIT_IN_PROGRESS]),
           cs([S.COMPLETE, S.INCOMPLETE]),
           qcIn(qc, [QC.AGREE, BLANK]),
         ),
+        // Ready to Code + any status + QC (Agree/Blank) → never shown.
+        excluded: and(
+          ms([M.READY_TO_CODE]),
+          cs([S.OPEN, S.INCOMPLETE, S.COMPLETE]),
+          qcIn(qc, [QC.AGREE, BLANK]),
+        ),
       };
-    }
-    // MANAGER and TEAMLEAD share the §4.5 matrix. QC is "any" for High/Medium
-    // (clause omitted); Low requires Blank.
+
+    // §4.5 Manager / Team Lead share the matrix. QC is "any" for High/Medium
+    // (the manual lists every QC value, so the clause is omitted); Low requires
+    // Blank. No exclusions.
     case Role.MANAGER:
     case Role.TEAMLEAD:
-    default: {
-      const qc = effectiveQc(c);
+    default:
       return {
         high: and(
           ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS, M.READY_TO_AUDIT, M.AUDIT_IN_PROGRESS]),
@@ -188,25 +200,27 @@ function roleConditions(role: Role, c: string, w: string): { high: string; mediu
           ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS, M.AUDIT_IN_PROGRESS]),
           cs([S.OPEN]),
           qcIn(qc, [BLANK]),
-          today,
+          receivedToday(w),
         ),
+        excluded: 'FALSE',
       };
-    }
   }
 }
 
 /**
- * A single SQL scalar expression giving the chart's priority bucket for `role`
- * ('CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW') or NULL when it matches no bucket.
+ * A single SQL scalar expression giving the chart's *highest* priority bucket
+ * for `role` ('CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW') or NULL when it matches no
+ * bucket (→ hidden from that role's backlog). Used for the row chip and sort.
  * Requires the charts table aliased (default `c`) and its worklist joined
  * (default `worklist`).
  */
 export function priorityBucketSql(role: Role, aliases: Aliases = {}): string {
   const c = aliases.chart ?? 'c';
   const w = aliases.worklist ?? 'worklist';
-  const { high, medium, low } = roleConditions(role, c, w);
+  const { high, medium, low, excluded } = roleConditions(role, c, w);
   return `CASE
     WHEN ${c}.manual_priority_at IS NOT NULL THEN ${c}.priority
+    WHEN ${excluded} THEN NULL
     WHEN ${high} THEN 'HIGH'
     WHEN ${medium} THEN 'MEDIUM'
     WHEN ${low} THEN 'LOW'
@@ -214,7 +228,30 @@ export function priorityBucketSql(role: Role, aliases: Aliases = {}): string {
   END`;
 }
 
-/** Numeric rank of a chart's bucket for ORDER BY (CRITICAL first, no-bucket last). */
+/**
+ * Boolean: does the chart belong to `bucket` for `role`? Unlike the scalar
+ * above, this honours the manual's legitimate two-bucket overlap — a chart with
+ * no manual pin belongs to EVERY computed bucket it satisfies. A manually
+ * pinned chart (§7.3) belongs only to its pinned bucket. Used by the tab filter
+ * and the per-bucket tab counts.
+ */
+export function bucketMembershipSql(role: Role, bucket: ComputedBucket, aliases: Aliases = {}): string {
+  const c = aliases.chart ?? 'c';
+  const w = aliases.worklist ?? 'worklist';
+  const pinned = `${c}.manual_priority_at IS NOT NULL`;
+  if (bucket === 'CRITICAL') {
+    // CRITICAL is only ever a manual pin.
+    return `(${pinned} AND ${c}.priority = 'CRITICAL')`;
+  }
+  const { high, medium, low, excluded } = roleConditions(role, c, w);
+  const cond = bucket === 'HIGH' ? high : bucket === 'MEDIUM' ? medium : low;
+  return `(CASE
+    WHEN ${pinned} THEN ${c}.priority = '${bucket}'
+    ELSE (NOT (${excluded}) AND ${cond})
+  END)`;
+}
+
+/** Numeric rank of a chart's highest bucket for ORDER BY (CRITICAL first). */
 export function priorityRankSql(role: Role, aliases: Aliases = {}): string {
   const bucket = priorityBucketSql(role, aliases);
   return `CASE (${bucket})
@@ -227,8 +264,35 @@ export function priorityRankSql(role: Role, aliases: Aliases = {}): string {
 }
 
 /**
- * "Touched today" (§4.6): the viewer started a timer on this chart during the
- * current India-time (IST) day. Bind `:doneViewerId` to the viewer's user id.
+ * §4.7 Finalized bucket (Managers only): the chart has reached Coding Done or
+ * Audit Done AND is Complete — fully done, no further work from anyone.
+ * Requires the charts table aliased (default `c`).
+ */
+export function finalizedSql(aliases: Aliases = {}): string {
+  const c = aliases.chart ?? 'c';
+  return `(${inList(`${c}.milestone`, [M.CODING_DONE, M.AUDIT_DONE])} AND ${c}.chart_status = '${S.COMPLETE}')`;
+}
+
+/**
+ * §4.6 Done bucket: the viewer started a timer on this chart during the current
+ * India-time (IST) day AND the chart is not sitting back in the viewer's "ready"
+ * milestone (Ready to Code for a Coder, Ready to Audit for an Auditor) — a chart
+ * reallocated back to "ready" needs work again, so it leaves Done. Team-leads /
+ * managers can act in either capacity, so both ready milestones exclude them.
+ * Bind `:doneViewerId` to the viewer's user id.
+ */
+export function doneSql(role: Role, aliases: Aliases = {}): string {
+  const c = aliases.chart ?? 'c';
+  const readyMs =
+    role === Role.CODER ? [M.READY_TO_CODE]
+    : role === Role.AUDITOR ? [M.READY_TO_AUDIT]
+    : [M.READY_TO_CODE, M.READY_TO_AUDIT];
+  return `(${touchedTodaySql(aliases)} AND ${c}.milestone NOT IN (${readyMs.map((m) => `'${m}'`).join(', ')}))`;
+}
+
+/**
+ * "Touched today": the viewer started a timer on this chart during the current
+ * India-time (IST) day. Bind `:doneViewerId` to the viewer's user id.
  * Requires the charts table aliased (default `c`).
  */
 export function touchedTodaySql(aliases: Aliases = {}): string {

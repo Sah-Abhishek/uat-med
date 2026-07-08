@@ -47,11 +47,12 @@ export enum ReviewedFilter {
 }
 
 export class QueryChartsDto extends PageParamsDto {
-  /** Priority "tab": a computed bucket (CRITICAL/HIGH/MEDIUM/LOW) or the
-   * touched-today 'DONE' bucket (§4.6). FINALIZED is retired. */
-  @ApiPropertyOptional({ enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'DONE'] })
+  /** Priority "tab": a computed bucket (CRITICAL/HIGH/MEDIUM/LOW), the
+   * touched-today 'DONE' bucket (§4.6, Coders/Auditors), or the 'FINALIZED'
+   * bucket (§4.7, Managers). */
+  @ApiPropertyOptional({ enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'DONE', 'FINALIZED'] })
   @IsOptional()
-  @IsIn([Priority.CRITICAL, Priority.HIGH, Priority.MEDIUM, Priority.LOW, 'DONE'])
+  @IsIn([Priority.CRITICAL, Priority.HIGH, Priority.MEDIUM, Priority.LOW, 'DONE', Priority.FINALIZED])
   priority?: Priority | 'DONE';
   @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) worklistId?: number[];
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() serialFrom?: number;

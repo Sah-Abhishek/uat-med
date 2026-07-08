@@ -74,15 +74,15 @@ import {
   X,
 } from 'lucide-react';
 
-const PRIORITY_TABS: Array<{ key: 'ALL' | PriorityTab; label: string }> = [
+// The four computed buckets, common to every role. The trailing tab is
+// role-specific: "Done" (§4.6) for Coders/Auditors/Team-Leads, "Finalized"
+// (§4.7) for Managers — appended per role in the component.
+const BASE_PRIORITY_TABS: Array<{ key: 'ALL' | PriorityTab; label: string }> = [
   { key: 'ALL', label: 'All Priorities' },
   { key: 'CRITICAL', label: 'Critical' },
   { key: 'HIGH', label: 'High' },
   { key: 'MEDIUM', label: 'Medium' },
   { key: 'LOW', label: 'Low' },
-  // "Done" = charts the viewer touched today (§4.6), reset daily — not a stored
-  // priority. Distinct from the computed buckets above.
-  { key: 'DONE', label: 'Done' },
 ];
 
 // Option lists for the stylized FancySelect filters. Each leads with an "Any"
@@ -483,6 +483,9 @@ function saveVisibleColumns(visible: Set<string>) {
 export function ChartsPage() {
   const user = useAuth((s) => s.user)!;
   const isManager = can(user, 'chart.bulkModify');
+  // The §4.7 Finalized bucket exists only for the Manager role (a Team-Lead may
+  // hold bulkModify but still gets the §4.6 Done bucket instead).
+  const isManagerRole = user.role === 'MANAGER';
   // Coder / auditor / admin can pull charts to themselves.
   const canSelfAllocate = can(user, 'chart.selfAllocate');
   const qc = useQueryClient();
@@ -498,6 +501,11 @@ export function ChartsPage() {
   const setPageSize = useChartsView((s) => s.setPageSize);
   const tab = useChartsView((s) => s.tab);
   const setTab = useChartsView((s) => s.setTab);
+  // The role-specific last tab (§4.6 Done vs §4.7 Finalized) differs per role, so
+  // a tab persisted from another role's session may not exist here — snap to All.
+  useEffect(() => {
+    if ((tab === 'FINALIZED' && !isManagerRole) || (tab === 'DONE' && isManagerRole)) setTab('ALL');
+  }, [tab, isManagerRole, setTab]);
   const filters = useChartsView((s) => s.filters);
   const setFilters = useChartsView((s) => s.setFilters);
   const persistedSort = useChartsView((s) => s.sort);
@@ -675,16 +683,23 @@ export function ChartsPage() {
   }
 
   const pc = summary.data?.priorityCounts;
-  const tabsWithCounts = PRIORITY_TABS.map((t) => ({
+  // Managers get the "Finalized" bucket (§4.7); everyone else gets "Done" (§4.6).
+  const priorityTabs: Array<{ key: 'ALL' | PriorityTab; label: string }> = [
+    ...BASE_PRIORITY_TABS,
+    isManagerRole ? { key: 'FINALIZED', label: 'Finalized' } : { key: 'DONE', label: 'Done' },
+  ];
+  const tabsWithCounts = priorityTabs.map((t) => ({
     ...t,
     count:
       t.key === 'ALL'
-        // ALL = every visible chart (each falls in exactly one computed bucket);
-        // "Done today" is a separate view, so it's not summed here.
-        ? (pc ? pc.critical + pc.high + pc.medium + pc.low : undefined)
+        // ALL = distinct charts in ≥1 active bucket. Buckets can overlap
+        // (§4.4/§4.5), so this is a backend distinct count, not the sum.
+        ? pc?.allBucketed
         : t.key === 'DONE'
           ? pc?.doneToday
-          : pc?.[t.key.toLowerCase() as keyof typeof pc],
+          : t.key === 'FINALIZED'
+            ? pc?.finalized
+            : pc?.[t.key.toLowerCase() as keyof typeof pc],
   }));
 
   return (

@@ -168,9 +168,10 @@ export type ChartStatus = 'OPEN' | 'COMPLETE' | 'INCOMPLETE' | 'HOLD';
 // of these buckets. FINALIZED is retained only for legacy stored values.
 export type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'FINALIZED';
 
-// The charts-page priority "tabs": the four computed buckets plus the
-// touched-today "Done" bucket (§4.6). Sent to the API as the `priority` param.
-export type PriorityTab = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'DONE';
+// The charts-page priority "tabs": the four computed buckets, the touched-today
+// "Done" bucket (§4.6, Coders/Auditors) and the "Finalized" bucket (§4.7,
+// Managers). Sent to the API as the `priority` param.
+export type PriorityTab = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'DONE' | 'FINALIZED';
 
 export interface Procedure {
   code: string;
@@ -335,7 +336,11 @@ export interface ChartSummary {
     high: number;
     medium: number;
     low: number;
-    /** Retired bucket, always 0 — kept for response-shape compatibility. */
+    /** Distinct charts in at least one active bucket (the "All" tab). Buckets
+     * can overlap (§4.4/§4.5), so this is not the sum of the four counts. */
+    allBucketed: number;
+    /** §4.7 Finalized bucket (Coding/Audit Done + Complete). Managers only; 0
+     * for other roles. */
     finalized: number;
     /** Charts the viewer touched today (§4.6 "Done" bucket). */
     doneToday: number;
