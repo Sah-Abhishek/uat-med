@@ -35,6 +35,9 @@ type Aliases = { chart?: string; worklist?: string };
 const BLANK = '__BLANK__';
 
 const EST = `'America/New_York'`;
+// The coders' local working day. Allocation happens during India business hours,
+// so the coder LOW bucket keys "allocated today" off IST, not the EST boundary.
+const IST = `'Asia/Kolkata'`;
 
 /** The DB's calendar "today" in Eastern time (the manual's 00:00 EST boundary). */
 export function estTodaySql(): string {
@@ -43,6 +46,27 @@ export function estTodaySql(): string {
 
 function receivedToday(w: string): string {
   return `${w}.received_date = ${estTodaySql()}`;
+}
+
+/** The chart was allocated to a coder during the current India-time (IST) day. */
+function allocatedToday(c: string): string {
+  return `(${c}.last_coder_allocated_at AT TIME ZONE ${IST})::date = (now() AT TIME ZONE ${IST})::date`;
+}
+
+/** Allocated on any day *before* today (IST). Charts with no allocation
+ * timestamp count as before-today (they were assigned before the column existed). */
+function allocatedBeforeToday(c: string): string {
+  return `NOT (${allocatedToday(c)})`;
+}
+
+/** "Worked on": a timer has been started on the chart at least once. */
+function workedOn(c: string): string {
+  return `EXISTS (SELECT 1 FROM chart_time_logs t WHERE t.chart_id = ${c}.id)`;
+}
+
+/** "Not worked on": no timer has ever been started on the chart by anyone. */
+function neverWorkedOn(c: string): string {
+  return `NOT ${workedOn(c)}`;
 }
 
 // QC status is persisted by the chart-detail form under custom_fields._formDraft
@@ -99,29 +123,24 @@ const QC = {
 function roleConditions(role: Role, c: string, w: string): { high: string; medium: string; low: string } {
   const ms = (vals: string[]) => inList(`${c}.milestone`, vals);
   const cs = (vals: string[]) => inList(`${c}.chart_status`, vals);
-  const notToday = `NOT (${receivedToday(w)})`;
   const today = receivedToday(w);
 
   switch (role) {
     case Role.CODER: {
-      const qc = coderQc(c);
       return {
-        high: and(
-          ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS]),
-          cs([S.INCOMPLETE, S.COMPLETE]),
-          qcIn(qc, [QC.IMPLEMENTED, QC.REJECTED, QC.PROVIDED, QC.AGREE]),
-        ),
-        medium: and(
-          ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS, M.CODING_DONE]),
-          cs([S.OPEN, S.INCOMPLETE]),
-          qcIn(qc, [QC.AGREE, BLANK, QC.IMPLEMENTED]),
-          notToday,
-        ),
+        // HIGH (product override 2026-07-08): the auditor has provided feedback
+        // on the chart — the coder must act on it.
+        high: qcIn(auditorQc(c), [QC.PROVIDED]),
+        // MEDIUM (product override 2026-07-08): either the chart was allocated
+        // before today and has not been worked on (aging backlog), OR it has
+        // been worked on and left INCOMPLETE.
+        medium: `(${and(allocatedBeforeToday(c), neverWorkedOn(c))} OR ${and(workedOn(c), cs([S.INCOMPLETE]))})`,
+        // LOW (product override 2026-07-08): allocated today, not yet worked on
+        // (no timer ever started), and chart status still OPEN.
         low: and(
-          ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS]),
           cs([S.OPEN]),
-          qcIn(qc, [BLANK]),
-          today,
+          allocatedToday(c),
+          neverWorkedOn(c),
         ),
       };
     }
