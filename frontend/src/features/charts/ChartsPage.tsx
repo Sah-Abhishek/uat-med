@@ -984,6 +984,36 @@ function SummaryTile({ label, value, tone }: { label: string; value: number; ton
 }
 
 /* ── Filter modal ────────────────────────────────────────── */
+// Every filter field the modal manages, blanked to undefined. Spread this
+// UNDER the applied filters when re-seeding the form (`reset({...BLANK, ...value})`).
+// react-hook-form's reset() only touches keys present in its payload — a sparse
+// payload (e.g. `reset({})` after "Clear all") leaves the controlled dropdowns
+// showing their previous selection. Listing every key here forces each field to
+// actually clear. Keep in sync with the Controllers/inputs below when adding a
+// new filter.
+const BLANK_FILTERS: ChartListParams = {
+  clientId: undefined,
+  locationId: undefined,
+  chartNo: undefined,
+  encounterId: undefined,
+  serialFrom: undefined,
+  serialTo: undefined,
+  worklistId: undefined,
+  allocatedUserId: undefined,
+  primarySpecialityId: undefined,
+  subSpecialityName: undefined,
+  chartStatus: undefined,
+  milestone: undefined,
+  aiStatus: undefined,
+  reviewed: undefined,
+  receivedDateFrom: undefined,
+  receivedDateTo: undefined,
+  dateOfServiceFrom: undefined,
+  dateOfServiceTo: undefined,
+  codingCompletedFrom: undefined,
+  codingCompletedTo: undefined,
+};
+
 function FilterModal({
   open,
   onClose,
@@ -1058,14 +1088,14 @@ function FilterModal({
   useEffect(() => {
     if (!open || selectedLocationIds.length === 0) return;
     if (selectedClientIds.length === 0) {
-      setValue('locationId', undefined);
+      setValue('locationId', []);
       return;
     }
     if (locationsLoading) return;
     const valid = new Set(locationOptions.map((o) => o.value));
     const kept = selectedLocationIds.filter((v) => valid.has(v));
     if (kept.length !== selectedLocationIds.length) {
-      setValue('locationId', kept.length ? kept.map(Number) : undefined);
+      setValue('locationId', kept.map(Number));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, selectedClientIds.join(','), selectedLocationIds.join(','), locationsLoading, locationOptions.length]);
@@ -1078,7 +1108,10 @@ function FilterModal({
   // remounted control could fail. Resetting on open keeps the form in lock-step
   // with the applied filters.
   useEffect(() => {
-    if (open) reset(value);
+    // Spread BLANK_FILTERS under the applied filters: reset() ignores keys
+    // absent from its payload, so a bare reset(value) would leave dropdowns not
+    // present in `value` (i.e. cleared filters) showing their old selection.
+    if (open) reset({ ...BLANK_FILTERS, ...value });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -1161,7 +1194,7 @@ function FilterModal({
                   searchPlaceholder="Search clients…"
                   placeholder={clients.isPending ? 'Loading…' : 'Any client'}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  onChange={(v) => field.onChange(v.map(Number))}
                   options={clientList.map((c) => ({ value: String(c.id), label: c.name }))}
                 />
               )}
@@ -1186,7 +1219,7 @@ function FilterModal({
                   loading={locationsLoading}
                   disabled={selectedClientIds.length === 0}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  onChange={(v) => field.onChange(v.map(Number))}
                   options={locationOptions}
                 />
               )}
@@ -1220,7 +1253,7 @@ function FilterModal({
                   placeholder={worklists.isPending ? 'Loading…' : 'Any worklist'}
                   loading={worklists.isFetching}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  onChange={(v) => field.onChange(v.map(Number))}
                   options={(worklists.data?.items ?? []).map((w) => ({
                     value: String(w.id),
                     label: w.worklistNumber,
@@ -1243,7 +1276,7 @@ function FilterModal({
                     searchPlaceholder="Search users…"
                     placeholder="Any user"
                     value={arr(field.value)}
-                    onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                    onChange={(v) => field.onChange(v.map(Number))}
                     options={(users.data?.items ?? []).map((u) => ({
                       value: String(u.id),
                       label: u.fullName,
@@ -1264,7 +1297,7 @@ function FilterModal({
                   searchPlaceholder="Search specialities…"
                   placeholder={specialities.isPending ? 'Loading…' : 'Any speciality'}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? v.map(Number) : undefined)}
+                  onChange={(v) => field.onChange(v.map(Number))}
                   options={(specialities.data?.items ?? []).map((s) => ({
                     value: String(s.id),
                     label: s.name,
@@ -1285,7 +1318,7 @@ function FilterModal({
                   placeholder={subSpecs.isPending ? 'Loading…' : 'Any sub-speciality'}
                   loading={subSpecs.isFetching}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? v : undefined)}
+                  onChange={(v) => field.onChange(v)}
                   options={(subSpecs.data?.items ?? []).map((s) => ({
                     value: s.name,
                     label: s.name,
@@ -1304,7 +1337,7 @@ function FilterModal({
                   placeholder="Any"
                   options={CHART_STATUS_OPTIONS}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? (v as ChartListParams['chartStatus']) : undefined)}
+                  onChange={(v) => field.onChange(v as ChartListParams['chartStatus'])}
                 />
               )}
             />
@@ -1319,7 +1352,7 @@ function FilterModal({
                   placeholder="Any"
                   options={MILESTONE_OPTIONS}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? (v as ChartListParams['milestone']) : undefined)}
+                  onChange={(v) => field.onChange(v as ChartListParams['milestone'])}
                 />
               )}
             />
@@ -1334,7 +1367,7 @@ function FilterModal({
                   placeholder="Any"
                   options={AI_STATUS_OPTIONS}
                   value={arr(field.value)}
-                  onChange={(v) => field.onChange(v.length ? (v as ChartListParams['aiStatus']) : undefined)}
+                  onChange={(v) => field.onChange(v as ChartListParams['aiStatus'])}
                 />
               )}
             />
@@ -1349,7 +1382,7 @@ function FilterModal({
                   placeholder="Any"
                   options={REVIEWED_OPTIONS}
                   value={field.value ?? ''}
-                  onChange={(v) => field.onChange(v ? (v as ChartListParams['reviewed']) : undefined)}
+                  onChange={(v) => field.onChange(v as ChartListParams['reviewed'])}
                 />
               )}
             />
@@ -1381,7 +1414,7 @@ function FilterModal({
         </div>
 
         <ModalFooter>
-          <Button variant="ghost" type="button" onClick={() => { reset({}); onApply({}); onClose(); }}>
+          <Button variant="ghost" type="button" onClick={() => { reset({ ...BLANK_FILTERS }); onApply({}); onClose(); }}>
             Clear all
           </Button>
           <Button type="submit">Apply filters</Button>
