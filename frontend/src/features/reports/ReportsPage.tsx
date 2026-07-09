@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getReportFields,
@@ -18,7 +18,7 @@ import { Card, CollapsibleCard } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Label, SearchInput, FancyMultiSelect, RangeDatePicker } from '@/components/ui/Field';
 import { Modal, ModalFooter, Pagination } from '@/components/ui/Primitives';
-import { formatDate, formatNumber } from '@/lib/utils';
+import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
   Settings2,
   Save,
@@ -29,6 +29,11 @@ import {
   BookmarkPlus,
   CheckCircle2,
   X,
+  FolderOpen,
+  LayoutTemplate,
+  FileText,
+  ChevronRight,
+  Plus,
 } from 'lucide-react';
 
 /** A date-range filter — either bound may be unset. */
@@ -358,7 +363,7 @@ function cleanFilters(f: Record<string, FilterValue>): Record<string, string | s
   return out;
 }
 
-/* ── Saved Templates section (inline table) ─────────────── */
+/* ── Saved Templates: compact bar + picker modal ────────── */
 function SavedTemplatesSection({
   currentUserId,
   currentUserRole,
@@ -372,117 +377,293 @@ function SavedTemplatesSection({
   onLoad: (t: ReportTemplate) => void;
   onNew: () => void;
 }) {
-  const qc = useQueryClient();
+  const [pickerOpen, setPickerOpen] = useState(false);
   const templates = useQuery({
     queryKey: ['reports', 'templates'],
     queryFn: () => listReportTemplates(1, 50),
   });
+  const count = templates.data?.items.length ?? 0;
+  const activeName = templates.data?.items.find((t) => String(t.id) === String(activeTemplateId))?.name;
+
+  return (
+    <>
+      <div className="rounded-card border border-line bg-surface px-5 py-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-primary-soft text-primary-ink dark:text-primary flex items-center justify-center shrink-0">
+            <LayoutTemplate className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-ink">Report templates</p>
+            <p className="text-xs text-ink-muted truncate">
+              {templates.isPending
+                ? 'Loading…'
+                : activeName
+                ? <>Loaded <span className="font-medium text-ink">{activeName}</span> · browse to switch</>
+                : count === 0
+                ? 'No templates yet — build a report and save it as a template'
+                : `${count} shared template${count === 1 ? '' : 's'} · browse to load one`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="soft"
+            leftIcon={<FolderOpen className="w-3.5 h-3.5" />}
+            onClick={() => setPickerOpen(true)}
+            disabled={count === 0 && !templates.isPending}
+          >
+            Browse
+            {count > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary/15 text-primary text-[11px] font-bold leading-none">
+                {count}
+              </span>
+            )}
+          </Button>
+          <Button variant="ghost" leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={onNew}>
+            New report
+          </Button>
+        </div>
+      </div>
+
+      <TemplatePickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        templates={templates.data?.items ?? []}
+        loading={templates.isPending}
+        activeTemplateId={activeTemplateId}
+        currentUserId={currentUserId}
+        canManageAny={currentUserRole === 'TEAMLEAD' || currentUserRole === 'MANAGER'}
+        onLoad={(t) => {
+          onLoad(t);
+          setPickerOpen(false);
+        }}
+        onNew={() => {
+          onNew();
+          setPickerOpen(false);
+        }}
+      />
+    </>
+  );
+}
+
+/* ── Template picker modal (searchable, keyboard-navigable) ── */
+function TemplatePickerModal({
+  open,
+  onClose,
+  templates,
+  loading,
+  activeTemplateId,
+  currentUserId,
+  canManageAny,
+  onLoad,
+  onNew,
+}: {
+  open: boolean;
+  onClose: () => void;
+  templates: ReportTemplate[];
+  loading: boolean;
+  activeTemplateId: number | string | null;
+  currentUserId: string | undefined;
+  canManageAny: boolean;
+  onLoad: (t: ReportTemplate) => void;
+  onNew: () => void;
+}) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [highlight, setHighlight] = useState(0);
+  const [armedDelete, setArmedDelete] = useState<string | null>(null);
+  const rowRefs = useRef<Array<HTMLDivElement | null>>([]);
 
   const delMutation = useMutation({
     mutationFn: (id: string | number) => deleteReportTemplate(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports', 'templates'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['reports', 'templates'] });
+      setArmedDelete(null);
+    },
   });
 
-  const canManageAny = currentUserRole === 'TEAMLEAD' || currentUserRole === 'MANAGER';
+  const q = search.trim().toLowerCase();
+  const filtered = useMemo(
+    () =>
+      !q
+        ? templates
+        : templates.filter(
+            (t) =>
+              t.name.toLowerCase().includes(q) ||
+              (t.ownerName ?? '').toLowerCase().includes(q),
+          ),
+    [templates, q],
+  );
+
+  // Reset transient state whenever the modal opens or the query changes.
+  useEffect(() => {
+    if (open) {
+      setSearch('');
+      setHighlight(0);
+      setArmedDelete(null);
+    }
+  }, [open]);
+  useEffect(() => setHighlight(0), [q]);
+
+  // Keep the highlighted row scrolled into view as the user arrows through.
+  useEffect(() => {
+    rowRefs.current[highlight]?.scrollIntoView({ block: 'nearest' });
+  }, [highlight]);
+
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    if (!filtered.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight((h) => Math.min(h + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight((h) => Math.max(h - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const t = filtered[highlight];
+      if (t) onLoad(t);
+    }
+  };
 
   return (
-    <CollapsibleCard
-      title="Saved Templates"
-      subtitle="Load a saved report definition or start from a blank one."
-      defaultOpen
-      actions={
-        <Button size="sm" variant="ghost" onClick={onNew}>
-          New report
-        </Button>
-      }
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Report templates"
+      subtitle="Load a saved report — its columns and filters. Templates are shared across the team."
+      size="lg"
     >
-      <div className="overflow-x-auto -mx-6">
-        <table className="w-full">
-          <thead>
-            <tr>
-              <th className="table-head">Template</th>
-              <th className="table-head">Columns</th>
-              <th className="table-head">Filters</th>
-              <th className="table-head">Updated</th>
-              <th className="table-head w-32 text-right pr-6">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {templates.isPending ? (
-              <tr>
-                <td colSpan={5} className="py-10 text-center">
-                  <Loader2 className="w-4 h-4 animate-spin inline text-ink-muted" />
-                </td>
-              </tr>
-            ) : (templates.data?.items.length ?? 0) === 0 ? (
-              <tr>
-                <td colSpan={5} className="py-10 text-center text-sm text-ink-muted">
-                  No saved templates yet. Configure filters + columns and click <span className="font-semibold">Save as template</span>.
-                </td>
-              </tr>
-            ) : (
-              templates.data?.items.map((t) => {
+      <div className="space-y-3" onKeyDown={onKeyDown}>
+        <SearchInput
+          autoFocus
+          placeholder="Search by template or creator…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1 space-y-1.5">
+          {loading ? (
+            <div className="py-14 text-center">
+              <Loader2 className="w-5 h-5 animate-spin inline text-ink-muted" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-12 text-center animate-[menu-in_140ms_ease-out]">
+              <div className="w-12 h-12 rounded-2xl bg-surface-sunken flex items-center justify-center mx-auto mb-3 text-ink-subtle">
+                <FolderOpen className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-semibold text-ink">
+                {templates.length === 0 ? 'No templates yet' : 'No matches'}
+              </p>
+              <p className="text-xs text-ink-muted mt-1">
+                {templates.length === 0
+                  ? 'Build a report, then use Customize / Save to store it as a template.'
+                  : 'Try a different name or creator.'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1.5 animate-[menu-in_140ms_ease-out]">
+              {filtered.map((t, i) => {
                 const isActive = String(t.id) === String(activeTemplateId);
                 const isOwn = String(t.ownerId) === String(currentUserId);
+                const isHi = i === highlight;
                 const filterCount = t.filterKeys?.length ?? 0;
+                const canDelete = isOwn || canManageAny;
                 return (
-                  <tr
+                  <div
                     key={t.id}
-                    className={
-                      'transition ' +
-                      (isActive ? 'bg-primary-soft/40' : 'hover:bg-surface-sunken/40')
-                    }
+                    ref={(el) => (rowRefs.current[i] = el)}
+                    role="button"
+                    tabIndex={-1}
+                    onMouseEnter={() => setHighlight(i)}
+                    onClick={() => onLoad(t)}
+                    className={cn(
+                      'group w-full text-left rounded-xl border px-3.5 py-3 flex items-center gap-3 cursor-pointer transition',
+                      isActive
+                        ? 'border-primary/50 bg-primary-soft/40'
+                        : isHi
+                        ? 'border-line-strong bg-surface-sunken/70'
+                        : 'border-line hover:border-line-strong',
+                    )}
                   >
-                    <td className="table-cell font-semibold text-ink">
-                      <div className="flex items-center gap-2">
-                        {isActive && <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />}
-                        <span className="truncate">
-                          <span className="font-normal text-ink-muted">
-                            {t.ownerName ?? 'Unknown'}
-                            {isOwn && ' (you)'} —{' '}
-                          </span>
-                          {t.name}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="table-cell text-ink-muted text-xs">
-                      {t.columns.length} column{t.columns.length === 1 ? '' : 's'}
-                    </td>
-                    <td className="table-cell text-ink-muted text-xs">
-                      {filterCount === 0 ? '—' : `${filterCount} filter${filterCount === 1 ? '' : 's'}`}
-                    </td>
-                    <td className="table-cell text-ink-muted text-xs">
-                      {formatDate(t.updatedAt)}
-                    </td>
-                    <td className="table-cell text-right pr-6">
-                      <div className="inline-flex items-center gap-1">
-                        <Button size="sm" variant={isActive ? 'soft' : 'primary'} onClick={() => onLoad(t)}>
-                          {isActive ? 'Loaded' : 'Load'}
-                        </Button>
-                        {(isOwn || canManageAny) && (
+                    <div
+                      className={cn(
+                        'w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition',
+                        isActive ? 'bg-success-soft text-success' : 'bg-surface-sunken text-ink-muted group-hover:text-primary',
+                      )}
+                    >
+                      {isActive ? <CheckCircle2 className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-ink truncate">{t.name}</p>
+                      <p className="text-[11px] text-ink-muted truncate">
+                        {t.ownerName ?? 'Unknown'}
+                        {isOwn && ' (you)'} · {t.columns.length} col{t.columns.length === 1 ? '' : 's'} ·{' '}
+                        {filterCount} filter{filterCount === 1 ? '' : 's'} · {formatDate(t.updatedAt)}
+                      </p>
+                    </div>
+
+                    {isActive && (
+                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-success bg-success-soft px-2 py-0.5 rounded-pill">
+                        Loaded
+                      </span>
+                    )}
+
+                    {canDelete &&
+                      (armedDelete === String(t.id) ? (
+                        <div className="shrink-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
-                            onClick={() => {
-                              if (window.confirm(`Delete template "${t.name}"?`)) {
-                                delMutation.mutate(t.id);
-                              }
-                            }}
-                            className="w-7 h-7 rounded-full text-danger hover:bg-danger-soft flex items-center justify-center"
-                            title="Delete template"
+                            onClick={() => delMutation.mutate(t.id)}
+                            disabled={delMutation.isPending}
+                            className="text-[11px] font-semibold text-white bg-danger hover:brightness-95 px-2 py-1 rounded-md transition"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                          <button
+                            type="button"
+                            onClick={() => setArmedDelete(null)}
+                            className="w-6 h-6 rounded-md text-ink-muted hover:bg-surface-sunken flex items-center justify-center transition"
+                            aria-label="Cancel delete"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setArmedDelete(String(t.id));
+                          }}
+                          className="shrink-0 w-7 h-7 rounded-full text-ink-subtle hover:text-danger hover:bg-danger-soft flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                          title="Delete template"
+                          aria-label="Delete template"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      ))}
+
+                    <ChevronRight
+                      className="shrink-0 w-4 h-4 text-ink-subtle group-hover:text-ink-muted group-hover:translate-x-0.5 transition"
+                    />
+                  </div>
                 );
-              })
-            )}
-          </tbody>
-        </table>
+              })}
+            </div>
+          )}
+        </div>
       </div>
-    </CollapsibleCard>
+
+      <ModalFooter>
+        <span className="mr-auto text-[11px] text-ink-muted">
+          {loading ? '' : `${filtered.length} of ${templates.length} template${templates.length === 1 ? '' : 's'}`}
+        </span>
+        <Button variant="ghost" leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={onNew}>
+          New blank report
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 
