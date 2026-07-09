@@ -129,9 +129,13 @@ const FIELDS: FieldDef[] = [
   { key: 'primaryHealthPlan', label: 'Primary Health Plan',sql: `c.custom_fields#>>'{_formDraft,primaryHealth}'`,                                 filterable: true,  sortable: true,  valuesFrom: { table: 'primary_health_plans', column: 'name' } },
   { key: 'facility',          label: 'Facility',           sql: `c.custom_fields#>>'{_formDraft,facility}'`,             filterable: true,  sortable: true,  filterKind: 'select' },
   { key: 'primaryDiagnosis',  label: 'Primary Diagnosis',  sql: 'c.primary_diagnosis',                      filterable: true,  sortable: true },
-  // Sdx — the chart's secondary diagnosis codes (aggregated). Filterable by
-  // substring so "I10" matches any chart carrying that code among its secondaries.
-  { key: 'secondaryDiagnoses',label: 'Secondary Dx (Sdx)', sql: `CASE WHEN jsonb_typeof(c.custom_fields#>'{aiPrediction,secondary}')='array' THEN (SELECT string_agg(e->>'code', ', ') FROM jsonb_array_elements(c.custom_fields#>'{aiPrediction,secondary}') e) END`, filterable: true, sortable: false, filterKind: 'text' },
+  // Sdx — the chart's secondary diagnosis codes, combined + deduped from BOTH
+  // sources: the manually-entered per-location "Secondary Diagnosis" custom
+  // field(s) (comma-separated strings; some locations carry several configs of
+  // that name) and the AI-predicted `aiPrediction.secondary` array. We split the
+  // manual strings on commas, trim, UNION with the AI codes, drop blanks, and
+  // sort. Substring-filterable so "I10" matches any chart carrying that code.
+  { key: 'secondaryDiagnoses',label: 'Secondary Dx (Sdx)', sql: `(SELECT string_agg(code, ', ' ORDER BY code) FROM (SELECT trim(x) AS code FROM custom_field_configs cfc CROSS JOIN LATERAL regexp_split_to_table(COALESCE(c.custom_fields->>(cfc.id::text),''), ',') AS x WHERE cfc.location_id = wl.location_id AND cfc.name ILIKE 'Secondary Diagnosis' UNION SELECT trim(e->>'code') FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.custom_fields#>'{aiPrediction,secondary}')='array' THEN c.custom_fields#>'{aiPrediction,secondary}' ELSE '[]'::jsonb END) AS e) codes WHERE code IS NOT NULL AND code <> '')`, filterable: true, sortable: false, filterKind: 'text' },
   { key: 'emLevel',           label: 'E/M Level',          sql: 'c.em_level',                               filterable: true,  sortable: true },
   // Modifier — the chart's final modifier codes, from submitted code decisions
   // (code_type = MODIFIER). Uses the edited code when the decision was EDITED,
