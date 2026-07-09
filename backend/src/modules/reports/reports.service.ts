@@ -141,6 +141,12 @@ const FIELDS: FieldDef[] = [
   // (code_type = MODIFIER). Uses the edited code when the decision was EDITED,
   // else the original value; rejected modifiers are excluded. Substring filter.
   { key: 'modifier',          label: 'Modifier',           sql: `(SELECT string_agg(DISTINCT COALESCE(NULLIF(cd.edited_code, ''), cd.code_value), ', ') FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.code_type = 'MODIFIER' AND cd.decision <> 'REJECTED')`, filterable: true, sortable: false, filterKind: 'text' },
+  // Code-decision counts, mirroring the QA accuracy metric (accepted / decisions).
+  // Total Codes = every submitted code decision on the chart; Corrected Codes =
+  // the ones the coder changed from the AI suggestion (EDITED / REJECTED / ADDED,
+  // i.e. NOT ACCEPTED). ::int so the driver returns a number (bigint → string).
+  { key: 'totalCodes',        label: 'Total Codes',        sql: `(SELECT COUNT(*)::int FROM chart_code_decisions cd WHERE cd.chart_id = c.id)`, filterable: true, sortable: true, type: 'number', filterKind: 'text' },
+  { key: 'correctedCodes',    label: 'Corrected Codes',    sql: `(SELECT COUNT(*)::int FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.decision <> 'ACCEPTED')`, filterable: true, sortable: true, type: 'number', filterKind: 'text' },
   { key: 'coderCommentsToClient', label: 'Coder Comments to Client', sql: 'c.coder_comments_to_client',       filterable: true,  sortable: false, filterKind: 'text' },
   { key: 'facilityEM',        label: 'Facility E/M',       sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE cfc.name='Facility E/M' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'text' },
   { key: 'infusion',          label: 'Infusion',           sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE cfc.name='Infusion' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'text' },
