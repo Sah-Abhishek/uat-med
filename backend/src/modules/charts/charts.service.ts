@@ -191,12 +191,7 @@ export class ChartsService {
     if (q.serialFrom) qb.andWhere('c.serial_no >= :sf', { sf: q.serialFrom });
     if (q.serialTo) qb.andWhere('c.serial_no <= :st', { st: q.serialTo });
     if (q.chartNo) qb.andWhere('c.chart_no ILIKE :cn', { cn: `%${q.chartNo}%` });
-    // Encounter id lives on the JSONB custom_fields (aiPrediction.encounterId);
-    // match a fragment of it case-insensitively, same as the chart # search.
-    if (q.encounterId?.trim())
-      qb.andWhere(`c.custom_fields->'aiPrediction'->>'encounterId' ILIKE :eid`, {
-        eid: `%${q.encounterId.trim()}%`,
-      });
+    this.applyEncounterIdFilter(qb, q.encounterId);
     if (q.chartStatus?.length) qb.andWhere('c.chart_status IN (:...cs)', { cs: q.chartStatus });
     if (q.milestone?.length) qb.andWhere('c.milestone IN (:...m)', { m: q.milestone });
     if (q.allocatedUserId?.length) qb.andWhere('(c.allocated_coder_id IN (:...au) OR c.allocated_auditor_id IN (:...au))', { au: q.allocatedUserId });
@@ -229,6 +224,18 @@ export class ChartsService {
     if (q.dateOfServiceFrom) qb.andWhere('c.dos >= :dosf', { dosf: q.dateOfServiceFrom });
     if (q.dateOfServiceTo) qb.andWhere('c.dos <= :dost', { dost: q.dateOfServiceTo });
     return qb;
+  }
+
+  /**
+   * Match a fragment of the chart's encounter id — stored on the JSONB
+   * custom_fields under aiPrediction.encounterId — case-insensitively, same as
+   * the chart # search. Shared by the normal grid-filter path and the global
+   * encounter-id lookup in list() so the two predicates never drift.
+   */
+  private applyEncounterIdFilter(qb: SelectQueryBuilder<Chart>, encounterId?: string): void {
+    const eid = encounterId?.trim();
+    if (eid)
+      qb.andWhere(`c.custom_fields->'aiPrediction'->>'encounterId' ILIKE :eid`, { eid: `%${eid}%` });
   }
 
   /**
@@ -278,19 +285,34 @@ export class ChartsService {
       .leftJoinAndSelect('worklist.process', 'process')
       .leftJoinAndSelect('c.serviceLine', 'serviceLine');
 
+    // Searching by encounter id is a *global* lookup: it finds the chart
+    // anywhere in the system, ignoring the viewer's role/allocation scope and
+    // every active grid filter (client/location/worklist/priority tab/dates/…),
+    // so a specific chart can always be pulled up by its id. Orphaned charts
+    // (soft-deleted worklist) stay hidden — those are deleted, not out of scope.
+    const globalEncounterSearch = !!q.encounterId?.trim();
+
     // Role-scoped visibility: coders see only their own queue. Auditors — like
     // team-leads / managers — see every chart and self-allocate one to work on
-    // it (the startTimer guard still enforces allocation before timing).
-    if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
+    // it (the startTimer guard still enforces allocation before timing). A
+    // global encounter-id lookup deliberately bypasses this scope.
+    if (user.role === Role.CODER && !globalEncounterSearch)
+      qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
 
     // Hide charts orphaned by a soft-deleted worklist (see helper).
     this.excludeOrphanedCharts(qb);
 
-    this.applyChartFilters(qb, q);
-    // Priority-tab scope (computed per viewer role). The no-bucket hide (User
-    // Manual §4.2) applies to the backlog, not to a worklist inventory view.
-    const scopedToWorklist = (q.worklistId?.length ?? 0) > 0;
-    this.applyPriorityScope(qb, user.role, q.priority, Number(user.id), !scopedToWorklist);
+    if (globalEncounterSearch) {
+      // Match on the encounter id alone — all other filters and the priority tab
+      // are dropped so the chart surfaces no matter what's selected in the grid.
+      this.applyEncounterIdFilter(qb, q.encounterId);
+    } else {
+      this.applyChartFilters(qb, q);
+      // Priority-tab scope (computed per viewer role). The no-bucket hide (User
+      // Manual §4.2) applies to the backlog, not to a worklist inventory view.
+      const scopedToWorklist = (q.worklistId?.length ?? 0) > 0;
+      this.applyPriorityScope(qb, user.role, q.priority, Number(user.id), !scopedToWorklist);
+    }
 
     // Count the fully-scoped set before pagination / the computed-priority
     // addSelect (getManyAndCount can't be used once we need the raw column).
