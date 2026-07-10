@@ -182,6 +182,12 @@ function roleConditions(role: Role, c: string, w: string): RoleConds {
     // §4.5 Manager / Team Lead share the matrix. QC is "any" for High/Medium
     // (the manual lists every QC value, so the clause is omitted); Low requires
     // Blank. No exclusions.
+    //
+    // READY_TO_ALLOCATE is deliberately absent from every bucket here: an
+    // unallocated chart (imported, not yet handed to a coder) must not surface in
+    // any role's priority backlog — Coder/Auditor already exclude it, so dropping
+    // it from the Manager/Team-Lead Medium bucket hides it from all three. It
+    // stays reachable via the worklist inventory view and a manual priority pin.
     case Role.MANAGER:
     case Role.TEAMLEAD:
     default:
@@ -192,7 +198,7 @@ function roleConditions(role: Role, c: string, w: string): RoleConds {
         ),
         medium: and(
           ms([
-            M.READY_TO_ALLOCATE, M.READY_TO_CODE, M.CODING_IN_PROGRESS, M.CODING_DONE,
+            M.READY_TO_CODE, M.CODING_IN_PROGRESS, M.CODING_DONE,
             M.READY_TO_AUDIT, M.AUDIT_IN_PROGRESS, M.AUDIT_DONE,
           ]),
           cs([S.OPEN, S.INCOMPLETE]),
