@@ -62,18 +62,40 @@ function receivedNotToday(w: string): string {
 }
 
 // QC status is persisted by the chart-detail form under custom_fields._formDraft
-// (coder in `qcStatus`, auditor in `auditorQcStatus`). The manual models a
-// single "QC Status" per chart, so every role reads the *effective* QC — the
-// auditor's value if set (it is the later step in the review lifecycle),
-// otherwise the coder's.
+// (coder in `qcStatus`, auditor in `auditorQcStatus`). The User Manual models a
+// SINGLE "QC Status" per chart that different roles change to different values
+// ("Only 'Feedback Provided'/'Agree' are available to the Auditor to change,
+// whilst 'Feedback Implemented'/'Feedback Rejected' are available to the Coder").
+// We keep the two role fields but pick the *effective* value as the one whose
+// role changed it MOST RECENTLY (ChartsService.update() stamps `qcStatusAt` /
+// `auditorQcStatusAt`): the coder's response supersedes the auditor's "Feedback
+// Provided", and the auditor's later "Agree" supersedes in turn.
 function coderQc(c: string): string {
   return `${c}.custom_fields#>>'{_formDraft,qcStatus}'`;
 }
 function auditorQc(c: string): string {
   return `${c}.custom_fields#>>'{_formDraft,auditorQcStatus}'`;
 }
+function coderQcAt(c: string): string {
+  return `${c}.custom_fields#>>'{_formDraft,qcStatusAt}'`;
+}
+function auditorQcAt(c: string): string {
+  return `${c}.custom_fields#>>'{_formDraft,auditorQcStatusAt}'`;
+}
 function effectiveQc(c: string): string {
-  return `COALESCE(NULLIF(${auditorQc(c)}, ''), NULLIF(${coderQc(c)}, ''))`;
+  const coder = `NULLIF(${coderQc(c)}, '')`;
+  const auditor = `NULLIF(${auditorQc(c)}, '')`;
+  // A missing timestamp sorts as "-infinity" so a newly-stamped value beats an
+  // un-stamped legacy one; when neither is stamped we fall back to the previous
+  // auditor-over-coder rule (legacy rows carry no timestamps).
+  // Parenthesise the #>> extraction before ::timestamptz — the cast binds
+  // tighter than #>>, so without parens it wrongly casts the JSON *path* literal.
+  const coderAt = `COALESCE((${coderQcAt(c)})::timestamptz, '-infinity')`;
+  const auditorAt = `COALESCE((${auditorQcAt(c)})::timestamptz, '-infinity')`;
+  return `CASE
+    WHEN ${coder} IS NOT NULL AND (${auditor} IS NULL OR ${coderAt} > ${auditorAt}) THEN ${coder}
+    ELSE COALESCE(${auditor}, ${coder})
+  END`;
 }
 
 function inList(expr: string, vals: string[]): string {

@@ -814,6 +814,18 @@ async update(id: number, dto: UpdateChartDto) {
   const c = await this.charts.findOne({ where: { id } });
   if (!c) throw new NotFoundException();
 
+  // QC Status is ONE logical value per the User Manual, stored as two role
+  // fields (coder = qcStatus, auditor = auditorQcStatus). Capture the pre-save
+  // values so we can stamp a *changed-at* timestamp below — the priority engine
+  // then treats whichever role changed theirs most recently as the effective QC
+  // (so the coder's "Feedback Implemented/Rejected" supersedes the auditor's
+  // "Feedback Provided", and the auditor's later "Agree" supersedes in turn).
+  const prevFd = (c.customFields?._formDraft ?? {}) as Record<string, unknown>;
+  const prevCoderQc = typeof prevFd.qcStatus === 'string' ? prevFd.qcStatus : '';
+  const prevAuditorQc = typeof prevFd.auditorQcStatus === 'string' ? prevFd.auditorQcStatus : '';
+  const prevCoderQcAt = typeof prevFd.qcStatusAt === 'string' ? prevFd.qcStatusAt : undefined;
+  const prevAuditorQcAt = typeof prevFd.auditorQcStatusAt === 'string' ? prevFd.auditorQcStatusAt : undefined;
+
   // Track who the chart was allocated to *as part of this save*, so we can
   // distinguish "save with handoff" from "save without handoff".
   const allocatingCoder = dto.allocatedCoderId !== undefined && dto.allocatedCoderId !== null;
@@ -855,6 +867,19 @@ async update(id: number, dto: UpdateChartDto) {
     // stale FE snapshot can't overwrite newer pipeline state.
     for (const k of RESERVED_PIPELINE_KEYS) delete (customFields as Record<string, unknown>)[k];
     c.customFields = { ...(c.customFields ?? {}), ...customFields };
+    // Stamp QC-change timestamps on the merged _formDraft (see prev* capture
+    // above). The FE blob replaces _formDraft wholesale and doesn't carry these
+    // stamps, so re-derive them: bump to now when a role's QC value changed,
+    // else preserve the prior stamp. effectiveQc() reads them to pick the value
+    // that was set most recently.
+    const fd = (c.customFields as Record<string, any>)._formDraft;
+    if (fd && typeof fd === 'object') {
+      const now = new Date().toISOString();
+      const newCoderQc = typeof fd.qcStatus === 'string' ? fd.qcStatus : '';
+      const newAuditorQc = typeof fd.auditorQcStatus === 'string' ? fd.auditorQcStatus : '';
+      fd.qcStatusAt = newCoderQc !== prevCoderQc ? now : prevCoderQcAt;
+      fd.auditorQcStatusAt = newAuditorQc !== prevAuditorQc ? now : prevAuditorQcAt;
+    }
   }
   if (nextStatus !== undefined) {
     c.setChartStatus(nextStatus);
