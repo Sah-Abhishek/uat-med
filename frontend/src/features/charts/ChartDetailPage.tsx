@@ -824,9 +824,13 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         chartStatus: chartStatusForApi,
         primaryDiagnosis: draft.primaryDiagnosis || undefined,
         emLevel: draft.em || undefined,
-        coderCommentsToClient: draft.coderComments || undefined,
-        rejectionDenialComments: draft.rejectionComments || undefined,
-        deficiencyComments: draft.deficiencyComments || undefined,
+        // Send the raw string (including '') so clearing a comment actually
+        // sticks. `|| undefined` drops the key from the JSON payload, and the
+        // backend's partial-update merge (Object.assign) then keeps the old
+        // value — which made a cleared comment reappear after save.
+        coderCommentsToClient: draft.coderComments,
+        rejectionDenialComments: draft.rejectionComments,
+        deficiencyComments: draft.deficiencyComments,
         admitDate: draft.admitDate || undefined,
         dischargeDate: draft.dischargeDate || undefined,
         dos: draft.dateOfService || undefined,
