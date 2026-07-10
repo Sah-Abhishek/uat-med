@@ -121,6 +121,16 @@ const REVIEWED_OPTIONS = [
   { value: 'YES', label: 'Reviewed' },
   { value: 'NO', label: 'Not reviewed' },
 ];
+// Coder / Auditor QC Status multi-select options. "Blank" uses a sentinel (not
+// '') so it survives query-param serialisation; the backend maps it to "QC not
+// set yet" (matches the manual's "find charts without a QC status").
+const QC_STATUS_FILTER_OPTIONS = [
+  { value: 'Agree', label: 'Agree' },
+  { value: 'Feedback Provided', label: 'Feedback Provided' },
+  { value: 'Feedback Implemented', label: 'Feedback Implemented' },
+  { value: 'Feedback Rejected', label: 'Feedback Rejected' },
+  { value: '__BLANK__', label: 'Blank (not set)' },
+];
 
 /* ── Configurable column catalog ──────────────────────────
  * Each entry pairs a label with a renderer; visibility is toggled from the
@@ -1006,6 +1016,8 @@ const BLANK_FILTERS: ChartListParams = {
   milestone: undefined,
   aiStatus: undefined,
   reviewed: undefined,
+  coderQcStatus: undefined,
+  auditorQcStatus: undefined,
   receivedDateFrom: undefined,
   receivedDateTo: undefined,
   dateOfServiceFrom: undefined,
@@ -1383,6 +1395,36 @@ function FilterModal({
                   options={REVIEWED_OPTIONS}
                   value={field.value ?? ''}
                   onChange={(v) => field.onChange(v as ChartListParams['reviewed'])}
+                />
+              )}
+            />
+          </div>
+          <div>
+            <Label>Coder QC Status</Label>
+            <Controller
+              control={control}
+              name="coderQcStatus"
+              render={({ field }) => (
+                <FancyMultiSelect
+                  placeholder="Any"
+                  options={QC_STATUS_FILTER_OPTIONS}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v)}
+                />
+              )}
+            />
+          </div>
+          <div>
+            <Label>Auditor QC Status</Label>
+            <Controller
+              control={control}
+              name="auditorQcStatus"
+              render={({ field }) => (
+                <FancyMultiSelect
+                  placeholder="Any"
+                  options={QC_STATUS_FILTER_OPTIONS}
+                  value={arr(field.value)}
+                  onChange={(v) => field.onChange(v)}
                 />
               )}
             />

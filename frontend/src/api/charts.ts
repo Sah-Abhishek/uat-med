@@ -58,6 +58,11 @@ export interface ChartListParams {
    * (there's no column for it). 'YES' keeps only reviewed charts, 'NO' keeps
    * only untouched ones; omit for no filter. */
   reviewed?: 'YES' | 'NO';
+  /** QC status multi-selects (values from _formDraft). Use the '__BLANK__'
+   * sentinel to match charts with no QC set yet. Coder = the coder's response
+   * field; Auditor = the auditor's verdict field. */
+  coderQcStatus?: string[];
+  auditorQcStatus?: string[];
   receivedDateFrom?: string;
   receivedDateTo?: string;
   dateOfServiceFrom?: string;

@@ -60,6 +60,11 @@ const CODING_FINISHED_MILESTONES: ReadonlySet<ChartMilestone> = new Set([
   ChartMilestone.CLOSED,
 ]);
 
+// Sentinel a QC-status multi-select uses to mean "not set yet" (matches the
+// Reports filter's BLANK_FILTER_VALUE); the frontend sends it in place of an
+// empty string so it survives query-param serialisation.
+const QC_BLANK_FILTER = '__BLANK__';
+
 /**
  * customFields keys owned by the AI pipeline — written only by the
  * process/finalize/upload/remove/watcher/bulk endpoints, never by the
@@ -207,6 +212,10 @@ export class ChartsService {
     this.applyEncounterIdFilter(qb, q.encounterId);
     if (q.chartStatus?.length) qb.andWhere('c.chart_status IN (:...cs)', { cs: q.chartStatus });
     if (q.milestone?.length) qb.andWhere('c.milestone IN (:...m)', { m: q.milestone });
+    // QC status multi-selects — Coder (qcStatus) and Auditor (auditorQcStatus)
+    // both live on the JSONB _formDraft blob.
+    this.applyQcStatusFilter(qb, `c.custom_fields#>>'{_formDraft,qcStatus}'`, q.coderQcStatus, 'coderQc');
+    this.applyQcStatusFilter(qb, `c.custom_fields#>>'{_formDraft,auditorQcStatus}'`, q.auditorQcStatus, 'auditorQc');
     if (q.allocatedUserId?.length) qb.andWhere('(c.allocated_coder_id IN (:...au) OR c.allocated_auditor_id IN (:...au))', { au: q.allocatedUserId });
     if (q.primarySpecialityId?.length) qb.andWhere('worklist.primary_speciality_id IN (:...ps)', { ps: q.primarySpecialityId });
     if (q.subSpecialityId?.length) qb.andWhere('worklist.sub_speciality_id IN (:...ss)', { ss: q.subSpecialityId });
@@ -249,6 +258,28 @@ export class ChartsService {
     const eid = encounterId?.trim();
     if (eid)
       qb.andWhere(`c.custom_fields->'aiPrediction'->>'encounterId' ILIKE :eid`, { eid: `%${eid}%` });
+  }
+
+  /**
+   * Filter a JSONB QC-status expression (from _formDraft) by a multi-select
+   * list. The '__BLANK__' sentinel (and a literal empty value) matches charts
+   * with no QC set yet — OR-ed with the concrete values, so e.g. ["Agree",
+   * "__BLANK__"] means "= Agree OR not set". Mirrors the Reports QC filter.
+   */
+  private applyQcStatusFilter(
+    qb: SelectQueryBuilder<Chart>,
+    expr: string,
+    values: string[] | undefined,
+    paramKey: string,
+  ): void {
+    if (!values?.length) return;
+    const concrete = values.filter((v) => v !== QC_BLANK_FILTER && v !== '');
+    const wantsBlank = values.some((v) => v === QC_BLANK_FILTER || v === '');
+    const clauses: string[] = [];
+    if (concrete.length) clauses.push(`${expr} IN (:...${paramKey})`);
+    if (wantsBlank) clauses.push(`(${expr} IS NULL OR ${expr} = '')`);
+    if (!clauses.length) return;
+    qb.andWhere(`(${clauses.join(' OR ')})`, concrete.length ? { [paramKey]: concrete } : {});
   }
 
   /**
