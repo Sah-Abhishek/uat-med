@@ -1016,9 +1016,12 @@ async update(id: number, dto: UpdateChartDto) {
     }
 
     // Capacity is derived from the chart's milestone (TEAMLEADs can do either).
+    // AUDIT_DONE counts as audit work too, so re-opening a finished audit logs
+    // the session as AUDIT rather than CODING.
     const kind: ChartTimerKind =
       c.milestone === ChartMilestone.READY_TO_AUDIT ||
-      c.milestone === ChartMilestone.AUDIT_IN_PROGRESS
+      c.milestone === ChartMilestone.AUDIT_IN_PROGRESS ||
+      c.milestone === ChartMilestone.AUDIT_DONE
         ? 'AUDIT'
         : 'CODING';
     const startedAt = new Date();
@@ -1048,10 +1051,15 @@ async update(id: number, dto: UpdateChartDto) {
     // any manual priority override so it reverts to its computed role bucket.
     let dirty = false;
     if (c.manualPriorityAt) { c.clearManualPriority(); dirty = true; }
-    if (c.milestone === ChartMilestone.READY_TO_CODE && canCode) {
+    // Starting the timer moves the chart into the active-work milestone. Re-opening
+    // a finished chart to work on it again flips it back to the in-progress
+    // milestone so it reflects live work; it re-completes on the next save:
+    //  - CODING_DONE  → CODING_IN_PROGRESS (e.g. an Incomplete chart back with the coder)
+    //  - AUDIT_DONE   → AUDIT_IN_PROGRESS  (an auditor re-opening a finished audit)
+    if ((c.milestone === ChartMilestone.READY_TO_CODE || c.milestone === ChartMilestone.CODING_DONE) && canCode) {
       c.setMilestone(ChartMilestone.CODING_IN_PROGRESS);
       dirty = true;
-    } else if (c.milestone === ChartMilestone.READY_TO_AUDIT && canAudit) {
+    } else if ((c.milestone === ChartMilestone.READY_TO_AUDIT || c.milestone === ChartMilestone.AUDIT_DONE) && canAudit) {
       c.setMilestone(ChartMilestone.AUDIT_IN_PROGRESS);
       dirty = true;
     }
