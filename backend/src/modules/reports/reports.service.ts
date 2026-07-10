@@ -147,6 +147,13 @@ const FIELDS: FieldDef[] = [
   // i.e. NOT ACCEPTED). ::int so the driver returns a number (bigint → string).
   { key: 'totalCodes',        label: 'Total Codes',        sql: `(SELECT COUNT(*)::int FROM chart_code_decisions cd WHERE cd.chart_id = c.id)`, filterable: true, sortable: true, type: 'number', filterKind: 'text' },
   { key: 'correctedCodes',    label: 'Corrected Codes',    sql: `(SELECT COUNT(*)::int FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.decision <> 'ACCEPTED')`, filterable: true, sortable: true, type: 'number', filterKind: 'text' },
+  // Audit Information table (chart-detail) — the per-area Total / Correct code
+  // counts an auditor manually enters, summed across every audit area. Stored in
+  // custom_fields._formDraft.audit as { <areaKey>: { totalCodes, correctCodes,
+  // feedbackCategory } }; values are digit strings, so we cast only numeric ones.
+  // Distinct from the code-decision Total/Corrected Codes above (a different source).
+  { key: 'auditTotalCodes',   label: 'Audit Total Codes',   sql: `(SELECT SUM(CASE WHEN e.value->>'totalCodes' ~ '^[0-9]+$' THEN (e.value->>'totalCodes')::int ELSE 0 END)::int FROM jsonb_each(CASE WHEN jsonb_typeof(c.custom_fields#>'{_formDraft,audit}')='object' THEN c.custom_fields#>'{_formDraft,audit}' ELSE '{}'::jsonb END) AS e)`, filterable: true, sortable: true, type: 'number', filterKind: 'text' },
+  { key: 'auditCorrectCodes', label: 'Audit Correct Codes', sql: `(SELECT SUM(CASE WHEN e.value->>'correctCodes' ~ '^[0-9]+$' THEN (e.value->>'correctCodes')::int ELSE 0 END)::int FROM jsonb_each(CASE WHEN jsonb_typeof(c.custom_fields#>'{_formDraft,audit}')='object' THEN c.custom_fields#>'{_formDraft,audit}' ELSE '{}'::jsonb END) AS e)`, filterable: true, sortable: true, type: 'number', filterKind: 'text' },
   { key: 'coderCommentsToClient', label: 'Coder Comments to Client', sql: 'c.coder_comments_to_client',       filterable: true,  sortable: false, filterKind: 'text' },
   { key: 'facilityEM',        label: 'Facility E/M',       sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE cfc.name='Facility E/M' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'text' },
   { key: 'infusion',          label: 'Infusion',           sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE cfc.name='Infusion' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'text' },
@@ -158,7 +165,12 @@ const FIELDS: FieldDef[] = [
   { key: 'pos',               label: 'POS',                sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE LOWER(cfc.name)='pos' AND cfc.location_id=wl.location_id LIMIT 1)`,           filterable: true,  sortable: true,  filterKind: 'select' },
   { key: 'providerName',      label: 'Provider Name',      sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE LOWER(cfc.name)='provider name' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'select' },
   { key: 'qcStatus',          label: 'QC Status',          sql: `c.custom_fields#>>'{_formDraft,qcStatus}'`,             filterable: true,  sortable: false, options: QC_STATUS_OPTIONS },
-  { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `c.custom_fields->>'feedbackCategory'`,     filterable: true,  sortable: false },
+  // Feedback Category — distinct feedback categories across the Audit
+  // Information rows in _formDraft.audit (each row's value is a string or a
+  // string[]). The old top-level custom_fields->>'feedbackCategory' key was
+  // never written by the form, so this column was always blank; sourced from the
+  // audit table it now reflects what auditors actually pick. Substring-filterable.
+  { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `(SELECT string_agg(DISTINCT trim(fc.val), ', ' ORDER BY trim(fc.val)) FROM jsonb_each(CASE WHEN jsonb_typeof(c.custom_fields#>'{_formDraft,audit}')='object' THEN c.custom_fields#>'{_formDraft,audit}' ELSE '{}'::jsonb END) AS e CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(e.value->'feedbackCategory')='array' THEN e.value->'feedbackCategory' WHEN COALESCE(e.value->>'feedbackCategory','')<>'' THEN jsonb_build_array(e.value->>'feedbackCategory') ELSE '[]'::jsonb END) AS fc(val) WHERE trim(fc.val) <> '')`,     filterable: true,  sortable: false, filterKind: 'text' },
   { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields->>'feedbackType'`,         filterable: true,  sortable: false },
 ];
 

@@ -287,7 +287,16 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     // Overlay refresh-restored unsaved edits (localStorage) on the server seed.
     ...(restoredLocal?.draft ?? {}),
   });
-  const { audit, updateAudit: rawUpdateAudit } = useAuditDraft(restoredLocal?.audit);
+  // Seed the Audit Information table from the persisted _formDraft.audit blob,
+  // then overlay any unsaved localStorage edits — mirroring how `draft` seeds
+  // from the server then overlays restoredLocal. Previously this seeded from
+  // localStorage only, so saved audit rows vanished on refresh and were never
+  // visible to other users.
+  const auditStash = (formDraftStash as { audit?: Record<string, AuditCell> }).audit ?? {};
+  const { audit, updateAudit: rawUpdateAudit, setAudit } = useAuditDraft({
+    ...auditStash,
+    ...(restoredLocal?.audit ?? {}),
+  });
   const { values: customValues, updateValue: rawUpdateCustomValue } = useCustomFieldValues({
     ...Object.fromEntries(
       Object.entries((chart.customFields ?? {}) as Record<string, unknown>).filter(
@@ -662,6 +671,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       auditOption: Array.isArray(stash.auditOption) ? stash.auditOption : [],
       qcStatus: typeof stash.qcStatus === 'string' ? stash.qcStatus : '',
     });
+    // Reseed the Audit Information table from the same persisted stash so a
+    // refetch (post-save / stale-cache hydrate) reflects the saved audit rows.
+    setAudit((stash as { audit?: Record<string, AuditCell> }).audit ?? {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart.id, chart.updatedAt]);
 
@@ -776,7 +788,19 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       // backend merges customFields shallowly, so spreading existing values
       // first preserves user-defined custom fields while overwriting our
       // reserved blob with the latest draft.
-      const formDraftBlob: Partial<FormDraft> = {
+      // Persist only the audit rows the auditor actually filled — mirrors the
+      // empty-row filtering on DRG/PCS below so we don't store blank areas.
+      const auditFilled = Object.fromEntries(
+        Object.entries(audit).filter(([, cell]) => {
+          const total = (cell.totalCodes ?? '').trim();
+          const correct = typeof cell.correctCodes === 'string' ? cell.correctCodes.trim() : '';
+          const fc = Array.isArray(cell.feedbackCategory)
+            ? cell.feedbackCategory.length > 0
+            : (cell.feedbackCategory ?? '') !== '';
+          return total !== '' || correct !== '' || fc;
+        }),
+      );
+      const formDraftBlob: Partial<FormDraft> & { audit?: Record<string, AuditCell> } = {
         primaryDiagnosisDescription: draft.primaryDiagnosisDescription,
         disposition: draft.disposition,
         primaryHealth: draft.primaryHealth,
@@ -797,6 +821,11 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         // Auditor QC status also drives the auditor priority buckets, so it must
         // be persisted (it was previously dropped from this blob).
         auditorQcStatus: draft.auditorQcStatus,
+        // Audit Information table — per-area Total Codes / Correct Codes /
+        // Feedback Category. Persisted here so it survives save + refresh, is
+        // visible to other users, and is exported in Reports (Audit Total Codes,
+        // Audit Correct Codes, Feedback Category). Previously dropped entirely.
+        audit: auditFilled,
       };
       // Send only the values of configured custom fields (keyed by field id)
       // plus the _formDraft blob — never the chart's full customFields. The
