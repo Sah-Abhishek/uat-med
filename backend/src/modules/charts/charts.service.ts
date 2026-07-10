@@ -820,6 +820,27 @@ async update(id: number, dto: UpdateChartDto) {
   const allocatingAuditor = dto.allocatedAuditorId !== undefined && dto.allocatedAuditorId !== null;
   const allocatingSomeone = allocatingCoder || allocatingAuditor;
 
+  // Handing the chart to a *different* coder/auditor while a timer is running (or
+  // paused) on it must stop that session first. Otherwise the previous owner is
+  // left with an un-stoppable orphan timer — the chart is no longer "theirs", so
+  // the UI hides Stop and shows Self-allocate — and the new owner is blocked by
+  // the per-chart lock ("… is already working on this chart"). Closing it here
+  // also captures the time actually worked. `c.allocated*Id` still hold the OLD
+  // ids at this point (Object.assign below applies the incoming ones).
+  const handoffToDifferentUser =
+    (allocatingCoder && Number(dto.allocatedCoderId) !== Number(c.allocatedCoderId ?? 0)) ||
+    (allocatingAuditor && Number(dto.allocatedAuditorId) !== Number(c.allocatedAuditorId ?? 0));
+  if (handoffToDifferentUser) {
+    await this.closeOpenTimerSession(id);
+    // Drop the paused-break flag on THIS entity — a separate load+save (as in
+    // clearPausedFlag) would be clobbered by the save at the end of this method.
+    const cfNow = (c.customFields ?? {}) as Record<string, unknown>;
+    if (cfNow.timerPaused) {
+      const { timerPaused: _drop, ...rest } = cfNow;
+      c.customFields = rest;
+    }
+  }
+
   // Merge customFields rather than overwrite — preserves other keys.
   // chartStatus is funnelled through setChartStatus() so we can stamp the
   // status-change timestamp; everything else can be plain-assigned.
@@ -1065,6 +1086,25 @@ async update(id: number, dto: UpdateChartDto) {
     }
     if (dirty) await this.charts.save(c);
     return { chartId: id, startedAt: startedAt.toISOString() };
+  }
+
+  /**
+   * Close any *running* timer session on a chart (stopped_at IS NULL) — used when
+   * the chart is handed to a different user, so the previous owner isn't left with
+   * an orphan session (which also blocks the new owner via the per-chart lock).
+   * Stamps stopped_at + elapsed_ms so the worked time is captured. Only one open
+   * session per chart is possible. The paused flag is handled by callers (in
+   * update() it must be cleared on the same entity to survive that method's save).
+   * Returns true if a session was closed.
+   */
+  private async closeOpenTimerSession(chartId: number): Promise<boolean> {
+    const open = await this.timeLogs.findOne({ where: { chartId, stoppedAt: IsNull() } });
+    if (!open) return false;
+    const stoppedAt = new Date();
+    open.stoppedAt = stoppedAt;
+    open.elapsedMs = stoppedAt.getTime() - open.startedAt.getTime();
+    await this.timeLogs.save(open);
+    return true;
   }
 
   async stopTimer(id: number, user: AuthenticatedUser) {
