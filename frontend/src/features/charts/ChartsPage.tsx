@@ -21,7 +21,7 @@ import type { ApiErrorShape, Priority, PriorityTab } from '@/api/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, SearchInput, Radio, FancySelect, FancyMultiSelect } from '@/components/ui/Field';
+import { Input, Label, SearchInput, Radio, FancySelect, FancyMultiSelect, RangeDatePicker } from '@/components/ui/Field';
 import {
   Modal,
   ModalFooter,
@@ -1387,29 +1387,48 @@ function FilterModal({
               )}
             />
           </div>
+          {/* Date filters: each From/To pair is a single two-month range picker
+              (matches the worklist "Date of service" field). The hidden inputs
+              keep the ...From/...To keys the backend expects registered with RHF;
+              the picker bridges them via watch/setValue. */}
           <div>
-            <Label>Received from</Label>
-            <Input type="date" {...register('receivedDateFrom')} />
+            <Label>Received date</Label>
+            <input type="hidden" {...register('receivedDateFrom')} />
+            <input type="hidden" {...register('receivedDateTo')} />
+            <RangeDatePicker
+              value={{ from: watch('receivedDateFrom') ?? null, to: watch('receivedDateTo') ?? null }}
+              onChange={({ from, to }) => {
+                setValue('receivedDateFrom', from ?? undefined);
+                setValue('receivedDateTo', to ?? undefined);
+              }}
+              placeholder="Any received date"
+            />
           </div>
           <div>
-            <Label>Received to</Label>
-            <Input type="date" {...register('receivedDateTo')} />
+            <Label>Date of service</Label>
+            <input type="hidden" {...register('dateOfServiceFrom')} />
+            <input type="hidden" {...register('dateOfServiceTo')} />
+            <RangeDatePicker
+              value={{ from: watch('dateOfServiceFrom') ?? null, to: watch('dateOfServiceTo') ?? null }}
+              onChange={({ from, to }) => {
+                setValue('dateOfServiceFrom', from ?? undefined);
+                setValue('dateOfServiceTo', to ?? undefined);
+              }}
+              placeholder="Any service date"
+            />
           </div>
           <div>
-            <Label>DOS from</Label>
-            <Input type="date" {...register('dateOfServiceFrom')} />
-          </div>
-          <div>
-            <Label>DOS to</Label>
-            <Input type="date" {...register('dateOfServiceTo')} />
-          </div>
-          <div>
-            <Label>Coded from</Label>
-            <Input type="date" {...register('codingCompletedFrom')} />
-          </div>
-          <div>
-            <Label>Coded to</Label>
-            <Input type="date" {...register('codingCompletedTo')} />
+            <Label>Date of coding</Label>
+            <input type="hidden" {...register('codingCompletedFrom')} />
+            <input type="hidden" {...register('codingCompletedTo')} />
+            <RangeDatePicker
+              value={{ from: watch('codingCompletedFrom') ?? null, to: watch('codingCompletedTo') ?? null }}
+              onChange={({ from, to }) => {
+                setValue('codingCompletedFrom', from ?? undefined);
+                setValue('codingCompletedTo', to ?? undefined);
+              }}
+              placeholder="Any coding date"
+            />
           </div>
         </div>
 
