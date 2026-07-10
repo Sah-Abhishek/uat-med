@@ -26,7 +26,7 @@ import { Input, Label, FancySelect, DatePicker, RangeDatePicker } from '@/compon
 import { listPrimarySpecialities, listSubSpecialities } from '@/api/configurations';
 import { Modal, ModalFooter, Tabs, PillBadge, Avatar, ConfirmModal, Toast } from '@/components/ui/Primitives';
 import { WorklistStatusChip, MilestoneChip } from '@/components/ui/Chip';
-import { cn, formatDate, formatNumber } from '@/lib/utils';
+import { cn, formatDate, formatNumber, todayISO } from '@/lib/utils';
 import {
   ArrowLeft,
   Building2,
@@ -1288,7 +1288,7 @@ function EditWorklistModal({
               value={watch('receivedDate') ?? ''}
               onChange={(v) => setValue('receivedDate', v, { shouldValidate: true })}
               placeholder="Select received date"
-              max={new Date().toISOString().slice(0, 10)}
+              max={todayISO()}
             />
             {errors.receivedDate && (
               <p className="mt-1 text-xs text-danger">{errors.receivedDate.message}</p>

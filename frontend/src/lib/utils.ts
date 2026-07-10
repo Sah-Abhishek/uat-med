@@ -33,6 +33,16 @@ export function formatDateTime(iso: string | null | undefined): string {
   });
 }
 
+/** Today's date as a LOCAL (not UTC) YYYY-MM-DD string. Use for date-input
+ * min/max so "today" isn't wrongly rejected for users ahead of UTC (e.g. IST,
+ * where new Date().toISOString() still reads yesterday until ~05:30 local). */
+export function todayISO(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 export function initials(name: string | null | undefined): string {
   if (!name) return '—';
   const parts = name.trim().split(/\s+/);
