@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { Check, Copy } from 'lucide-react';
 import { CollapsibleCard } from '@/components/ui/Card';
 import { Label, Textarea } from '@/components/ui/Field';
 import { FormField, MultiSelect, SkeletonGrid, FieldSkeleton } from './shared';
@@ -5,6 +7,39 @@ import { CustomFieldsRenderer } from './CustomFieldsRenderer';
 import { QC_STATUS_OPTIONS, type FormDraft, type CustomFieldValues } from './formState';
 import { isFieldDisabledByStatus, type FieldConfig } from './useFieldConfig';
 import { cn } from '@/lib/utils';
+
+/**
+ * Copy-to-clipboard button for a text field's value. It deliberately sets
+ * `pointer-events-auto` so it keeps working even when its parent field wrapper
+ * is disabled (`pointer-events-none` from Complete / read-only / auditor-lock) —
+ * the whole point is to let a coder copy what they sent to the client after the
+ * chart is finalized and the inputs go read-only. Renders nothing when empty.
+ */
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!value?.trim()) return null;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked (insecure context / denied) — leave the value visible */
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={copied ? 'Copied' : `Copy ${label}`}
+      aria-label={`Copy ${label}`}
+      className="pointer-events-auto inline-flex items-center gap-1 text-[11.5px] text-ink-subtle hover:text-primary transition shrink-0"
+    >
+      {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
 
 interface UserOption {
   id: string;
@@ -141,24 +176,28 @@ export function ProcessingInfoSection({
           />
         </div>
 
-        {/* Row 3: coder comments — disabled when Complete */}
+        {/* Row 3: coder comments — disabled when Complete. Only the textarea is
+            dimmed/disabled; the label row (with its Copy button) stays live so
+            the comment can be copied verbatim after the chart is finalized. */}
         {visible('coderCommentsToClient') && (
-          <div
-            className={cn(
-              'mb-4',
-              coderCommentsDisabled && 'opacity-50 pointer-events-none',
-              lockForAuditor,
-            )}
-          >
-            <Label required={!coderCommentsDisabled && required('coderCommentsToClient')}>
-              Coder comments to client
-            </Label>
-            <Textarea
-              rows={3}
-              value={draft.coderComments}
-              onChange={(e) => update('coderComments', e.target.value)}
-              readOnly={readOnly || coderCommentsDisabled}
-            />
+          <div className={cn('mb-4', lockForAuditor)}>
+            <div className="flex items-center justify-between gap-2">
+              <Label
+                required={!coderCommentsDisabled && required('coderCommentsToClient')}
+                className={cn(coderCommentsDisabled && 'opacity-50')}
+              >
+                Coder comments to client
+              </Label>
+              <CopyButton value={draft.coderComments} label="coder comments to client" />
+            </div>
+            <div className={cn(coderCommentsDisabled && 'opacity-50 pointer-events-none')}>
+              <Textarea
+                rows={3}
+                value={draft.coderComments}
+                onChange={(e) => update('coderComments', e.target.value)}
+                readOnly={readOnly || coderCommentsDisabled}
+              />
+            </div>
           </div>
         )}
 
