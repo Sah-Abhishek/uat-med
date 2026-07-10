@@ -306,20 +306,26 @@ export function codingFinishedSql(aliases: Aliases = {}): string {
 }
 
 /**
- * §4.6 Done bucket: the viewer started a timer on this chart during the current
- * India-time (IST) day AND the chart is not sitting back in the viewer's "ready"
- * milestone (Ready to Code for a Coder, Ready to Audit for an Auditor) — a chart
- * reallocated back to "ready" needs work again, so it leaves Done. Team-leads /
- * managers can act in either capacity, so both ready milestones exclude them.
+ * §4.6 Done bucket (product override 2026-07-11): the viewer started a timer on
+ * this chart during the current India-time (IST) day AND the chart has reached a
+ * FINISHED milestone for their role — Coding Done or later for a Coder, Audit Done
+ * or later for an Auditor. A chart still in progress (or reallocated back to a
+ * "ready"/in-progress state) is NOT Done even if it was timed today. Team-leads /
+ * managers act as coders here, so the coding-finished chain (Coding Done onward,
+ * which already covers Audit Done / Closed) applies to them too.
+ *
+ * NOTE: this replaces the manual's original §4.6 rule ("timed today AND not back
+ * in the ready milestone", which counted in-progress charts as Done).
  * Bind `:doneViewerId` to the viewer's user id.
  */
 export function doneSql(role: Role, aliases: Aliases = {}): string {
   const c = aliases.chart ?? 'c';
-  const readyMs =
-    role === Role.CODER ? [M.READY_TO_CODE]
-    : role === Role.AUDITOR ? [M.READY_TO_AUDIT]
-    : [M.READY_TO_CODE, M.READY_TO_AUDIT];
-  return `(${touchedTodaySql(aliases)} AND ${c}.milestone NOT IN (${readyMs.map((m) => `'${m}'`).join(', ')}))`;
+  const doneMs =
+    role === Role.AUDITOR
+      ? [M.AUDIT_DONE, M.CLOSED]
+      : /* CODER + MANAGER/TEAMLEAD (act in the coder capacity) */
+        [M.CODING_DONE, M.READY_TO_AUDIT, M.AUDIT_IN_PROGRESS, M.AUDIT_DONE, M.CLOSED];
+  return `(${touchedTodaySql(aliases)} AND ${c}.milestone IN (${doneMs.map((m) => `'${m}'`).join(', ')}))`;
 }
 
 /**
