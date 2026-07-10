@@ -98,7 +98,7 @@ const CHART_STATUS_OPTIONS = [
 const MILESTONE_OPTIONS = [
   { value: '', label: 'Any' },
   { value: 'READY_TO_CODE', label: 'Ready to Code' },
-  { value: 'CODING_IN_PROGRESS', label: 'Coding' },
+  { value: 'CODING_IN_PROGRESS', label: 'Coding in Progress' },
   { value: 'CODING_DONE', label: 'Coding Done' },
   { value: 'READY_TO_AUDIT', label: 'Ready to Audit' },
   { value: 'AUDIT_IN_PROGRESS', label: 'Auditing' },
