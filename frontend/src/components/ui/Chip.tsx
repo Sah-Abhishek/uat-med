@@ -73,7 +73,11 @@ const PRIORITY_LABEL: Record<Priority, string> = {
   // §4.7 Finalized bucket (Managers): Coding/Audit Done + Complete.
   FINALIZED: 'Finalized',
 };
-export function PriorityChip({ priority }: { priority: Priority }) {
+export function PriorityChip({ priority }: { priority?: Priority | null }) {
+  // No priority value → render nothing (no empty pill). A coder's completed
+  // charts now come back with a null priority (the non-manual "Finalized" chip
+  // was removed), so guard against a falsy value here.
+  if (!priority || !PRIORITY_LABEL[priority]) return null;
   return (
     <span className={cn('chip', PRIORITY_STYLES[priority])}>
       {PRIORITY_LABEL[priority]}

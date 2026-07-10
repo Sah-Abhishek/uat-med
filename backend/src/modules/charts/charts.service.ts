@@ -403,14 +403,18 @@ export class ChartsService {
         // left every priority bucket). In the Finalized tab every row is, by
         // definition, finalized — show that chip rather than the empty bucket.
         // A coder's completed charts (now surfaced in their ALL view) have no
-        // computed bucket; show "Finalized" instead of the stale stored priority
-        // (e.g. a residual CRITICAL/MEDIUM) so the chip isn't misleading.
+        // computed bucket. Per User Manual §4.2/§4.7, "Finalized" is a MANAGER
+        // bucket, not a coder priority value — so we do NOT stamp a Finalized
+        // chip on a coder's rows (it also mislabelled Incomplete charts). Show
+        // no chip (null) rather than the stale stored priority (residual
+        // CRITICAL/MEDIUM), which would be equally misleading.
         priority:
           q.priority === 'FINALIZED'
             ? Priority.FINALIZED
             : (rowPriorityAt(i) ??
                (user.role === Role.CODER && CODING_FINISHED_MILESTONES.has(rest.milestone)
-                 ? Priority.FINALIZED
+                 // ? Priority.FINALIZED   // chip hidden — see note above
+                 ? null
                  : rest.priority)),
         // Map the `dos` column to the `dateOfService` key the frontend reads.
         dateOfService: rest.dos ?? null,
