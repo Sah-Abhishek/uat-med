@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { EncountersService } from './encounters.service';
@@ -19,5 +19,16 @@ export class EncountersController {
   })
   list(@Query() q: QueryEncountersDto) {
     return this.svc.list(q);
+  }
+
+  // Global lookup — any authenticated user can resolve any encounter id, with no
+  // client/location/role scoping (the encounter id is the whole key).
+  @Get(':encounterId')
+  @ApiOperation({
+    summary:
+      'JWT-guarded detail for a single encounter id — client, location, primary & sub speciality, uploaded-document urls, date of coding, received date and coder name. Not scoped to the caller; 404 if unknown.',
+  })
+  detail(@Param('encounterId') encounterId: string) {
+    return this.svc.detail(encounterId);
   }
 }
