@@ -100,6 +100,7 @@ const M = {
   READY_TO_AUDIT: 'READY_TO_AUDIT',
   AUDIT_IN_PROGRESS: 'AUDIT_IN_PROGRESS',
   AUDIT_DONE: 'AUDIT_DONE',
+  CLOSED: 'CLOSED',
 } as const;
 const S = { OPEN: 'OPEN', COMPLETE: 'COMPLETE', INCOMPLETE: 'INCOMPLETE' } as const;
 const QC = {
@@ -271,6 +272,31 @@ export function priorityRankSql(role: Role, aliases: Aliases = {}): string {
 export function finalizedSql(aliases: Aliases = {}): string {
   const c = aliases.chart ?? 'c';
   return `(${inList(`${c}.milestone`, [M.CODING_DONE, M.AUDIT_DONE])} AND ${c}.chart_status = '${S.COMPLETE}')`;
+}
+
+/**
+ * "Coding finished": the chart has reached Coding Done or any later
+ * (audit-stage / closed) milestone — i.e. the coder's own work on it is over.
+ *
+ * These charts match no *active* CODER priority bucket (a freshly-finished chart
+ * is Coding Done + Complete/Incomplete with a blank QC → the buckets return
+ * NULL), so the backlog's `bucket IS NOT NULL` visibility test would hide them
+ * entirely; the coder's only other surface, the "Done" tab (§4.6), lists just
+ * charts they *timed today*, leaving older completed work unreachable. Callers
+ * OR this into the coder's ALL-view visibility so a coder keeps seeing their own
+ * completed charts. It deliberately carries no bucket, so the priority sort
+ * ranks these charts last (rank 4) — below every piece of active work.
+ * Requires the charts table aliased (default `c`).
+ */
+export function codingFinishedSql(aliases: Aliases = {}): string {
+  const c = aliases.chart ?? 'c';
+  return inList(`${c}.milestone`, [
+    M.CODING_DONE,
+    M.READY_TO_AUDIT,
+    M.AUDIT_IN_PROGRESS,
+    M.AUDIT_DONE,
+    M.CLOSED,
+  ]);
 }
 
 /**

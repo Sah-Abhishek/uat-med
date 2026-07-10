@@ -13,7 +13,7 @@ import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
-import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, type ComputedBucket } from './priority-rules';
+import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, type ComputedBucket } from './priority-rules';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
@@ -46,6 +46,19 @@ const TRANSITIONS: Record<ChartMilestone, ChartMilestone[]> = {
   [ChartMilestone.AUDIT_DONE]:          [ChartMilestone.CLOSED],
   [ChartMilestone.CLOSED]:              [],
 };
+
+// Milestones at/after Coding Done — the coder's own work is finished. Mirrors
+// codingFinishedSql() in priority-rules.ts. A coder's completed charts match no
+// active priority bucket, so the list row's computed bucket is null and the
+// priority chip would otherwise fall back to the (often stale) stored value —
+// show "Finalized" instead. Keep this in sync with codingFinishedSql().
+const CODING_FINISHED_MILESTONES: ReadonlySet<ChartMilestone> = new Set([
+  ChartMilestone.CODING_DONE,
+  ChartMilestone.READY_TO_AUDIT,
+  ChartMilestone.AUDIT_IN_PROGRESS,
+  ChartMilestone.AUDIT_DONE,
+  ChartMilestone.CLOSED,
+]);
 
 /**
  * customFields keys owned by the AI pipeline — written only by the
@@ -271,7 +284,17 @@ export class ChartsService {
       // under each tab it qualifies for.
       qb.andWhere(bucketMembershipSql(role, tab as ComputedBucket));
     } else if (hideUnbucketed) {
-      qb.andWhere(`(${bucket}) IS NOT NULL`);
+      // ALL / backlog view. A coder's OWN completed charts (Coding Done and
+      // beyond) match no active coder bucket, so the bare `bucket IS NOT NULL`
+      // test used to hide them from the coder's list entirely — the "Done" tab
+      // only surfaces charts timed TODAY, so older completed work was
+      // unreachable. Keep them visible for the coder; carrying no bucket, the
+      // priority sort drops them below all active work (rank 4).
+      const visible =
+        role === Role.CODER
+          ? `((${bucket}) IS NOT NULL OR ${codingFinishedSql()})`
+          : `(${bucket}) IS NOT NULL`;
+      qb.andWhere(visible);
     }
   }
 
@@ -379,7 +402,16 @@ export class ChartsService {
         // only for the touched-today "Done" tab, where a finished chart may have
         // left every priority bucket). In the Finalized tab every row is, by
         // definition, finalized — show that chip rather than the empty bucket.
-        priority: q.priority === 'FINALIZED' ? Priority.FINALIZED : (rowPriorityAt(i) ?? rest.priority),
+        // A coder's completed charts (now surfaced in their ALL view) have no
+        // computed bucket; show "Finalized" instead of the stale stored priority
+        // (e.g. a residual CRITICAL/MEDIUM) so the chip isn't misleading.
+        priority:
+          q.priority === 'FINALIZED'
+            ? Priority.FINALIZED
+            : (rowPriorityAt(i) ??
+               (user.role === Role.CODER && CODING_FINISHED_MILESTONES.has(rest.milestone)
+                 ? Priority.FINALIZED
+                 : rest.priority)),
         // Map the `dos` column to the `dateOfService` key the frontend reads.
         dateOfService: rest.dos ?? null,
         // serviceLineId travels in `...rest`; surface the resolved name for display.
@@ -460,12 +492,19 @@ export class ChartsService {
     // chart once). Finalized (§4.7) is a Managers-only bucket.
     const sum = (cond: string) => `SUM(CASE WHEN ${cond} THEN 1 ELSE 0 END)`;
     const isManagerView = user.role === Role.MANAGER;
+    // "All" tab visibility must match applyPriorityScope()'s ALL branch: for a
+    // coder it also counts their own completed (Coding Done+) charts, which the
+    // list now shows below active work.
+    const allVisible =
+      user.role === Role.CODER
+        ? `((${priorityBucketSql(user.role)}) IS NOT NULL OR ${codingFinishedSql()})`
+        : `(${priorityBucketSql(user.role)}) IS NOT NULL`;
     const countRow = await priorityQb.clone()
       .select(sum(bucketMembershipSql(user.role, 'CRITICAL')), 'critical')
       .addSelect(sum(bucketMembershipSql(user.role, 'HIGH')), 'high')
       .addSelect(sum(bucketMembershipSql(user.role, 'MEDIUM')), 'medium')
       .addSelect(sum(bucketMembershipSql(user.role, 'LOW')), 'low')
-      .addSelect(sum(`(${priorityBucketSql(user.role)}) IS NOT NULL`), 'allbucketed')
+      .addSelect(sum(allVisible), 'allbucketed')
       .addSelect(isManagerView ? sum(finalizedSql()) : '0', 'finalized')
       .getRawOne();
     // "Done" tab count (§4.6): must match the applyPriorityScope('DONE')
