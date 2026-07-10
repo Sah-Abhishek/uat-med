@@ -75,10 +75,10 @@ export function ProcessingInfoSection({
   codersLoading,
   auditorsLoading,
 }: Props) {
-  // Auditor profile only edits Coder QC Status here; everything else is locked.
-  // Coder profile edits everything except Coder QC Status. We apply this per-row
-  // (instead of one wrapper) so the Coder QC Status cell can stay un-dimmed and
-  // interactive for auditors despite living in the same section.
+  // The auditor profile locks this whole section (they work in Audit
+  // Information instead). Coder QC Status is the one cell gated independently
+  // (see coderQcEditable below) — per the manual it's the coder's response, so
+  // we apply the lock per-row rather than one wrapper.
   const lockForAuditor = isAuditor
     ? 'opacity-50 pointer-events-none grayscale'
     : readOnly
@@ -89,6 +89,12 @@ export function ProcessingInfoSection({
   // disabled by chart status.
   const coderCommentsDisabled = isFieldDisabledByStatus('coderCommentsToClient', draft.chartStatus);
   const holdReasonDisabled    = isFieldDisabledByStatus('holdReason', draft.chartStatus);
+  // User Manual §5.2 / rule #511: "Coder QC Status" is the CODER's response to
+  // an audit — editable only when the chart has been reallocated back to them by
+  // an auditor whose QC Status is "Feedback Provided" (so it's disabled once the
+  // auditor selects "Agree"). It is never editable in the auditor profile, nor
+  // while the section is read-only (QA / stopped / paused timer).
+  const coderQcEditable = !isAuditor && !readOnly && draft.auditorQcStatus === 'Feedback Provided';
 
   if (cfg.isLoading) {
     return (
@@ -242,16 +248,18 @@ export function ProcessingInfoSection({
               readOnly={readOnly}
             />
           </div>
-          {/* Coder QC Status is auditor-owned: editable only in the auditor
-              profile, read-only for coders. */}
-          <div className={cn(!isAuditor && 'opacity-50 pointer-events-none')}>
+          {/* Coder QC Status (User Manual §5.2): the CODER's response after an
+              auditor sends the chart back with QC "Feedback Provided"; disabled
+              otherwise (incl. when the auditor "Agree"d — rule #511) and never
+              editable in the auditor profile. */}
+          <div className={cn(!coderQcEditable && 'opacity-50 pointer-events-none')}>
             <FormField
               label="Coder QC Status"
               type="select"
               value={draft.qcStatus}
               onChange={(v) => update('qcStatus', v)}
               options={QC_STATUS_OPTIONS}
-              readOnly={!isAuditor}
+              readOnly={!coderQcEditable}
             />
           </div>
         </div>

@@ -17,6 +17,9 @@ interface Props {
   updateAudit: (rowKey: string, field: keyof AuditCell, value: string | string[]) => void;
   /** When true, the whole section is disabled. Source rule: only auditor can edit and only while timer is running. */
   disabled?: boolean;
+  /** User Manual §6.2.2: when any feedback category is selected, Auditor QC
+   * Status is auto-set to "Feedback Provided" and locked (can't be changed). */
+  qcAutoProvided?: boolean;
   /** Drives default-open: this card opens by default for auditors. */
   isAuditor?: boolean;
   feedbackTypes?: string[];
@@ -38,6 +41,7 @@ export function AuditInfoSection({
   updateAudit,
   disabled,
   isAuditor,
+  qcAutoProvided,
   feedbackTypes,
   auditAreas = [],
   areasLoading,
@@ -166,6 +170,9 @@ export function AuditInfoSection({
               readOnly={disabled}
             />
           </div>
+          {/* User Manual §6.2.2: "Feedback Provided" is auto-selected and locked
+              whenever the auditor flags a feedback category; otherwise the
+              auditor picks (e.g. "Agree"). */}
           <FormField
             label="Auditor QC Status"
             required
@@ -173,7 +180,7 @@ export function AuditInfoSection({
             value={draft.auditorQcStatus}
             onChange={(v) => update('auditorQcStatus', v)}
             options={QC_STATUS_OPTIONS_REQUIRED}
-            readOnly={disabled}
+            readOnly={disabled || qcAutoProvided}
           />
           {draft.auditorQcStatus !== 'Agree' && (
             <FormField

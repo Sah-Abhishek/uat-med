@@ -297,6 +297,17 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     ...auditStash,
     ...(restoredLocal?.audit ?? {}),
   });
+  // User Manual §6.2.2: the auditor picks a Feedback Category on an Audit
+  // Information row only when a discrepancy exists. True when any row carries one.
+  const hasAuditFeedback = useMemo(
+    () =>
+      Object.values(audit).some((c) =>
+        Array.isArray(c.feedbackCategory)
+          ? c.feedbackCategory.length > 0
+          : typeof c.feedbackCategory === 'string' && c.feedbackCategory.trim() !== '',
+      ),
+    [audit],
+  );
   const { values: customValues, updateValue: rawUpdateCustomValue } = useCustomFieldValues({
     ...Object.fromEntries(
       Object.entries((chart.customFields ?? {}) as Record<string, unknown>).filter(
@@ -670,12 +681,29 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       holdReason: Array.isArray(stash.holdReason) ? stash.holdReason : [],
       auditOption: Array.isArray(stash.auditOption) ? stash.auditOption : [],
       qcStatus: typeof stash.qcStatus === 'string' ? stash.qcStatus : '',
+      // Must be reseeded too: the coder-QC gate and the Auditor QC display both
+      // read it, so dropping it on a refetch would blank the auditor's verdict.
+      auditorQcStatus: typeof stash.auditorQcStatus === 'string' ? stash.auditorQcStatus : '',
     });
     // Reseed the Audit Information table from the same persisted stash so a
     // refetch (post-save / stale-cache hydrate) reflects the saved audit rows.
     setAudit((stash as { audit?: Record<string, AuditCell> }).audit ?? {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart.id, chart.updatedAt]);
+
+  // User Manual §6.2.2: "'Feedback Provided' will automatically be selected if
+  // any of the feedback categories were selected." One-directional on purpose —
+  // picking a category auto-selects Feedback Provided, but clearing categories
+  // does NOT force it back (that would wipe the QC of legacy charts that carry a
+  // persisted 'Feedback Provided' with no stored feedback rows). When categories
+  // are cleared the field simply unlocks (see qcAutoProvided) so the auditor can
+  // change it. setDraft (not update) so seeding never marks the form dirty.
+  useEffect(() => {
+    if (!hasAuditFeedback) return;
+    setDraft((d) =>
+      d.auditorQcStatus === 'Feedback Provided' ? d : { ...d, auditorQcStatus: 'Feedback Provided' },
+    );
+  }, [hasAuditFeedback, setDraft]);
 
   const cfg = useFieldConfig(chart);
 
@@ -1049,6 +1077,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
           updateAudit={updateAudit}
           disabled={auditDisabled || qaReadOnly}
           isAuditor={isAuditor}
+          qcAutoProvided={hasAuditFeedback}
           feedbackTypes={cfg.options.feedbackTypes}
           auditAreas={auditAreaRows}
           areasLoading={feedbackCategoriesQ.isLoading}
