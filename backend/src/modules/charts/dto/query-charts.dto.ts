@@ -74,11 +74,10 @@ export class QueryChartsDto extends PageParamsDto {
   @ApiPropertyOptional({ enum: ChartMilestone, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(ChartMilestone, { each: true }) milestone?: ChartMilestone[];
   @ApiPropertyOptional({ enum: AiStatusFilter, isArray: true }) @IsOptional() @Transform(toArray) @IsEnum(AiStatusFilter, { each: true }) aiStatus?: AiStatusFilter[];
   @ApiPropertyOptional({ enum: ReviewedFilter }) @IsOptional() @IsEnum(ReviewedFilter) reviewed?: ReviewedFilter;
-  // QC status multi-selects (values live in custom_fields._formDraft). The
-  // '__BLANK__' sentinel matches charts with no QC set yet. Coder = qcStatus,
-  // Auditor = auditorQcStatus.
-  @ApiPropertyOptional({ type: [String] }) @IsOptional() @Transform(toArray) @IsString({ each: true }) coderQcStatus?: string[];
-  @ApiPropertyOptional({ type: [String] }) @IsOptional() @Transform(toArray) @IsString({ each: true }) auditorQcStatus?: string[];
+  // Single QC Status multi-select — matches the chart's effective QC (one
+  // logical value per the manual). The '__BLANK__' sentinel matches charts with
+  // no QC set yet.
+  @ApiPropertyOptional({ type: [String] }) @IsOptional() @Transform(toArray) @IsString({ each: true }) qcStatus?: string[];
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDateTo?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateOfServiceFrom?: string;

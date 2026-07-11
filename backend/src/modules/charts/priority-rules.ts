@@ -82,7 +82,7 @@ function coderQcAt(c: string): string {
 function auditorQcAt(c: string): string {
   return `${c}.custom_fields#>>'{_formDraft,auditorQcStatusAt}'`;
 }
-function effectiveQc(c: string): string {
+export function effectiveQc(c: string): string {
   const coder = `NULLIF(${coderQc(c)}, '')`;
   const auditor = `NULLIF(${auditorQc(c)}, '')`;
   // A missing timestamp sorts as "-infinity" so a newly-stamped value beats an

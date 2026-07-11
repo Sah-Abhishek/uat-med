@@ -13,7 +13,7 @@ import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
-import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, type ComputedBucket } from './priority-rules';
+import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, effectiveQc, type ComputedBucket } from './priority-rules';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
@@ -212,10 +212,10 @@ export class ChartsService {
     this.applyEncounterIdFilter(qb, q.encounterId);
     if (q.chartStatus?.length) qb.andWhere('c.chart_status IN (:...cs)', { cs: q.chartStatus });
     if (q.milestone?.length) qb.andWhere('c.milestone IN (:...m)', { m: q.milestone });
-    // QC status multi-selects — Coder (qcStatus) and Auditor (auditorQcStatus)
-    // both live on the JSONB _formDraft blob.
-    this.applyQcStatusFilter(qb, `c.custom_fields#>>'{_formDraft,qcStatus}'`, q.coderQcStatus, 'coderQc');
-    this.applyQcStatusFilter(qb, `c.custom_fields#>>'{_formDraft,auditorQcStatus}'`, q.auditorQcStatus, 'auditorQc');
+    // Single QC Status filter. QC is one logical value per the manual, so match
+    // the chart's *effective* QC (the value the most-recently-active role set —
+    // exactly what the priority buckets read), not either raw role field.
+    this.applyQcStatusFilter(qb, effectiveQc('c'), q.qcStatus, 'qc');
     if (q.allocatedUserId?.length) qb.andWhere('(c.allocated_coder_id IN (:...au) OR c.allocated_auditor_id IN (:...au))', { au: q.allocatedUserId });
     if (q.primarySpecialityId?.length) qb.andWhere('worklist.primary_speciality_id IN (:...ps)', { ps: q.primarySpecialityId });
     if (q.subSpecialityId?.length) qb.andWhere('worklist.sub_speciality_id IN (:...ss)', { ss: q.subSpecialityId });

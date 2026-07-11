@@ -1016,8 +1016,7 @@ const BLANK_FILTERS: ChartListParams = {
   milestone: undefined,
   aiStatus: undefined,
   reviewed: undefined,
-  coderQcStatus: undefined,
-  auditorQcStatus: undefined,
+  qcStatus: undefined,
   receivedDateFrom: undefined,
   receivedDateTo: undefined,
   dateOfServiceFrom: undefined,
@@ -1400,25 +1399,10 @@ function FilterModal({
             />
           </div>
           <div>
-            <Label>Coder QC Status</Label>
+            <Label>QC Status</Label>
             <Controller
               control={control}
-              name="coderQcStatus"
-              render={({ field }) => (
-                <FancyMultiSelect
-                  placeholder="Any"
-                  options={QC_STATUS_FILTER_OPTIONS}
-                  value={arr(field.value)}
-                  onChange={(v) => field.onChange(v)}
-                />
-              )}
-            />
-          </div>
-          <div>
-            <Label>Auditor QC Status</Label>
-            <Controller
-              control={control}
-              name="auditorQcStatus"
+              name="qcStatus"
               render={({ field }) => (
                 <FancyMultiSelect
                   placeholder="Any"
