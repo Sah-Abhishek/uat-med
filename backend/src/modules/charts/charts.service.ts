@@ -779,9 +779,17 @@ export class ChartsService {
     const cf = (rest.customFields ?? {}) as Record<string, any>;
     return {
       ...rest,
-      // Viewer-computed priority bucket (see detail() head); the stored column
-      // only matters as a manual override, already folded into computedPriority.
-      priority: computedPriority ?? rest.priority,
+      // Viewer-computed priority bucket (see detail() head). Do NOT fall back to
+      // the stored `priority` column: it's an override-only column that is left
+      // untouched when a pin is cleared (clearManualPriority nulls
+      // manual_priority_at but not `priority`), so a chart a coder has worked
+      // keeps a residual CRITICAL/HIGH there. computedPriority already folds in
+      // any ACTIVE pin (priorityBucketSql returns the stored value only while
+      // manual_priority_at is set) and is null once the chart matches no bucket
+      // (e.g. a finished/Done chart) — the same null the list emits, so the
+      // detail Priority field no longer shows a stale bucket. (Frontend tolerates
+      // null: PriorityBadge hides on falsy, the select shows its placeholder.)
+      priority: computedPriority,
       // The DB column is `dos`, but the frontend reads `dateOfService`.
       dateOfService: c.dos ?? null,
       serviceLineName: serviceLine?.name ?? null,
