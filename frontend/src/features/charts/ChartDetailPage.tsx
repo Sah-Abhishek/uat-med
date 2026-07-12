@@ -287,6 +287,15 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     // Overlay refresh-restored unsaved edits (localStorage) on the server seed.
     ...(restoredLocal?.draft ?? {}),
   });
+  // Baseline the Priority select was seeded to *this session*, so a save can
+  // tell a real user edit from computed drift. `chart.priority` is the COMPUTED
+  // bucket (viewer-dependent) and legitimately changes under the form — e.g.
+  // starting the timer clears a manual pin and recomputes LOW→MEDIUM. Comparing
+  // the select to the live `chart.priority` therefore misfired and re-sent the
+  // stale value as a fresh manual override, silently re-pinning the chart (§7.3).
+  // Compare against this seeded baseline instead: only a value the user actually
+  // moved the select to differs from it. Refreshed wherever the draft reseeds.
+  const seededPriorityRef = useRef(chart.priority);
   // Seed the Audit Information table from the persisted _formDraft.audit blob,
   // then overlay any unsaved localStorage edits — mirroring how `draft` seeds
   // from the server then overlays restoredLocal. Previously this seeded from
@@ -688,6 +697,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     // Reseed the Audit Information table from the same persisted stash so a
     // refetch (post-save / stale-cache hydrate) reflects the saved audit rows.
     setAudit((stash as { audit?: Record<string, AuditCell> }).audit ?? {});
+    // Move the manual-override baseline in lockstep with the reseeded select, so
+    // the recomputed priority becomes the new "unchanged" value (see the ref).
+    seededPriorityRef.current = chart.priority;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart.id, chart.updatedAt]);
 
@@ -872,10 +884,12 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         mrNumber: draft.mrNo || undefined,
         // Priority is computed per viewer; only send it when the user actually
         // changed the select, in which case the backend records it as a manual
-        // override (§7.3) that reverts once they touch the chart. Sending it on
-        // every save would pin the computed value permanently.
+        // override (§7.3) that reverts once they touch the chart. Compare against
+        // the seeded baseline, NOT the live computed `chart.priority`: the latter
+        // shifts under the form (e.g. starting the timer clears the pin and
+        // recomputes LOW→MEDIUM), which made a plain save re-pin the chart.
         priority:
-          draft.priority && draft.priority !== chart.priority
+          draft.priority && draft.priority !== seededPriorityRef.current
             ? (draft.priority as Priority)
             : undefined,
         chartStatus: chartStatusForApi,
