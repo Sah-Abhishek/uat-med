@@ -196,6 +196,8 @@ export function AuditInfoSection({
                       ...coders.map((u) => ({ value: u.id, label: u.fullName })),
                     ]
               }
+              searchable
+              searchPlaceholder="Search coders…"
               readOnly={disabled || draft.auditorQcStatus !== 'Feedback Provided' || codersLoading}
               placeholder={codersLoading ? 'Loading coders…' : 'Select coder…'}
             />

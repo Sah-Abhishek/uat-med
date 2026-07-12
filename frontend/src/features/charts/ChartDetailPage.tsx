@@ -717,6 +717,22 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     );
   }, [hasAuditFeedback, setDraft]);
 
+  // When the auditor flags QC "Feedback Provided" the chart is going back to the
+  // coder for rework — default the Audit-section "Allocate to Coder" to the
+  // chart's ORIGINAL coder (the one who held it before audit; `originalCoderId`
+  // is stamped once at first allocation and never overwritten). Fill only when
+  // the field is empty so a deliberate pick is never clobbered, and use setDraft
+  // (not update) so seeding the default never marks the form dirty on its own —
+  // the auditor's QC change already did.
+  useEffect(() => {
+    if (draft.auditorQcStatus !== 'Feedback Provided') return;
+    const originalCoder = chart.originalCoderId ?? chart.allocatedCoderId;
+    if (!originalCoder) return;
+    setDraft((d) =>
+      d.auditAllocateCoder ? d : { ...d, auditAllocateCoder: String(originalCoder) },
+    );
+  }, [draft.auditorQcStatus, chart.originalCoderId, chart.allocatedCoderId, setDraft]);
+
   const cfg = useFieldConfig(chart);
 
   // Fetch the parent worklist so we can clamp the chart's Date of Service to
@@ -911,7 +927,19 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         // Drives the milestone state machine: backend keeps the chart in
         // CODING_IN_PROGRESS / AUDIT_IN_PROGRESS when these are set, otherwise
         // advances to CODING_DONE / AUDIT_DONE.
-        allocatedCoderId: draft.allocateCoder ? Number(draft.allocateCoder) : undefined,
+        //
+        // Two surfaces feed the coder allocation: the Processing-Info picker
+        // (`allocateCoder`, coder/manager path) and the Audit-section picker
+        // (`auditAllocateCoder`, the auditor sending the chart back on "Feedback
+        // Provided"). The audit picker only applies when QC is "Feedback
+        // Provided" — an "Agree" save must not resend a stale coder — so gate it
+        // on that. Whichever surface the user actually used wins.
+        allocatedCoderId: (() => {
+          const auditReallocate =
+            draft.auditorQcStatus === 'Feedback Provided' ? draft.auditAllocateCoder : '';
+          const coder = draft.allocateCoder || auditReallocate;
+          return coder ? Number(coder) : undefined;
+        })(),
         allocatedAuditorId: draft.allocateAuditor ? Number(draft.allocateAuditor) : undefined,
         customFields: { ...customFieldValues, _formDraft: formDraftBlob },
       };

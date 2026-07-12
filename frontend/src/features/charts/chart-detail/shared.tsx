@@ -50,6 +50,12 @@ interface FormFieldProps {
   readOnly?: boolean;
   placeholder?: string;
   aiTag?: boolean;
+  /** Select-only: show a type-to-filter search box at the top of the dropdown
+   *  (forwarded to FancySelect). Handy for long option lists like coder/auditor
+   *  pickers. */
+  searchable?: boolean;
+  /** Select-only: placeholder for the search box when `searchable`. */
+  searchPlaceholder?: string;
   min?: string;
   max?: string;
   /** Date-only: related dates to mark on the calendar + show in a legend. */
@@ -69,6 +75,8 @@ export function FormField({
   readOnly,
   placeholder,
   aiTag,
+  searchable,
+  searchPlaceholder,
   min,
   max,
   dateMarkers,
@@ -99,6 +107,8 @@ export function FormField({
           options={opts}
           placeholder={placeholder ?? 'Select…'}
           disabled={readOnly}
+          searchable={searchable}
+          searchPlaceholder={searchPlaceholder}
         />
       ) : type === 'date' ? (
         <DatePicker

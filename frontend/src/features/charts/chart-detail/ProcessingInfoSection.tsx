@@ -282,6 +282,8 @@ export function ProcessingInfoSection({
                     ...auditors.map((u) => ({ value: u.id, label: u.fullName })),
                   ]
             }
+            searchable
+            searchPlaceholder="Search auditors…"
             readOnly={readOnly || auditorsLoading}
             placeholder={auditorsLoading ? 'Loading auditors…' : 'Select auditor…'}
           />
@@ -298,6 +300,8 @@ export function ProcessingInfoSection({
                     ...coders.map((u) => ({ value: u.id, label: u.fullName })),
                   ]
             }
+            searchable
+            searchPlaceholder="Search coders…"
             readOnly={readOnly || codersLoading}
             placeholder={codersLoading ? 'Loading coders…' : 'Select coder…'}
           />
