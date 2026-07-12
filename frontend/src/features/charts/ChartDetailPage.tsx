@@ -200,6 +200,15 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     ['CODING_DONE', 'READY_TO_AUDIT', 'AUDIT_IN_PROGRESS', 'AUDIT_DONE', 'CLOSED'].includes(
       chart.milestone,
     );
+  // The chart is in the audit stage — the only context where the Audit-section
+  // "Allocate to Coder" (auditAllocateCoder) reallocation applies. Gating the
+  // auto-default and the save-fold on this keeps a coder's rework save (or a
+  // team-lead/manager coding) from picking up that field: were it folded into
+  // allocatedCoderId there, `allocatingSomeone` would flip true and the chart
+  // would never advance to CODING_DONE.
+  const isAuditStageChart = ['READY_TO_AUDIT', 'AUDIT_IN_PROGRESS', 'AUDIT_DONE'].includes(
+    chart.milestone,
+  );
 
   // Frontend-only draft for the source's wide form. Seed with everything the
   // server persists for this chart so the auditor opens with the coder's saved
@@ -725,13 +734,13 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   // (not update) so seeding the default never marks the form dirty on its own —
   // the auditor's QC change already did.
   useEffect(() => {
-    if (draft.auditorQcStatus !== 'Feedback Provided') return;
+    if (!isAuditStageChart || draft.auditorQcStatus !== 'Feedback Provided') return;
     const originalCoder = chart.originalCoderId ?? chart.allocatedCoderId;
     if (!originalCoder) return;
     setDraft((d) =>
       d.auditAllocateCoder ? d : { ...d, auditAllocateCoder: String(originalCoder) },
     );
-  }, [draft.auditorQcStatus, chart.originalCoderId, chart.allocatedCoderId, setDraft]);
+  }, [isAuditStageChart, draft.auditorQcStatus, chart.originalCoderId, chart.allocatedCoderId, setDraft]);
 
   const cfg = useFieldConfig(chart);
 
@@ -936,7 +945,9 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         // on that. Whichever surface the user actually used wins.
         allocatedCoderId: (() => {
           const auditReallocate =
-            draft.auditorQcStatus === 'Feedback Provided' ? draft.auditAllocateCoder : '';
+            isAuditStageChart && draft.auditorQcStatus === 'Feedback Provided'
+              ? draft.auditAllocateCoder
+              : '';
           const coder = draft.allocateCoder || auditReallocate;
           return coder ? Number(coder) : undefined;
         })(),
