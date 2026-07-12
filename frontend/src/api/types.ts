@@ -219,6 +219,10 @@ export interface Chart {
   processName?: string | null;
   receivedDate?: string | null;
   qcStatus?: string | null;
+  auditorQcStatus?: string | null;
+  // The single effective QC status (coder- or auditor-set, whichever most
+  // recent) shown in the grid's "QC Status" column.
+  effectiveQcStatus?: string | null;
   originalCoderId?: string | null;
   originalAuditorId?: string | null;
   originalCoderName?: string | null;

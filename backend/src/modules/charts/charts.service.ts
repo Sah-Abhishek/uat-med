@@ -187,12 +187,22 @@ export class ChartsService {
    * `auditorQcStatus`) — NOT at the top level. Read both, tolerating
    * absent/non-string values (empty string = "Blank" → null). The same
    * `_formDraft` path is what the priority-rule SQL and reports.service read. */
-  private readFormDraftQc(cf: Record<string, any>): { coder: string | null; auditor: string | null } {
+  private readFormDraftQc(cf: Record<string, any>): { coder: string | null; auditor: string | null; effective: string | null } {
     const fd = (cf?._formDraft ?? {}) as Record<string, any>;
-    return {
-      coder: typeof fd.qcStatus === 'string' && fd.qcStatus ? fd.qcStatus : null,
-      auditor: typeof fd.auditorQcStatus === 'string' && fd.auditorQcStatus ? fd.auditorQcStatus : null,
-    };
+    const coder = typeof fd.qcStatus === 'string' && fd.qcStatus ? fd.qcStatus : null;
+    const auditor = typeof fd.auditorQcStatus === 'string' && fd.auditorQcStatus ? fd.auditorQcStatus : null;
+    // The single "QC Status" the manual models = the value whose role changed it
+    // MOST RECENTLY. Mirrors effectiveQc() in priority-rules (which the list's QC
+    // filter already uses): a missing timestamp sorts oldest, and for legacy rows
+    // with neither stamped the auditor value wins. This is what the grid's QC
+    // Status column should display — reading coder-only left an auditor-set QC
+    // (e.g. "Feedback Provided") showing blank.
+    const cAt = typeof fd.qcStatusAt === 'string' ? Date.parse(fd.qcStatusAt) : NaN;
+    const aAt = typeof fd.auditorQcStatusAt === 'string' ? Date.parse(fd.auditorQcStatusAt) : NaN;
+    const coderAt = Number.isNaN(cAt) ? -Infinity : cAt;
+    const auditorAt = Number.isNaN(aAt) ? -Infinity : aAt;
+    const effective = coder && (!auditor || coderAt > auditorAt) ? coder : (auditor ?? coder);
+    return { coder, auditor, effective };
   }
 
   /**
@@ -477,8 +487,11 @@ export class ChartsService {
           worklist?.subSpeciality?.name ?? (typeof cf.subSpeciality === 'string' ? cf.subSpeciality : null),
         // QC status is persisted by the chart-detail form under the _formDraft
         // blob, not at the top level — read it from there (matches reports.service).
+        // `qcStatus`/`auditorQcStatus` are the raw per-role values; the grid's "QC
+        // Status" column shows the effective (most-recently-set) one.
         qcStatus: this.readFormDraftQc(cf).coder,
         auditorQcStatus: this.readFormDraftQc(cf).auditor,
+        effectiveQcStatus: this.readFormDraftQc(cf).effective,
       };
     });
     return new PaginatedResponseDto(mapped, total, q.page, q.pageSize);
@@ -820,6 +833,7 @@ export class ChartsService {
       // QC status is persisted under the _formDraft blob (see readFormDraftQc).
       qcStatus: this.readFormDraftQc(cf).coder,
       auditorQcStatus: this.readFormDraftQc(cf).auditor,
+      effectiveQcStatus: this.readFormDraftQc(cf).effective,
     };
   }
 

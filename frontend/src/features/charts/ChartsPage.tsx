@@ -378,7 +378,10 @@ function buildChartColumns({
       key: 'qcStatus',
       label: 'QC Status',
       defaultVisible: false,
-      render: (c) => dash(c.qcStatus),
+      // Show the effective QC (coder- or auditor-set, whichever most recent) —
+      // reading coder-only left an auditor-set QC (e.g. "Feedback Provided")
+      // blank. Fall back to the raw coder value for older API responses.
+      render: (c) => dash(c.effectiveQcStatus ?? c.qcStatus),
     },
     {
       key: 'coderAllocatedAt',
