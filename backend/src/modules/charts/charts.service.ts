@@ -901,6 +901,27 @@ async update(id: number, dto: UpdateChartDto) {
     c.setMilestone(ChartMilestone.READY_TO_AUDIT);
   }
 
+  // Auditor feedback → coder rework. When an audit-stage save reallocates a
+  // coder AND the auditor's QC is "Feedback Provided", send the chart back into
+  // the coder's active queue: move it to CODING_IN_PROGRESS and pin it HIGH so it
+  // surfaces in the coder's High bucket regardless of chart status (audit-stage
+  // charts are frequently still OPEN, which the computed Coder-High rule excludes,
+  // so a manual pin is the only way to guarantee visibility). This mirrors the
+  // per-code audit "Disagree" reallocation below; the pin reverts to the computed
+  // bucket the moment the coder touches the chart (starts the timer →
+  // clearManualPriority). CRITICAL is never downgraded.
+  const mergedFd = (c.customFields?._formDraft ?? {}) as Record<string, unknown>;
+  const auditorQcNow = typeof mergedFd.auditorQcStatus === 'string' ? mergedFd.auditorQcStatus : '';
+  const inAuditStage = [
+    ChartMilestone.READY_TO_AUDIT,
+    ChartMilestone.AUDIT_IN_PROGRESS,
+    ChartMilestone.AUDIT_DONE,
+  ].includes(c.milestone);
+  if (allocatingCoder && auditorQcNow === 'Feedback Provided' && inAuditStage) {
+    c.setMilestone(ChartMilestone.CODING_IN_PROGRESS);
+    if (c.priority !== Priority.CRITICAL) c.setManualPriority(Priority.HIGH);
+  }
+
   // Priority itself is no longer nudged by milestone/status here — it is
   // computed per viewer from the chart's milestone/status/QC/received-date
   // (see priority-rules.ts). The one exception is an explicit user override:
