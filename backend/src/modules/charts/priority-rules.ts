@@ -263,6 +263,15 @@ export function priorityBucketSql(role: Role, aliases: Aliases = {}): string {
  * no manual pin belongs to EVERY computed bucket it satisfies. A manually
  * pinned chart (§7.3) belongs only to its pinned bucket. Used by the tab filter
  * and the per-bucket tab counts.
+ *
+ * A chart the viewer has finished-and-timed TODAY lives in the Done bucket
+ * (§4.6) for that day and must NOT double up in an active priority tab — the
+ * classic case is a Coding-Done + Incomplete chart, which the Coder Medium rule
+ * still matches (so it can resurface in Medium the NEXT day) but which is "done"
+ * today. So the COMPUTED branch also requires `NOT doneSql`: the chart shows only
+ * under Done today, then falls back to its computed bucket once it's no longer
+ * timed-today. A manual pin (CRITICAL / an explicit override) is deliberately
+ * exempt — an explicit override wins over Done. Binds `:doneViewerId`.
  */
 export function bucketMembershipSql(role: Role, bucket: ComputedBucket, aliases: Aliases = {}): string {
   const c = aliases.chart ?? 'c';
@@ -276,7 +285,7 @@ export function bucketMembershipSql(role: Role, bucket: ComputedBucket, aliases:
   const cond = bucket === 'HIGH' ? high : bucket === 'MEDIUM' ? medium : low;
   return `(CASE
     WHEN ${pinned} THEN ${c}.priority = '${bucket}'
-    ELSE (NOT (${excluded}) AND ${cond})
+    ELSE (NOT (${excluded}) AND ${cond} AND NOT (${doneSql(role, aliases)}))
   END)`;
 }
 

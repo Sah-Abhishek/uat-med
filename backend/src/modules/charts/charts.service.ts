@@ -312,8 +312,10 @@ export class ChartsService {
     } else if (tab) {
       // A specific computed bucket: match by membership (not the single highest
       // bucket) so the manual's legitimate two-bucket overlap surfaces the chart
-      // under each tab it qualifies for.
-      qb.andWhere(bucketMembershipSql(role, tab as ComputedBucket));
+      // under each tab it qualifies for. bucketMembershipSql excludes charts the
+      // viewer finished-and-timed today (they belong to Done, not an active tab),
+      // so bind :doneViewerId.
+      qb.andWhere(bucketMembershipSql(role, tab as ComputedBucket), { doneViewerId: viewerId });
     } else if (hideUnbucketed) {
       // ALL / backlog view. A coder's OWN completed charts (Coding Done and
       // beyond) match no active coder bucket, so the bare `bucket IS NOT NULL`
@@ -541,6 +543,9 @@ export class ChartsService {
       .addSelect(sum(bucketMembershipSql(user.role, 'LOW')), 'low')
       .addSelect(sum(allVisible), 'allbucketed')
       .addSelect(isManagerView ? sum(finalizedSql()) : '0', 'finalized')
+      // bucketMembershipSql (High/Medium/Low) references :doneViewerId to exclude
+      // charts already counted under Done — bind it here for the count query too.
+      .setParameter('doneViewerId', Number(user.id))
       .getRawOne();
     // "Done" tab count (§4.6): must match the applyPriorityScope('DONE')
     // predicate exactly.
