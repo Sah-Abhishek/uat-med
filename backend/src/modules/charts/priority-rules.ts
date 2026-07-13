@@ -337,6 +337,25 @@ export function codingFinishedSql(aliases: Aliases = {}): string {
 }
 
 /**
+ * A coder's stale completed work: Coding Done + Complete + received on any day
+ * other than today. Product rule (2026-07-13): a coder must NOT see these in any
+ * priority bucket NOR in the All-priorities view. They already carry no computed
+ * bucket, but codingFinishedSql() above re-surfaces them in the coder's All view
+ * — so callers subtract this (AND NOT ...) from that carve-out to hide them.
+ * Today's completed charts (received today) are unaffected. Requires the charts
+ * table aliased (default `c`) and its worklist joined (default `worklist`).
+ */
+export function coderStaleCompletedSql(aliases: Aliases = {}): string {
+  const c = aliases.chart ?? 'c';
+  const w = aliases.worklist ?? 'worklist';
+  return and(
+    `${c}.milestone = '${M.CODING_DONE}'`,
+    `${c}.chart_status = '${S.COMPLETE}'`,
+    receivedNotToday(w),
+  );
+}
+
+/**
  * §4.6 Done bucket (product override 2026-07-11): the viewer started a timer on
  * this chart during the current India-time (IST) day AND the chart has reached a
  * FINISHED milestone for their role — Coding Done or later for a Coder, Audit Done

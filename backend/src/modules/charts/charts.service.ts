@@ -13,7 +13,7 @@ import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
-import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, effectiveQc, type ComputedBucket } from './priority-rules';
+import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, coderStaleCompletedSql, effectiveQc, type ComputedBucket } from './priority-rules';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
@@ -335,7 +335,7 @@ export class ChartsService {
       // priority sort drops them below all active work (rank 4).
       const visible =
         role === Role.CODER
-          ? `((${bucket}) IS NOT NULL OR ${codingFinishedSql()})`
+          ? `((${bucket}) IS NOT NULL OR (${codingFinishedSql()} AND NOT ${coderStaleCompletedSql()}))`
           : `(${bucket}) IS NOT NULL`;
       qb.andWhere(visible);
     }
@@ -547,7 +547,7 @@ export class ChartsService {
     // list now shows below active work.
     const allVisible =
       user.role === Role.CODER
-        ? `((${priorityBucketSql(user.role)}) IS NOT NULL OR ${codingFinishedSql()})`
+        ? `((${priorityBucketSql(user.role)}) IS NOT NULL OR (${codingFinishedSql()} AND NOT ${coderStaleCompletedSql()}))`
         : `(${priorityBucketSql(user.role)}) IS NOT NULL`;
     const countRow = await priorityQb.clone()
       .select(sum(bucketMembershipSql(user.role, 'CRITICAL')), 'critical')
