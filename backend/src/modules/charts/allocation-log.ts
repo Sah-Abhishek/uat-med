@@ -21,13 +21,21 @@ export interface AllocationEventInput {
   milestone?: string | null;
   chartStatus?: string | null;
   worklistId?: number | null;
+  /**
+   * Record the row even when the slot owner didn't change (from === to).
+   * Used by the audit "Disagree" bounce-back: sending a chart back to the coder
+   * for rework is a real workflow event worth auditing even when the same coder
+   * gets it back. Off by default so ordinary re-saves stay quiet.
+   */
+  force?: boolean;
 }
 
 const norm = (v: number | null | undefined): number | null => (v == null ? null : Number(v));
 
 /**
  * Append a coder/auditor allocation-change event. No-ops when the slot didn't
- * actually change owner (from === to) so plain re-saves don't create noise.
+ * actually change owner (from === to) so plain re-saves don't create noise —
+ * unless `e.force` is set (see AllocationEventInput.force).
  * Pass the request-scoped repository, or a transaction manager's repository when
  * inside `ds.transaction(...)`, so the event commits with the allocation.
  */
@@ -37,7 +45,7 @@ export async function logAllocationEvent(
 ): Promise<void> {
   const from = norm(e.fromUserId);
   const to = norm(e.toUserId);
-  if (from === to) return;
+  if (from === to && !e.force) return;
   await repo.save(
     repo.create({
       chartId: e.chartId,

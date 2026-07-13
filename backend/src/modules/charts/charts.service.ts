@@ -2285,12 +2285,16 @@ async allocationHistory(id: number) {
           chart.markCoderAllocated();
           if (chart.priority !== Priority.CRITICAL) chart.setManualPriority(Priority.HIGH);
           await chartsRepo.save(chart);
-          // Allocation audit (same transaction as the reallocation).
+          // Allocation audit (same transaction as the reallocation). `force` so
+          // the bounce-back is recorded even when the same coder gets the chart
+          // back for rework (fromCoder === toCoder) — it's a real workflow event
+          // the manager's audit trail should show, not a no-op re-save.
           await logAllocationEvent(manager.getRepository(ChartAllocationEvent), {
             chartId: Number(chart.id), role: 'CODER',
             fromUserId: fromCoder, toUserId: chart.allocatedCoderId ?? null,
             changedById: user?.id ?? null, source: 'AUDIT_REALLOCATION',
             milestone: chart.milestone, chartStatus: chart.chartStatus, worklistId: chart.worklistId ?? null,
+            force: true,
           });
         }
       }
