@@ -362,7 +362,13 @@ export class ChartsService {
     // team-leads / managers — see every chart and self-allocate one to work on
     // it (the startTimer guard still enforces allocation before timing). A
     // global encounter-id lookup deliberately bypasses this scope.
-    if (user.role === Role.CODER && !globalEncounterSearch)
+    //
+    // EXCEPTION — the Done tab lists what the coder WORKED ON today, so a chart
+    // they timed today but have since handed off to another user must still
+    // appear. doneSql() (applied in applyPriorityScope) already scopes Done to
+    // charts THIS user timed today, so we drop the current-allocation restriction
+    // for that tab only; every other tab stays scoped to the coder's own queue.
+    if (user.role === Role.CODER && !globalEncounterSearch && q.priority !== 'DONE')
       qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
 
     // Hide charts orphaned by a soft-deleted worklist (see helper).
@@ -560,9 +566,17 @@ export class ChartsService {
       // charts already counted under Done — bind it here for the count query too.
       .setParameter('doneViewerId', Number(user.id))
       .getRawOne();
-    // "Done" tab count (§4.6): must match the applyPriorityScope('DONE')
-    // predicate exactly.
-    const doneTodayRow = await priorityQb.clone()
+    // "Done" tab count (§4.6): must match the applyPriorityScope('DONE') list
+    // exactly. For a coder that set is scoped by "timed today" (doneSql), NOT
+    // current allocation — it includes charts they worked today and have since
+    // handed off — so this count runs WITHOUT the coder allocation scope that
+    // priorityQb carries for the other buckets.
+    const doneQb = this.charts.createQueryBuilder('c')
+      .leftJoin('c.worklist', 'worklist')
+      .leftJoin('worklist.subSpeciality', 'subSpeciality');
+    this.excludeOrphanedCharts(doneQb);
+    this.applyChartFilters(doneQb, { ...q, priority: undefined });
+    const doneTodayRow = await doneQb
       .andWhere(doneSql(user.role), { doneViewerId: Number(user.id) })
       .select('COUNT(*)', 'count').getRawOne();
 
