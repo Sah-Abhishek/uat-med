@@ -97,6 +97,44 @@ const QC_STATUS_OPTIONS: FilterOption[] = [
   { value: BLANK_FILTER_VALUE, label: 'Blank' },
 ];
 
+// ── Per-audit-area report columns (chart-detail "Audit Information" section) ──
+// The 7 built-in audit areas each store { totalCodes, correctCodes,
+// feedbackCategory } per chart under custom_fields._formDraft.audit, keyed by the
+// LOCATION's audit_areas.id (ids differ per location). Resolve the id by
+// (location, name) at query time — same pattern as the per-location custom-field
+// columns below. Produces 3 columns (Total / Correct / Feedback) per area.
+const REPORT_AUDIT_AREAS: ReadonlyArray<{ name: string; slug: string }> = [
+  { name: 'Primary Diagnosis',   slug: 'PrimaryDx' },
+  { name: 'Secondary Diagnosis', slug: 'SecondaryDx' },
+  { name: 'Procedures',          slug: 'Procedures' },
+  { name: 'ED/EM Level',         slug: 'EdEm' },
+  { name: 'Modifier',            slug: 'Modifier' },
+  { name: 'POA Indicator',       slug: 'Poa' },
+  { name: 'DRG Value',           slug: 'Drg' },
+];
+
+/** Scalar subquery: this chart's audit object for `areaName` (resolved by
+ *  location + name), with `project` applied to its derived-table alias `s.av`. */
+function auditAreaSql(areaName: string, project: (av: string) => string): string {
+  return `(SELECT ${project('s.av')} FROM (SELECT (c.custom_fields#>'{_formDraft,audit}')->(aa.id::text) AS av FROM audit_areas aa WHERE aa.location_id = wl.location_id AND aa.name = '${areaName}' LIMIT 1) s)`;
+}
+
+/** 3 report columns (Total / Correct / Feedback Category) for each built-in area. */
+function auditAreaFields(): FieldDef[] {
+  return REPORT_AUDIT_AREAS.flatMap((a): FieldDef[] => [
+    { key: `auditArea_${a.slug}_total`,    label: `Audit ${a.name}: Total Codes`,       sql: auditAreaSql(a.name, (av) => `CASE WHEN (${av}->>'totalCodes') ~ '^[0-9]+$' THEN (${av}->>'totalCodes')::int END`),     filterable: true, sortable: true,  type: 'number', filterKind: 'text' },
+    { key: `auditArea_${a.slug}_correct`,  label: `Audit ${a.name}: Correct Codes`,     sql: auditAreaSql(a.name, (av) => `CASE WHEN (${av}->>'correctCodes') ~ '^[0-9]+$' THEN (${av}->>'correctCodes')::int END`), filterable: true, sortable: true,  type: 'number', filterKind: 'text' },
+    { key: `auditArea_${a.slug}_feedback`, label: `Audit ${a.name}: Feedback Category`, sql: auditAreaSql(a.name, (av) => `CASE WHEN jsonb_typeof(${av}->'feedbackCategory')='array' THEN (SELECT string_agg(trim(t.val), ', ') FROM jsonb_array_elements_text(${av}->'feedbackCategory') AS t(val) WHERE trim(t.val) <> '') ELSE NULLIF(${av}->>'feedbackCategory', '') END`), filterable: true, sortable: false, filterKind: 'text' },
+  ]);
+}
+
+// Coder / auditor identity as NAMES (employee codes aren't in the DB —
+// users.employee_id is empty). Coder = the original coder. Auditor:
+// original_auditor_id is never set, so use the latest AUDITOR-role author in
+// chart_feedback, else the allocated auditor.
+const CODER_NAME_SQL = `(SELECT u2.full_name FROM users u2 WHERE u2.id = c.original_coder_id)`;
+const AUDITOR_NAME_SQL = `COALESCE((SELECT u2.full_name FROM chart_feedback cf JOIN users u2 ON u2.id = cf.auditor_id WHERE cf.chart_id = c.id AND u2.role = 'AUDITOR' ORDER BY cf.created_at DESC LIMIT 1), (SELECT u3.full_name FROM users u3 WHERE u3.id = c.allocated_auditor_id))`;
+
 const FIELDS: FieldDef[] = [
   { key: 'worklistNumber',    label: 'Worklist Number',    sql: 'wl.worklist_number',                       filterable: true,  sortable: true,  filterKind: 'text' },
   { key: 'serialNo',          label: 'S.No',               sql: 'c.serial_no',                              filterable: true,  sortable: true,  type: 'number', filterKind: 'text' },
@@ -172,6 +210,24 @@ const FIELDS: FieldDef[] = [
   // audit table it now reflects what auditors actually pick. Substring-filterable.
   { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `(SELECT string_agg(DISTINCT trim(fc.val), ', ' ORDER BY trim(fc.val)) FROM jsonb_each(CASE WHEN jsonb_typeof(c.custom_fields#>'{_formDraft,audit}')='object' THEN c.custom_fields#>'{_formDraft,audit}' ELSE '{}'::jsonb END) AS e CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(e.value->'feedbackCategory')='array' THEN e.value->'feedbackCategory' WHEN COALESCE(e.value->>'feedbackCategory','')<>'' THEN jsonb_build_array(e.value->>'feedbackCategory') ELSE '[]'::jsonb END) AS fc(val) WHERE trim(fc.val) <> '')`,     filterable: true,  sortable: false, filterKind: 'text' },
   { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields->>'feedbackType'`,         filterable: true,  sortable: false },
+  // ── Additional auditor-report columns ──
+  // The "Employee Code" columns carry the coder's / auditor's NAME (no codes in DB).
+  { key: 'coderEmployeeCode',   label: 'Coder Employee Code',   sql: CODER_NAME_SQL,   filterable: true, sortable: true },
+  { key: 'originalCoder',       label: 'Original Coder Name',   sql: CODER_NAME_SQL,   filterable: true, sortable: true },
+  { key: 'auditorEmployeeCode', label: 'Auditor Employee Code', sql: AUDITOR_NAME_SQL, filterable: true, sortable: true },
+  { key: 'originalAuditor',     label: 'Original Auditor Name', sql: AUDITOR_NAME_SQL, filterable: true, sortable: true },
+  { key: 'admitDate',        label: 'Admit Date',            sql: 'c.admit_date',     filterable: true, sortable: true, type: 'date' },
+  { key: 'dischargeDate',    label: 'Discharge Date',        sql: 'c.discharge_date', filterable: true, sortable: true, type: 'date' },
+  // Audited Week = Monday-based week-of-month of the Audit Done date. Matches the
+  // auditor-report (2026-03-20 → 4, 2026-06-15 → 3). Blank once CLOSED (mirrors
+  // Audit Done Date, which reads milestone_changed_at only while at AUDIT_DONE).
+  { key: 'auditedWeek',      label: 'Audited Week',          sql: `CASE WHEN c.milestone = 'AUDIT_DONE' THEN FLOOR((EXTRACT(DAY FROM c.milestone_changed_at) + EXTRACT(ISODOW FROM date_trunc('month', c.milestone_changed_at)) - 2) / 7)::int + 1 END`, filterable: true, sortable: true, type: 'number', filterKind: 'text' },
+  // Comment Log — the full chart conversation from chart_feedback (each row is one
+  // comment; `auditor_id` is really the author's user id — coders, auditors, TLs),
+  // formatted "Name (Role) [MM/DD/YYYY HH:MI:SS +00]: text", one entry per line.
+  { key: 'commentLog',       label: 'Comment Log',           sql: `(SELECT string_agg(u2.full_name || ' (' || initcap(lower(u2.role::text)) || ') [' || to_char(cf.created_at AT TIME ZONE 'UTC', 'MM/DD/YYYY HH24:MI:SS') || ' +00]: ' || cf.comments, E'\\n' ORDER BY cf.created_at) FROM chart_feedback cf JOIN users u2 ON u2.id = cf.auditor_id WHERE cf.chart_id = c.id)`, filterable: false, sortable: false },
+  // Per-area Audit Information columns (Total / Correct / Feedback Category × 7 areas).
+  ...auditAreaFields(),
 ];
 
 /** Derive the FE filter control for a field (date type → date, else select). */
