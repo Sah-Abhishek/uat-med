@@ -22,6 +22,7 @@ import { BillingPage } from '@/features/billing/BillingPage';
 import { CodeDecisionsPage } from '@/features/admin/CodeDecisionsPage';
 import { ChartDecisionsDetailPage } from '@/features/admin/ChartDecisionsDetailPage';
 import { ActiveWorkPage } from '@/features/admin/ActiveWorkPage';
+import { AllocationHistoryPage } from '@/features/allocation-history/AllocationHistoryPage';
 import { NotFoundPage } from '@/components/NotFoundPage';
 
 export const router = createBrowserRouter([
@@ -50,6 +51,7 @@ export const router = createBrowserRouter([
           { path: 'coder-rules', element: <CoderRulesPage /> },
           { path: 'billing', element: <BillingPage /> },
           { path: 'admin/active-work', element: <ActiveWorkPage /> },
+          { path: 'allocation-history', element: <AllocationHistoryPage /> },
           { path: 'admin/code-decisions', element: <CodeDecisionsPage /> },
           { path: 'admin/code-decisions/charts/:id', element: <ChartDecisionsDetailPage /> },
           { path: '*', element: <NotFoundPage /> },

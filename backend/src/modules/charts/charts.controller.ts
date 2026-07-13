@@ -12,6 +12,7 @@ import {
   Put,
   Query,
   UploadedFiles,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
@@ -25,6 +26,8 @@ import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
 import { ProcessDocumentsDto } from './dto/process-documents.dto';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
+import { QueryAllocationHistoryDto } from './dto/query-allocation-history.dto';
+import { ManagerOnlyGuard } from '../../common/guards/manager-only.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/roles.enum';
@@ -92,6 +95,15 @@ export class ChartsController {
   @ApiOperation({ summary: 'Bulk soft-delete charts.' })
   bulkDelete(@Body() dto: BulkIdsDto) {
     return this.svc.bulkDelete(dto.chartIds);
+  }
+
+  // Declared before the `:id` routes so the static path wins over `:id`
+  // (otherwise ParseIntPipe would reject "allocation-history" as a chart id).
+  @Get('allocation-history')
+  @UseGuards(ManagerOnlyGuard)
+  @ApiOperation({ summary: 'Manager-only global audit trail of coder/auditor allocation changes across all charts.' })
+  allocationHistoryList(@Query() q: QueryAllocationHistoryDto) {
+    return this.svc.allocationHistoryList(q);
   }
 
   @Get(':id')

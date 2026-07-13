@@ -21,6 +21,7 @@ import {
   Gauge,
   Receipt,
   Activity,
+  History,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ const NAV: NavItem[] = [
   { to: '/coder-rules', label: 'Coder Rules', icon: BookOpenCheck, requires: 'coderRules.manage' },
   { to: '/billing', label: 'Billing', icon: Receipt, requires: 'billing.view' },
   { to: '/admin/code-decisions', label: 'Code Decisions', icon: ShieldCheck, requires: 'admin.codeDecisions.view' },
+  { to: '/allocation-history', label: 'Allocation History', icon: History, requires: 'allocation.audit.view' },
 ];
 
 const STORAGE_KEY = 'app.sidebar.collapsed';

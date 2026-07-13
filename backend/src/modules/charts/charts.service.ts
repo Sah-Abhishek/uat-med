@@ -12,6 +12,8 @@ import { ChartCodeDecisionDraft } from '../../entities/chart-code-decision-draft
 import { ChartTimeLog, type ChartTimerKind } from '../../entities/chart-time-log.entity';
 import { CodeReviewReason } from '../../entities/code-review-reason.entity';
 import { Worklist } from '../../entities/worklist.entity';
+import { Client } from '../../entities/client.entity';
+import { Location } from '../../entities/location.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
 import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, coderStaleCompletedSql, effectiveQc, type ComputedBucket } from './priority-rules';
@@ -23,6 +25,7 @@ import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { AiStatusFilter, QueryChartsDto, ReviewedFilter } from './dto/query-charts.dto';
+import { QueryAllocationHistoryDto } from './dto/query-allocation-history.dto';
 import { UpdateChartDto } from './dto/update-chart.dto';
 import { BulkModifyDto } from './dto/bulk-modify.dto';
 import { ChartFeedbackDto, UpdateFeedbackDto } from './dto/chart-feedback.dto';
@@ -1051,6 +1054,83 @@ async allocationHistory(id: number) {
     })),
   };
 }
+
+  /**
+   * Global allocation-history (audit trail) across ALL charts, newest first,
+   * with optional filters and pagination. Backs the manager-only
+   * GET /charts/allocation-history page — a central log of every coder/auditor
+   * (re)allocation: which chart moved, from → to whom, who did it, how (source),
+   * and the chart's milestone/status captured at the time.
+   */
+  async allocationHistoryList(q: QueryAllocationHistoryDto) {
+    const qb = this.allocationEvents
+      .createQueryBuilder('e')
+      .leftJoin(Chart, 'c', 'c.id = e.chartId')
+      .leftJoin(Worklist, 'w', 'w.id = e.worklistId')
+      .leftJoin(Client, 'cl', 'cl.id = w.clientId')
+      .leftJoin(Location, 'loc', 'loc.id = w.locationId')
+      .leftJoin(User, 'fu', 'fu.id = e.fromUserId')
+      .leftJoin(User, 'tu', 'tu.id = e.toUserId')
+      .leftJoin(User, 'cb', 'cb.id = e.changedById')
+      .select('e.id', 'id')
+      .addSelect('e.chartId', 'chartId')
+      .addSelect('c.chartNo', 'chartNo')
+      .addSelect('e.worklistId', 'worklistId')
+      .addSelect('w.worklistNumber', 'worklistNumber')
+      .addSelect('cl.name', 'clientName')
+      .addSelect('loc.name', 'locationName')
+      .addSelect('e.role', 'role')
+      .addSelect('e.fromUserId', 'fromUserId')
+      .addSelect('fu.fullName', 'fromUserName')
+      .addSelect('e.toUserId', 'toUserId')
+      .addSelect('tu.fullName', 'toUserName')
+      .addSelect('e.changedById', 'changedById')
+      .addSelect('cb.fullName', 'changedByName')
+      .addSelect('e.source', 'source')
+      .addSelect('e.milestone', 'milestone')
+      .addSelect('e.chartStatus', 'chartStatus')
+      .addSelect('e.createdAt', 'createdAt')
+      .orderBy('e.createdAt', 'DESC')
+      .addOrderBy('e.id', 'DESC');
+
+    if (q.chartNo)     qb.andWhere('c.chartNo ILIKE :chartNo', { chartNo: `%${q.chartNo}%` });
+    if (q.role)        qb.andWhere('e.role = :role', { role: q.role });
+    if (q.source)      qb.andWhere('e.source = :source', { source: q.source });
+    if (q.userId)      qb.andWhere('(e.fromUserId = :uid OR e.toUserId = :uid)', { uid: q.userId });
+    if (q.changedById) qb.andWhere('e.changedById = :cbid', { cbid: q.changedById });
+    if (q.from)        qb.andWhere('e.createdAt >= :from', { from: `${q.from}T00:00:00Z` });
+    if (q.to)          qb.andWhere('e.createdAt <= :to',   { to:   `${q.to}T23:59:59.999Z` });
+
+    // Total before pagination, so the FE can render a stable page count.
+    const total = await qb.clone().getCount();
+    const rows: Array<Record<string, any>> = await qb
+      .offset((q.page - 1) * q.pageSize)
+      .limit(q.pageSize)
+      .getRawMany();
+
+    return {
+      items: rows.map((r) => ({
+        id: Number(r.id),
+        chartId: Number(r.chartId),
+        chartNo: r.chartNo ?? null,
+        worklistId: r.worklistId != null ? Number(r.worklistId) : null,
+        worklistNumber: r.worklistNumber ?? null,
+        clientName: r.clientName ?? null,
+        locationName: r.locationName ?? null,
+        role: r.role,
+        from: r.fromUserId ? { id: Number(r.fromUserId), name: r.fromUserName ?? null } : null,
+        to: r.toUserId ? { id: Number(r.toUserId), name: r.toUserName ?? null } : null,
+        changedBy: r.changedById ? { id: Number(r.changedById), name: r.changedByName ?? null } : null,
+        source: r.source,
+        milestone: r.milestone,
+        chartStatus: r.chartStatus,
+        at: r.createdAt,
+      })),
+      total,
+      page: q.page,
+      pageSize: q.pageSize,
+    };
+  }
 
   async transition(id: number, body: { milestone: string; chartStatus?: string }) {
     const c = await this.charts.findOne({ where: { id } });

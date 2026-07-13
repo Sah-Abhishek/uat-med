@@ -25,6 +25,11 @@ export const PERMISSIONS = {
   'coderRules.manage': ['TEAMLEAD', 'MANAGER'],
   'admin.codeDecisions.view': ['TEAMLEAD', 'MANAGER'],
   'admin.activeWork.view': ['TEAMLEAD', 'MANAGER'],
+  // Manager-exclusive by product decision: Team Leads are deliberately excluded
+  // from the allocation-history audit trail. The backend enforces this with a
+  // dedicated ManagerOnlyGuard (RolesGuard would otherwise let TEAMLEAD through
+  // as a super-role).
+  'allocation.audit.view': ['MANAGER'],
   'billing.view': ['TEAMLEAD', 'MANAGER'],
   'billing.configure': ['TEAMLEAD', 'MANAGER'],
 } as const satisfies Record<string, readonly Role[]>;
