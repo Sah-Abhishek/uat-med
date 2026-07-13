@@ -4,6 +4,8 @@ import { DataSource, Repository, In } from 'typeorm';
 import { Worklist } from '../../entities/worklist.entity';
 import { Chart } from '../../entities/chart.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
+import { ChartAllocationEvent } from '../../entities/chart-allocation-event.entity';
+import { logAllocationEvent } from '../charts/allocation-log';
 import { ChartMilestone, WorklistStatus } from '../../common/enums';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { CreateWorklistDto } from './dto/create-worklist.dto';
@@ -374,6 +376,8 @@ export class WorklistsService {
           where: { worklistId: id, serialNo: In(range(a.from, a.to)) },
         });
         for (const c of charts) {
+          const fromCoder = c.allocatedCoderId ?? null;
+          const fromAuditor = c.allocatedAuditorId ?? null;
           if (a.role === 'CODER') {
             c.allocatedCoderId = a.assigneeId;
             c.originalCoderId ??= a.assigneeId;
@@ -397,6 +401,18 @@ export class WorklistsService {
           await manager.getRepository(ChartAllocation).save(manager.getRepository(ChartAllocation).create({
             chartId: c.id, userId: a.assigneeId, role: a.role, allocatedBy: userId,
           }));
+          // Allocation audit trail (same transaction).
+          await logAllocationEvent(manager.getRepository(ChartAllocationEvent), {
+            chartId: Number(c.id),
+            role: a.role,
+            fromUserId: a.role === 'CODER' ? fromCoder : fromAuditor,
+            toUserId: a.assigneeId,
+            changedById: userId ?? null,
+            source: 'WORKLIST_ALLOCATE',
+            milestone: c.milestone,
+            chartStatus: c.chartStatus,
+            worklistId: c.worklistId ?? null,
+          });
           allocated++;
         }
       }

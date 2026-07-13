@@ -76,8 +76,8 @@ export class ChartsController {
   @Post('bulk/modify')
   @Roles(Role.MANAGER)
   @ApiOperation({ summary: 'Modify Charts popover — change priority and/or allocation for many charts.' })
-  bulkModify(@Body() dto: BulkModifyDto) {
-    return this.svc.bulkModify(dto);
+  bulkModify(@Body() dto: BulkModifyDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.bulkModify(dto, user);
   }
 
   @Post('bulk/self-allocate')
@@ -100,6 +100,12 @@ export class ChartsController {
     return this.svc.detail(id, user);
   }
 
+  @Get(':id/allocation-history')
+  @ApiOperation({ summary: "A chart's coder/auditor allocation history: who it moved from/to, who did it, and how." })
+  allocationHistory(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.allocationHistory(id);
+  }
+
   @Get(':id/time-logs')
   @ApiOperation({ summary: 'Per-session time logged on this chart (one row per start→stop) for the Time Tracker.' })
   timeLogs(@Param('id', ParseIntPipe) id: number) {
@@ -108,8 +114,8 @@ export class ChartsController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Persist coder / auditor edits (auto-save).' })
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateChartDto) {
-    return this.svc.update(id, dto);
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateChartDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.update(id, dto, user);
   }
 
   @Post(':id/start')

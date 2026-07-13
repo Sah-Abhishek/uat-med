@@ -4,6 +4,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, In, IsNull, QueryFailedError, Repository, SelectQueryBuilder } from 'typeorm';
 import { Chart } from '../../entities/chart.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
+import { ChartAllocationEvent } from '../../entities/chart-allocation-event.entity';
 import { ChartFeedback } from '../../entities/chart-feedback.entity';
 import { ChartCodeDecision } from '../../entities/chart-code-decision.entity';
 import { ChartCodeAudit } from '../../entities/chart-code-audit.entity';
@@ -17,6 +18,7 @@ import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, 
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
+import { logAllocationEvent, type AllocationSource } from './allocation-log';
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
@@ -157,6 +159,7 @@ export class ChartsService {
   constructor(
     @InjectRepository(Chart) private readonly charts: Repository<Chart>,
     @InjectRepository(ChartAllocation) private readonly allocations: Repository<ChartAllocation>,
+    @InjectRepository(ChartAllocationEvent) private readonly allocationEvents: Repository<ChartAllocationEvent>,
     @InjectRepository(ChartFeedback) private readonly feedbacks: Repository<ChartFeedback>,
     @InjectRepository(ChartCodeDecision) private readonly codeDecisions: Repository<ChartCodeDecision>,
     @InjectRepository(ChartCodeAudit) private readonly codeAudits: Repository<ChartCodeAudit>,
@@ -851,9 +854,14 @@ export class ChartsService {
     };
   }
 
-async update(id: number, dto: UpdateChartDto) {
+async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
   const c = await this.charts.findOne({ where: { id } });
   if (!c) throw new NotFoundException();
+
+  // Allocation audit: remember who held each slot BEFORE this save so we can log
+  // any coder/auditor handoff (incl. reallocation) with the acting user below.
+  const prevCoderId = c.allocatedCoderId ?? null;
+  const prevAuditorId = c.allocatedAuditorId ?? null;
 
   // QC Status is ONE logical value per the User Manual, stored as two role
   // fields (coder = qcStatus, auditor = auditorQcStatus). Capture the pre-save
@@ -968,7 +976,81 @@ async update(id: number, dto: UpdateChartDto) {
   // (see priority-rules.ts). The one exception is an explicit user override:
   if (nextPriority) c.setManualPriority(nextPriority as Priority);
 
-  return this.charts.save(c);
+  const saved = await this.charts.save(c);
+  // Record any coder/auditor ownership change made by this save.
+  await this.recordAlloc(saved, 'CODER', prevCoderId, user?.id ?? null, 'DETAIL_SAVE');
+  await this.recordAlloc(saved, 'AUDITOR', prevAuditorId, user?.id ?? null, 'DETAIL_SAVE');
+  return saved;
+}
+
+/**
+ * Append one coder/auditor allocation-change event (no-ops if the slot's owner
+ * didn't change). `fromUserId` is the pre-change holder; the new holder is read
+ * from the chart. See allocation-log.ts / ChartAllocationEvent.
+ */
+private recordAlloc(
+  c: Chart,
+  role: 'CODER' | 'AUDITOR',
+  fromUserId: number | null,
+  changedById: number | null,
+  source: AllocationSource,
+): Promise<void> {
+  return logAllocationEvent(this.allocationEvents, {
+    chartId: Number(c.id),
+    role,
+    fromUserId,
+    toUserId: (role === 'CODER' ? c.allocatedCoderId : c.allocatedAuditorId) ?? null,
+    changedById,
+    source,
+    milestone: c.milestone,
+    chartStatus: c.chartStatus,
+    worklistId: c.worklistId ?? null,
+  });
+}
+
+/**
+ * Full coder/auditor allocation history for a chart (oldest first): each hop's
+ * role, from → to user, who did it, how (source), and the chart state at the
+ * time. Backs GET /charts/:id/allocation-history.
+ */
+async allocationHistory(id: number) {
+  const chart = await this.charts.findOne({ where: { id } });
+  if (!chart) throw new NotFoundException();
+  const rows: Array<Record<string, any>> = await this.allocationEvents
+    .createQueryBuilder('e')
+    .leftJoin(User, 'fu', 'fu.id = e.fromUserId')
+    .leftJoin(User, 'tu', 'tu.id = e.toUserId')
+    .leftJoin(User, 'cb', 'cb.id = e.changedById')
+    .select('e.id', 'id')
+    .addSelect('e.role', 'role')
+    .addSelect('e.fromUserId', 'fromUserId')
+    .addSelect('fu.fullName', 'fromUserName')
+    .addSelect('e.toUserId', 'toUserId')
+    .addSelect('tu.fullName', 'toUserName')
+    .addSelect('e.changedById', 'changedById')
+    .addSelect('cb.fullName', 'changedByName')
+    .addSelect('e.source', 'source')
+    .addSelect('e.milestone', 'milestone')
+    .addSelect('e.chartStatus', 'chartStatus')
+    .addSelect('e.createdAt', 'createdAt')
+    .where('e.chartId = :id', { id })
+    .orderBy('e.createdAt', 'ASC')
+    .addOrderBy('e.id', 'ASC')
+    .getRawMany();
+  return {
+    chartId: id,
+    events: rows.map((r) => ({
+      id: Number(r.id),
+      role: r.role,
+      from: r.fromUserId ? { id: Number(r.fromUserId), name: r.fromUserName ?? null } : null,
+      to: r.toUserId ? { id: Number(r.toUserId), name: r.toUserName ?? null } : null,
+      changedBy: r.changedById ? { id: Number(r.changedById), name: r.changedByName ?? null } : null,
+      source: r.source,
+      milestone: r.milestone,
+      chartStatus: r.chartStatus,
+      at: r.createdAt,
+    })),
+  };
 }
 
   async transition(id: number, body: { milestone: string; chartStatus?: string }) {
@@ -1371,31 +1453,40 @@ async update(id: number, dto: UpdateChartDto) {
     };
   }
 
-  async bulkModify(dto: BulkModifyDto) {
+  async bulkModify(dto: BulkModifyDto, user?: AuthenticatedUser) {
     const updatedCharts = await this.charts.findBy({ id: In(dto.chartIds) });
     if (updatedCharts.length === 0) return { updated: 0 };
+    // Allocation audit: remember the pre-change holder of the slot each action
+    // touches, so we can log the handoff (with the acting user) after the save.
+    const pending: Array<{ c: Chart; role: 'CODER' | 'AUDITOR'; from: number | null; source: AllocationSource }> = [];
     for (const c of updatedCharts) {
       // serviceLineId is explicitly nullable: undefined = leave as-is, null =
       // clear, number = set. So check `!== undefined`, not truthiness.
       if (dto.serviceLineId !== undefined) c.serviceLineId = dto.serviceLineId;
       if (dto.allocation && dto.allocation.action !== 'NONE') {
         if (dto.allocation.action === 'ALLOCATE_CODING' && dto.allocation.assigneeId) {
+          const from = c.allocatedCoderId ?? null;
           c.allocatedCoderId = dto.allocation.assigneeId;
           // Fresh coder allocation → LOW priority bucket (mirrors worklist-allocate).
           c.markCoderAllocated();
           // First coder allocation lifts the chart out of "Ready to allocate"
           // into the coding queue (mirrors the worklist-allocate path).
           if (c.milestone === ChartMilestone.READY_TO_ALLOCATE) c.setMilestone(ChartMilestone.READY_TO_CODE);
+          pending.push({ c, role: 'CODER', from, source: 'BULK_ALLOCATE_CODING' });
         }
         if (dto.allocation.action === 'ALLOCATE_AUDITING' && dto.allocation.assigneeId) {
+          const from = c.allocatedAuditorId ?? null;
           c.allocatedAuditorId = dto.allocation.assigneeId;
           // Allocating an auditor to a *finished* chart moves it into the audit
           // queue. Only from CODING_DONE — coding must complete before audit.
           if (c.milestone === ChartMilestone.CODING_DONE) c.setMilestone(ChartMilestone.READY_TO_AUDIT);
+          pending.push({ c, role: 'AUDITOR', from, source: 'BULK_ALLOCATE_AUDITING' });
         }
         if (dto.allocation.action === 'REALLOCATE_TO_ORIGINAL_CODER') {
+          const from = c.allocatedCoderId ?? null;
           c.allocatedCoderId = c.originalCoderId ?? c.allocatedCoderId;
           c.markCoderAllocated();
+          pending.push({ c, role: 'CODER', from, source: 'BULK_REALLOCATE_TO_ORIGINAL' });
         }
       }
       // A bulk priority choice is a manual override (§7.3): it pins the chart to
@@ -1404,6 +1495,7 @@ async update(id: number, dto: UpdateChartDto) {
       if (dto.priority) c.setManualPriority(dto.priority as Priority);
     }
     await this.charts.save(updatedCharts);
+    for (const p of pending) await this.recordAlloc(p.c, p.role, p.from, user?.id ?? null, p.source);
     return { updated: updatedCharts.length };
   }
 
@@ -1422,11 +1514,15 @@ async update(id: number, dto: UpdateChartDto) {
     const allocatedIds: number[] = [];
     const skipped: Array<{ chartId: number; reason: string }> = [];
     const toSave: Chart[] = [];
+    // Allocation audit: (chart, role, previous holder) tuples to log post-save.
+    const pending: Array<{ c: Chart; role: 'CODER' | 'AUDITOR'; from: number | null }> = [];
     for (const c of cs) {
       if (busyIds.has(Number(c.id))) {
         skipped.push({ chartId: Number(c.id), reason: 'Someone is already working on this chart.' });
         continue;
       }
+      const fromCoder = c.allocatedCoderId ?? null;
+      const fromAuditor = c.allocatedAuditorId ?? null;
       if (user.role === Role.CODER) {
         c.allocatedCoderId = user.id;
       } else if (user.role === Role.AUDITOR) {
@@ -1449,10 +1545,13 @@ async update(id: number, dto: UpdateChartDto) {
       if (setsAuditor && c.milestone === ChartMilestone.CODING_DONE) {
         c.setMilestone(ChartMilestone.READY_TO_AUDIT);
       }
+      if (setsCoder) pending.push({ c, role: 'CODER', from: fromCoder });
+      if (setsAuditor) pending.push({ c, role: 'AUDITOR', from: fromAuditor });
       toSave.push(c);
       allocatedIds.push(Number(c.id));
     }
     if (toSave.length) await this.charts.save(toSave);
+    for (const p of pending) await this.recordAlloc(p.c, p.role, p.from, user.id, 'SELF_ALLOCATE');
     return { allocated: allocatedIds.length, allocatedIds, skipped };
   }
 
@@ -2102,10 +2201,18 @@ async update(id: number, dto: UpdateChartDto) {
         const chartsRepo = manager.getRepository(Chart);
         const chart = await chartsRepo.findOne({ where: { id: chartId } });
         if (chart) {
+          const fromCoder = chart.allocatedCoderId ?? null;
           chart.allocatedCoderId = chart.allocatedCoderId ?? chart.originalCoderId;
           chart.markCoderAllocated();
           if (chart.priority !== Priority.CRITICAL) chart.setManualPriority(Priority.HIGH);
           await chartsRepo.save(chart);
+          // Allocation audit (same transaction as the reallocation).
+          await logAllocationEvent(manager.getRepository(ChartAllocationEvent), {
+            chartId: Number(chart.id), role: 'CODER',
+            fromUserId: fromCoder, toUserId: chart.allocatedCoderId ?? null,
+            changedById: user?.id ?? null, source: 'AUDIT_REALLOCATION',
+            milestone: chart.milestone, chartStatus: chart.chartStatus, worklistId: chart.worklistId ?? null,
+          });
         }
       }
       return rows;
