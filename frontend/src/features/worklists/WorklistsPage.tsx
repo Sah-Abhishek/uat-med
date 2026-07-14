@@ -238,7 +238,9 @@ export function WorklistsPage() {
       <PageHeader title="Worklists" subtitle="Worklists" />
 
       {/* ── Status tiles ───────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* "Closed" tile hidden: no code path ever sets a worklist to CLOSED,
+          so it was always 0. Remove to avoid a permanently-empty KPI. */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <IllustrationStatCard
           variant="open"
           value={summary.data?.open ?? 0}
@@ -255,12 +257,6 @@ export function WorklistsPage() {
           variant="complete"
           value={summary.data?.completed ?? 0}
           label="Completed"
-          loading={summary.isPending}
-        />
-        <IllustrationStatCard
-          variant="closed"
-          value={summary.data?.closed ?? 0}
-          label="Closed"
           loading={summary.isPending}
         />
       </div>
