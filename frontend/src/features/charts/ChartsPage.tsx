@@ -1161,12 +1161,27 @@ function FilterModal({
   });
 
   // Worklists for the filter dropdown — show the worklist NUMBER (the
-  // human-recognisable name), not the surrogate ID. Worklist counts are
-  // modest, so we fetch a large page once and let FancySelect's built-in
-  // local search filter by label.
+  // human-recognisable name), not the surrogate ID. The list endpoint caps
+  // pageSize at 200 (shared PageParamsDto @Max), so we page through ALL
+  // worklists (newest received first) rather than a single 200 slice —
+  // otherwise older worklists silently drop out of the dropdown and its
+  // local search can't find them. FancySelect then filters by label locally.
   const worklists = useQuery({
     queryKey: ['worklists', 'filter-options'],
-    queryFn: () => listWorklists({ pageSize: 200, sortBy: 'receivedDate', sortDir: 'desc' }),
+    queryFn: async () => {
+      const PAGE_SIZE = 200;
+      type Item = Awaited<ReturnType<typeof listWorklists>>['items'][number];
+      const all: Item[] = [];
+      let page = 1;
+      // Hard page bound is a safety net; the short-page check terminates normally.
+      while (page <= 100) {
+        const res = await listWorklists({ page, pageSize: PAGE_SIZE, sortBy: 'receivedDate', sortDir: 'desc' });
+        all.push(...res.items);
+        if (res.items.length < PAGE_SIZE || all.length >= res.total) break;
+        page += 1;
+      }
+      return { items: all };
+    },
     enabled: open,
   });
 
