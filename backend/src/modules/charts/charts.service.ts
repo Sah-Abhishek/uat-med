@@ -954,15 +954,16 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
 
   // Auditor feedback → coder rework. When an audit-stage save reallocates a
   // coder AND the auditor's QC is "Feedback Provided", send the chart back into
-  // the coder's active queue: move it to CODING_IN_PROGRESS and pin it HIGH so it
-  // surfaces in the coder's High bucket regardless of chart status (audit-stage
-  // charts are frequently still OPEN, which the computed Coder-High rule excludes,
-  // so a manual pin is the only way to guarantee visibility). This is the ONLY
-  // path that sends an audited chart back to the coder — it is an explicit auditor
-  // action (pick a coder in "Allocate to Coder" with QC "Feedback Provided"), not
-  // an automatic side-effect of a DISAGREE verdict. The pin reverts to the computed
-  // bucket the moment the coder touches the chart (starts the timer →
-  // clearManualPriority). CRITICAL is never downgraded.
+  // the coder's backlog: move it to READY_TO_CODE (the coder picks it up and
+  // clicks Start to begin) and pin it HIGH so it surfaces in the coder's High
+  // bucket regardless of chart status (audit-stage charts are frequently still
+  // OPEN, which the computed Coder-High rule excludes, so a manual pin is the
+  // only way to guarantee visibility). This is the ONLY path that sends an
+  // audited chart back to the coder — it is an explicit auditor action (pick a
+  // coder in "Allocate to Coder" with QC "Feedback Provided"), not an automatic
+  // side-effect of a DISAGREE verdict. The pin reverts to the computed bucket the
+  // moment the coder touches the chart (starts the timer → clearManualPriority).
+  // CRITICAL is never downgraded.
   const mergedFd = (c.customFields?._formDraft ?? {}) as Record<string, unknown>;
   const auditorQcNow = typeof mergedFd.auditorQcStatus === 'string' ? mergedFd.auditorQcStatus : '';
   const inAuditStage = [
@@ -971,7 +972,7 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
     ChartMilestone.AUDIT_DONE,
   ].includes(c.milestone);
   if (allocatingCoder && auditorQcNow === 'Feedback Provided' && inAuditStage) {
-    c.setMilestone(ChartMilestone.CODING_IN_PROGRESS);
+    c.setMilestone(ChartMilestone.READY_TO_CODE);
     if (c.priority !== Priority.CRITICAL) c.setManualPriority(Priority.HIGH);
   }
 

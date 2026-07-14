@@ -69,6 +69,17 @@ export const QC_STATUS_OPTIONS: { value: string; label: string }[] = [
 ];
 export const QC_STATUS_OPTIONS_REQUIRED = QC_STATUS_OPTIONS.filter((o) => o.value !== '');
 
+// User Manual §4.1: "Only 'Feedback Provided' and 'Agree' are available to the
+// Auditor to change, whilst 'Feedback Implemented' and 'Feedback Rejected' are
+// available to the Coder to change." Each role's QC-status dropdown offers only
+// its own values.
+export const CODER_QC_STATUS_OPTIONS = QC_STATUS_OPTIONS.filter(
+  (o) => o.value === 'Feedback Implemented' || o.value === 'Feedback Rejected',
+);
+export const AUDITOR_QC_STATUS_OPTIONS = QC_STATUS_OPTIONS.filter(
+  (o) => o.value === 'Agree' || o.value === 'Feedback Provided',
+);
+
 export const EMPTY_FORM_DRAFT: FormDraft = {
   chartNo: '',
   mrNo: '',
