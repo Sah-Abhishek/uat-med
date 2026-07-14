@@ -179,6 +179,13 @@ const FIELDS: FieldDef[] = [
   // (code_type = MODIFIER). Uses the edited code when the decision was EDITED,
   // else the original value; rejected modifiers are excluded. Substring filter.
   { key: 'modifier',          label: 'Modifier',           sql: `(SELECT string_agg(DISTINCT COALESCE(NULLIF(cd.edited_code, ''), cd.code_value), ', ') FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.code_type = 'MODIFIER' AND cd.decision <> 'REJECTED')`, filterable: true, sortable: false, filterKind: 'text' },
+  // Procedure Codes — the chart's final submitted procedure codes, from code
+  // decisions (code_type = PROCEDURE). Uses the edited code when the decision was
+  // EDITED, else the original value; rejected procedures are excluded. Mirrors the
+  // Modifier column's source (the coder's confirmed output, not the AI guess in
+  // aiPrediction.procedures). Substring-filterable so "69210" matches any chart
+  // carrying that procedure code.
+  { key: 'procedureCodes',    label: 'Procedure Codes',    sql: `(SELECT string_agg(DISTINCT COALESCE(NULLIF(cd.edited_code, ''), cd.code_value), ', ') FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.code_type = 'PROCEDURE' AND cd.decision <> 'REJECTED')`, filterable: true, sortable: false, filterKind: 'text' },
   // Code-decision counts, mirroring the QA accuracy metric (accepted / decisions).
   // Total Codes = every submitted code decision on the chart; Corrected Codes =
   // the ones the coder changed from the AI suggestion (EDITED / REJECTED / ADDED,

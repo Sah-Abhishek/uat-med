@@ -68,6 +68,7 @@ const DEFAULT_COLUMNS = [
   'milestone',
   'chartStatus',
   'receivedDate',
+  'procedureCodes',
 ];
 const PAGE_SIZE = 50;
 
