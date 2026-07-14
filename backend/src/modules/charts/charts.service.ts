@@ -973,7 +973,13 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
   ].includes(c.milestone);
   if (allocatingCoder && auditorQcNow === 'Feedback Provided' && inAuditStage) {
     c.setMilestone(ChartMilestone.READY_TO_CODE);
-    if (c.priority !== Priority.CRITICAL) c.setManualPriority(Priority.HIGH);
+    // Preserve only an ACTIVE Critical override. A stale/inert priority='CRITICAL'
+    // (manual_priority_at IS NULL — e.g. a legacy value) must NOT block this rework
+    // pin: without the pin the chart stays unpinned, and a READY_TO_CODE + OPEN +
+    // "Feedback Provided" chart matches no computed coder bucket → hidden from the
+    // coder entirely. Only a live CRITICAL pin outranks the HIGH rework bump.
+    const activeCritical = c.manualPriorityAt != null && c.priority === Priority.CRITICAL;
+    if (!activeCritical) c.setManualPriority(Priority.HIGH);
   }
 
   // Priority itself is no longer nudged by milestone/status here — it is
@@ -1797,7 +1803,10 @@ async allocationHistory(id: number) {
     // touches it. A coder's own Conversation Log comment must NOT escalate their
     // chart, so the bump is gated to reviewers.
     const isReviewer = user.role === Role.AUDITOR || user.role === Role.TEAMLEAD;
-    if (isReviewer && chart.priority !== Priority.CRITICAL) {
+    // Only a LIVE Critical pin (manual_priority_at set) outranks the HIGH bump; a
+    // stale/inert priority='CRITICAL' must not suppress it (see update() above).
+    const activeCritical = chart.manualPriorityAt != null && chart.priority === Priority.CRITICAL;
+    if (isReviewer && !activeCritical) {
       chart.setManualPriority(Priority.HIGH);
       await this.charts.save(chart);
     }
