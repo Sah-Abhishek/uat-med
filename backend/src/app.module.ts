@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import * as path from 'path';
 
 import configuration from './config/configuration';
@@ -43,6 +44,9 @@ import { EncountersModule } from './modules/encounters/encounters.module';
       validationSchema,
       validationOptions: { abortEarly: true, allowUnknown: true },
     }),
+    // Enables @Cron scheduled jobs (e.g. the nightly CRITICAL-bucket reset in
+    // ChartsModule). No jobs run until the declaring provider is instantiated.
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (cfg: ConfigService) => ({

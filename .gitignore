@@ -7,3 +7,6 @@ graphify-out/
 # Local docker-compose overrides (may hold secrets) — keep the example only.
 .env
 !.env.docker.example
+
+# Runtime data snapshots (nightly CRITICAL-pin clear backups, manual cleanups).
+backend/data-backups/
