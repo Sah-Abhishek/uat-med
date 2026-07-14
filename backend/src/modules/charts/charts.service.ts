@@ -957,8 +957,10 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
   // the coder's active queue: move it to CODING_IN_PROGRESS and pin it HIGH so it
   // surfaces in the coder's High bucket regardless of chart status (audit-stage
   // charts are frequently still OPEN, which the computed Coder-High rule excludes,
-  // so a manual pin is the only way to guarantee visibility). This mirrors the
-  // per-code audit "Disagree" reallocation below; the pin reverts to the computed
+  // so a manual pin is the only way to guarantee visibility). This is the ONLY
+  // path that sends an audited chart back to the coder — it is an explicit auditor
+  // action (pick a coder in "Allocate to Coder" with QC "Feedback Provided"), not
+  // an automatic side-effect of a DISAGREE verdict. The pin reverts to the computed
   // bucket the moment the coder touches the chart (starts the timer →
   // clearManualPriority). CRITICAL is never downgraded.
   const mergedFd = (c.customFields?._formDraft ?? {}) as Record<string, unknown>;
@@ -2307,34 +2309,13 @@ async allocationHistory(id: number) {
       // (The auditor's draft is a separate per-user row from the coder's.)
       await manager.getRepository(ChartCodeDecisionDraft).delete({ chartId, userId: user.id });
 
-      // Any disagreement sends the chart back to the coder: restore the coder
-      // slot (kept as-is when still held; falls back to the first-ever coder if
-      // a teamlead/manager self-allocate overwrote it or it was cleared) and
-      // pin priority HIGH (manual override) so it resurfaces on the coder's
-      // queue, reverting to the computed bucket once the coder touches it. An
-      // all-AGREE audit changes nothing — there is no rework for the coder.
-      if (uniqueAudits.some((a) => a.verdict === CodeAuditVerdict.DISAGREE)) {
-        const chartsRepo = manager.getRepository(Chart);
-        const chart = await chartsRepo.findOne({ where: { id: chartId } });
-        if (chart) {
-          const fromCoder = chart.allocatedCoderId ?? null;
-          chart.allocatedCoderId = chart.allocatedCoderId ?? chart.originalCoderId;
-          chart.markCoderAllocated();
-          if (chart.priority !== Priority.CRITICAL) chart.setManualPriority(Priority.HIGH);
-          await chartsRepo.save(chart);
-          // Allocation audit (same transaction as the reallocation). `force` so
-          // the bounce-back is recorded even when the same coder gets the chart
-          // back for rework (fromCoder === toCoder) — it's a real workflow event
-          // the manager's audit trail should show, not a no-op re-save.
-          await logAllocationEvent(manager.getRepository(ChartAllocationEvent), {
-            chartId: Number(chart.id), role: 'CODER',
-            fromUserId: fromCoder, toUserId: chart.allocatedCoderId ?? null,
-            changedById: user?.id ?? null, source: 'AUDIT_REALLOCATION',
-            milestone: chart.milestone, chartStatus: chart.chartStatus, worklistId: chart.worklistId ?? null,
-            force: true,
-          });
-        }
-      }
+      // NOTE: a DISAGREE no longer auto-reallocates the chart back to the coder.
+      // Submitting audit verdicts only records the feedback here. Sending the
+      // chart back for rework is an EXPLICIT auditor action: set QC status to
+      // "Feedback Provided" and pick the coder in the "Allocate to Coder" field
+      // (which defaults to the original coder) — handled by the detail-save path
+      // in update() (auditorQcStatus === 'Feedback Provided' + allocatingCoder →
+      // CODING_IN_PROGRESS, pinned HIGH), logged as a DETAIL_SAVE allocation event.
       return rows;
     });
 
