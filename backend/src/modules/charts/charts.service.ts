@@ -974,16 +974,17 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
 
   // Auditor feedback → coder rework. When an audit-stage save reallocates a
   // coder AND the auditor's QC is "Feedback Provided", send the chart back into
-  // the coder's backlog: move it to READY_TO_CODE (the coder picks it up and
-  // clicks Start to begin) and pin it HIGH so it surfaces in the coder's High
-  // bucket regardless of chart status (audit-stage charts are frequently still
-  // OPEN, which the computed Coder-High rule excludes, so a manual pin is the
-  // only way to guarantee visibility). This is the ONLY path that sends an
-  // audited chart back to the coder — it is an explicit auditor action (pick a
-  // coder in "Allocate to Coder" with QC "Feedback Provided"), not an automatic
-  // side-effect of a DISAGREE verdict. The pin reverts to the computed bucket the
-  // moment the coder touches the chart (starts the timer → clearManualPriority).
-  // CRITICAL is never downgraded.
+  // the coder's backlog by moving it to READY_TO_CODE (the coder picks it up and
+  // clicks Start to begin). The coder's HIGH bucket is reached by the COMPUTED
+  // priority rule — priority-rules.ts Coder-HIGH now matches "Feedback Provided"
+  // rework at READY_TO_CODE/CODING_IN_PROGRESS regardless of chart status — so
+  // this path applies NO manual pin. `manual_priority_at` is reserved for a
+  // TL/Manager's deliberate override; audit-feedback rework is a normal workflow
+  // state and stays computed (and thus survives any pin cleanup). An active
+  // CRITICAL pin still outranks it automatically (a manual pin always wins over
+  // the computed bucket). This is the ONLY path that sends an audited chart back
+  // to the coder — an explicit auditor action (pick a coder in "Allocate to
+  // Coder" with QC "Feedback Provided"), not a side-effect of a DISAGREE verdict.
   const mergedFd = (c.customFields?._formDraft ?? {}) as Record<string, unknown>;
   const auditorQcNow = typeof mergedFd.auditorQcStatus === 'string' ? mergedFd.auditorQcStatus : '';
   const inAuditStage = [
@@ -993,13 +994,6 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
   ].includes(c.milestone);
   if (allocatingCoder && auditorQcNow === 'Feedback Provided' && inAuditStage) {
     c.setMilestone(ChartMilestone.READY_TO_CODE);
-    // Preserve only an ACTIVE Critical override. A stale/inert priority='CRITICAL'
-    // (manual_priority_at IS NULL — e.g. a legacy value) must NOT block this rework
-    // pin: without the pin the chart stays unpinned, and a READY_TO_CODE + OPEN +
-    // "Feedback Provided" chart matches no computed coder bucket → hidden from the
-    // coder entirely. Only a live CRITICAL pin outranks the HIGH rework bump.
-    const activeCritical = c.manualPriorityAt != null && c.priority === Priority.CRITICAL;
-    if (!activeCritical) c.setManualPriority(Priority.HIGH);
   }
 
   // Priority itself is no longer nudged by milestone/status here — it is
@@ -1849,22 +1843,12 @@ async allocationHistory(id: number) {
     const chart = await this.charts.findOne({ where: { id: chartId } });
     if (!chart) throw new NotFoundException();
     const f = await this.feedbacks.save(this.feedbacks.create({ chartId, auditorId: user.id, ...dto }));
-    // A REVIEWER's comment (auditor / team lead) resurfaces the chart for the
-    // coder: pin it HIGH as a manual override (unless Critical) so it leaves any
-    // "done" state and shows on the coder's queue, reverting once the coder
-    // touches it. A coder's own Conversation Log comment must NOT escalate their
-    // chart, so the bump is gated to reviewers.
-    const isReviewer = user.role === Role.AUDITOR || user.role === Role.TEAMLEAD;
-    // Only a LIVE Critical pin (manual_priority_at set) outranks the HIGH bump; a
-    // stale/inert priority='CRITICAL' must not suppress it (see update() above).
-    const activeCritical = chart.manualPriorityAt != null && chart.priority === Priority.CRITICAL;
-    if (isReviewer && !activeCritical) {
-      const prevPinAt = chart.manualPriorityAt ?? null;
-      const prevPinPriority = chart.priority ?? null;
-      chart.setManualPriority(Priority.HIGH);
-      await this.charts.save(chart);
-      await this.recordPin(chart, prevPinAt, prevPinPriority, user.id, 'REVIEWER_COMMENT_HIGH_PIN');
-    }
+    // A reviewer's Conversation Log comment no longer manually pins the chart.
+    // Audit feedback reaches the coder's HIGH bucket through the COMPUTED rule
+    // when the auditor formally sends the chart back with QC "Feedback Provided"
+    // (see update() + priority-rules.ts Coder-HIGH). `manual_priority_at` is
+    // reserved for a TL/Manager's deliberate override, so a comment alone must
+    // not create one.
     return { id: f.id };
   }
 

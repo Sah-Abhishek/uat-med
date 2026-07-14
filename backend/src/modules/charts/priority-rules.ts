@@ -150,11 +150,24 @@ function roleConditions(role: Role, c: string, w: string): RoleConds {
     // ChartsService; audit-stage milestones never appear in these buckets.)
     case Role.CODER:
       return {
-        high: and(
+        // HIGH = active coder work needing attention. First clause is the
+        // manual's §4.3 rule. Second clause is AUDITOR REWORK: a chart the
+        // auditor sent back with QC "Feedback Provided" (milestone reset to
+        // READY_TO_CODE by ChartsService.update()) is HIGH for the coder
+        // REGARDLESS of chart status — the frequent READY_TO_CODE + OPEN +
+        // "Feedback Provided" state matched no bucket before and had to be
+        // manually pinned to stay visible. It is now COMPUTED, never a manual
+        // pin: audit-feedback rework is a normal workflow state, so it must not
+        // touch `manual_priority_at` (reserved for a TL/Manager override) and
+        // must survive any pin cleanup.
+        high: `(${and(
           ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS]),
           cs([S.INCOMPLETE, S.COMPLETE]),
           qcIn(qc, [QC.IMPLEMENTED, QC.REJECTED, QC.PROVIDED, QC.AGREE]),
-        ),
+        )} OR ${and(
+          ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS]),
+          qcIn(qc, [QC.PROVIDED]),
+        )})`,
         medium: and(
           ms([M.READY_TO_CODE, M.CODING_IN_PROGRESS, M.CODING_DONE]),
           cs([S.OPEN, S.INCOMPLETE]),
