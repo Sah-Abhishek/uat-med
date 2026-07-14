@@ -24,6 +24,7 @@ import { startChart, stopChart, pauseChart, resumeChart, getActiveTimer, selfAll
 import { getWorklist } from '@/api/worklists';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/auth/store';
+import { can } from '@/permissions';
 import { formatDate } from '@/lib/utils';
 import { MetaItem, PriorityBadge } from './shared';
 
@@ -338,6 +339,8 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
   });
 
   const canTime = user?.role === 'CODER' || user?.role === 'AUDITOR' || user?.role === 'TEAMLEAD' || user?.role === 'MANAGER';
+  // Coders can no longer self-allocate a chart that isn't theirs (see permissions.ts).
+  const canSelfAllocate = can(user, 'chart.selfAllocate');
 
   const startStr = startedAt
     ? new Date(startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -401,6 +404,15 @@ function TimerPanel({ chart, canStop, qaReadOnly }: { chart: Chart; canStop: boo
               {chart.milestone === 'CODING_IN_PROGRESS'
                 ? 'This chart is still being coded — it’s not ready for audit yet.'
                 : 'This chart hasn’t been coded yet — it’s not ready for audit yet.'}
+            </p>
+          </div>
+        ) : !canSelfAllocate ? (
+          // No self-allocate rights (e.g. a coder who reached a chart that isn't
+          // theirs) — show a read-only notice, not a self-allocate button.
+          <div className="flex items-start gap-2">
+            <Lock className="w-4 h-4 text-ink-subtle mt-0.5 shrink-0" />
+            <p className="text-[12px] text-ink-muted leading-snug">
+              This chart isn’t allocated to you.
             </p>
           </div>
         ) : (

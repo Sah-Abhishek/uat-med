@@ -499,8 +499,13 @@ export function ChartsPage() {
   // The §4.7 Finalized bucket exists only for the Manager role (a Team-Lead may
   // hold bulkModify but still gets the §4.6 Done bucket instead).
   const isManagerRole = user.role === 'MANAGER';
-  // Coder / auditor / admin can pull charts to themselves.
+  // Auditor / admin can pull charts to themselves; coders are assigned charts
+  // by a TL/Manager and no longer self-allocate.
   const canSelfAllocate = can(user, 'chart.selfAllocate');
+  // Anyone who can run a timer sees the active-timer card (coders included) —
+  // this is independent of self-allocate, which coders no longer have.
+  const canTime =
+    user.role === 'CODER' || user.role === 'AUDITOR' || user.role === 'TEAMLEAD' || user.role === 'MANAGER';
   const qc = useQueryClient();
   // Client / Location are part of the Charts filters now (see the Filter modal),
   // not the global header scope — so they live in `filters` alongside the rest.
@@ -719,7 +724,7 @@ export function ChartsPage() {
     <div className="p-8 max-w-[1600px] space-y-5">
       <PageHeader title="Charts" subtitle="Charts" />
 
-      {canSelfAllocate && <ActiveTimerCard />}
+      {canTime && <ActiveTimerCard />}
 
       {/* Summary tiles */}
       {summary.data && (

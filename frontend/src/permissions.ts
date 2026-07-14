@@ -10,7 +10,9 @@ export const PERMISSIONS = {
   'worklist.bulkImport': ['TEAMLEAD', 'MANAGER'],
   'chart.bulkModify': ['TEAMLEAD', 'MANAGER'],
   'chart.bulkDelete': ['TEAMLEAD', 'MANAGER'],
-  'chart.selfAllocate': ['CODER', 'AUDITOR', 'TEAMLEAD', 'MANAGER'],
+  // Coders excluded — charts are assigned to them by a Team-Lead/Manager; they
+  // no longer self-serve from the pool (and can't see unallocated charts anyway).
+  'chart.selfAllocate': ['AUDITOR', 'TEAMLEAD', 'MANAGER'],
   'chart.feedback.add': ['AUDITOR'],
   'chart.feedback.respond': ['CODER'],
   'user.create': ['TEAMLEAD', 'MANAGER'],

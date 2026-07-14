@@ -29,6 +29,7 @@ import { getFeedbackCategories } from '@/api/configurations';
 import type { AuditAreaRow } from './chart-detail/shared';
 import type { AiEncounterResult, ApiErrorShape, Chart, ChartStatus, Priority, UploadedDocument } from '@/api/types';
 import { useAuth } from '@/auth/store';
+import { can } from '@/permissions';
 import { useChartsView } from './chartsViewStore';
 import { Button } from '@/components/ui/Button';
 import { ConfirmModal, Toast } from '@/components/ui/Primitives';
@@ -609,15 +610,17 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
     };
   }, [codeAuditsQ.data]);
 
-  // QA takeover: a viewer (Team Lead / Coder / Auditor — not Manager, who can't
-  // self-allocate) looking at a chart in read-only QA view that isn't theirs can
-  // self-allocate to take it over. Doing so assigns it to them, drops ?qa=1 so
-  // the page leaves read-only QA and reopens in editing mode.
+  // QA takeover: a viewer with self-allocate rights (Auditor / Team-Lead)
+  // looking at a chart in read-only QA view that isn't theirs can self-allocate
+  // to take it over. Doing so assigns it to them, drops ?qa=1 so the page leaves
+  // read-only QA and reopens in editing mode. Coders can no longer self-allocate,
+  // so the takeover button never shows for them (see permissions.ts).
+  const canSelfAllocate = can(user, 'chart.selfAllocate');
   const allocatedToMe =
     !!user &&
     (String(chart.allocatedCoderId ?? '') === user.id ||
       String(chart.allocatedAuditorId ?? '') === user.id);
-  const canTakeOver = qaReadOnly && canTime && !allocatedToMe;
+  const canTakeOver = qaReadOnly && canTime && !allocatedToMe && canSelfAllocate;
   const [takeoverOpen, setTakeoverOpen] = useState(false);
   const [takeoverError, setTakeoverError] = useState<string | null>(null);
   const takeoverMut = useMutation({
