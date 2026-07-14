@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 interface CoderOption {
   id: string;
   fullName: string;
+  email?: string;
 }
 
 interface Props {
@@ -193,11 +194,11 @@ export function AuditInfoSection({
                   ? []
                   : [
                       { value: '', label: 'None' },
-                      ...coders.map((u) => ({ value: u.id, label: u.fullName })),
+                      ...coders.map((u) => ({ value: u.id, label: u.fullName, searchText: u.email })),
                     ]
               }
               searchable
-              searchPlaceholder="Search coders…"
+              searchPlaceholder="Search by name or email…"
               readOnly={disabled || draft.auditorQcStatus !== 'Feedback Provided' || codersLoading}
               placeholder={codersLoading ? 'Loading coders…' : 'Select coder…'}
             />

@@ -147,6 +147,9 @@ export interface FancySelectOption {
   /** Muted tag shown on the right of the option row inside the dropdown only
    *  (never on the closed trigger). E.g. "already allocated". */
   hint?: string;
+  /** Extra text matched by the local search (in addition to `label`) but never
+   *  displayed. E.g. a user's email, so the option is findable by name OR email. */
+  searchText?: string;
 }
 interface FancySelectProps {
   value: string;
@@ -268,7 +271,10 @@ export function FancySelect({
   // parent already returns matches, so show them as-is.
   const visibleOptions =
     searchable && !onSearch && query.trim()
-      ? options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()))
+      ? options.filter((o) => {
+          const q = query.trim().toLowerCase();
+          return o.label.toLowerCase().includes(q) || (o.searchText?.toLowerCase().includes(q) ?? false);
+        })
       : options;
 
   return (

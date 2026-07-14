@@ -1141,7 +1141,7 @@ function AllocateFreshVolume({
             searchable
             onSearch={setUserSearch}
             loading={users.isFetching}
-            searchPlaceholder="Search coders…"
+            searchPlaceholder="Search by name or email…"
             options={(users.data?.items ?? []).map((u) => ({
               value: String(u.id),
               label: u.fullName,

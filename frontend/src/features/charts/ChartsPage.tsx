@@ -1740,13 +1740,14 @@ function ModifyChartsModal({
               render={({ field }) => (
                 <FancySelect
                   searchable
-                  searchPlaceholder="Search users…"
+                  searchPlaceholder="Search by name or email…"
                   placeholder={users.isPending ? 'Loading…' : 'Select user…'}
                   value={field.value != null ? String(field.value) : ''}
                   onChange={(v) => field.onChange(v ? Number(v) : undefined)}
                   options={(users.data?.items ?? []).map((u) => ({
                     value: String(u.id),
                     label: u.fullName,
+                    searchText: u.email,
                   }))}
                 />
               )}

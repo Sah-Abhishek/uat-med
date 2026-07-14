@@ -825,10 +825,10 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   // themselves.
   const coderOpts = (codersQ.data?.items ?? [])
     .filter((u) => String(u.id) !== String(user?.id))
-    .map((u) => ({ id: u.id, fullName: u.fullName }));
+    .map((u) => ({ id: u.id, fullName: u.fullName, email: u.email }));
   const auditorOpts = (auditorsQ.data?.items ?? [])
     .filter((u) => String(u.id) !== String(user?.id))
-    .map((u) => ({ id: u.id, fullName: u.fullName }));
+    .map((u) => ({ id: u.id, fullName: u.fullName, email: u.email }));
 
   /**
    * Check every field marked MANDATORY in the per-combo config and collect

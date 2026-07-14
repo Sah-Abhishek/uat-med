@@ -44,6 +44,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 interface UserOption {
   id: string;
   fullName: string;
+  email?: string;
 }
 
 interface Props {
@@ -282,11 +283,11 @@ export function ProcessingInfoSection({
                 ? []
                 : [
                     { value: '', label: 'None' },
-                    ...auditors.map((u) => ({ value: u.id, label: u.fullName })),
+                    ...auditors.map((u) => ({ value: u.id, label: u.fullName, searchText: u.email })),
                   ]
             }
             searchable
-            searchPlaceholder="Search auditors…"
+            searchPlaceholder="Search by name or email…"
             readOnly={readOnly || auditorsLoading}
             placeholder={auditorsLoading ? 'Loading auditors…' : 'Select auditor…'}
           />

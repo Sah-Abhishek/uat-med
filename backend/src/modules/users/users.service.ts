@@ -24,10 +24,17 @@ export class UsersService {
 
   async list(q: { page?: number; pageSize?: number; status?: UserStatus; role?: Role; search?: string }) {
     const page = q.page ?? 1, pageSize = q.pageSize ?? 20;
-    const where: any = {};
-    if (q.status) where.status = q.status;
-    if (q.role) where.role = q.role;
-    if (q.search) where.fullName = ILike(`%${q.search}%`);
+    const base: any = {};
+    if (q.status) base.status = q.status;
+    if (q.role) base.role = q.role;
+    // Search matches full name OR email (array = OR, each branch keeps the
+    // status/role scope) so users are findable by either.
+    const where = q.search
+      ? [
+          { ...base, fullName: ILike(`%${q.search}%`) },
+          { ...base, email: ILike(`%${q.search}%`) },
+        ]
+      : base;
     const [items, total] = await this.users.findAndCount({
       where,
       skip: (page - 1) * pageSize,
