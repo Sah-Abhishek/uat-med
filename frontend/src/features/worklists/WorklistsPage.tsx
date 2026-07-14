@@ -17,7 +17,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { IllustrationStatCard } from '@/components/ui/StatCards';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Label, FancySelect, DatePicker, RangeDatePicker } from '@/components/ui/Field';
+import { Input, Label, FancySelect, DatePicker, RangeDatePicker, SearchInput } from '@/components/ui/Field';
 import {
   listClients,
   listLocations,
@@ -88,7 +88,7 @@ const WL_COLUMNS: WlColumn[] = [
   { key: 'allocation', label: 'Allocation %', defaultVisible: true,
     render: (wl) => <DualProgressBar percent={wl.totalCharts > 0 ? (wl.allocatedCharts / wl.totalCharts) * 100 : 0} /> },
   { key: 'progress', label: 'Progress %', defaultVisible: true,
-    render: (wl) => <DualProgressBar percent={wl.totalCharts > 0 ? ((wl.completedCharts ?? 0) / wl.totalCharts) * 100 : 0} tone="success" /> },
+    render: (wl) => <DualProgressBar percent={wl.totalCharts > 0 ? ((wl.completedCharts ?? 0) / wl.totalCharts) * 100 : 0} tone="success" completeLabel="Completed" /> },
   { key: 'changedBy', label: 'Changed by', defaultVisible: false,
     render: () => <Avatar name="—" size="sm" /> },
   { key: 'dateOfService', label: 'Date of service', sortKey: 'dateOfService', defaultVisible: true, className: 'text-ink-muted',
@@ -272,6 +272,13 @@ export function WorklistsPage() {
             Worklist ({formatNumber(list.data?.total ?? 0)})
           </h2>
           <div className="flex items-center gap-2">
+            <div className="w-56">
+              <SearchInput
+                placeholder="Search worklist #..."
+                value={filters.search ?? ''}
+                onChange={(e) => patchFilters({ search: e.target.value || undefined })}
+              />
+            </div>
             <Button
               variant="soft"
               onClick={() => setFiltersOpen((o) => !o)}

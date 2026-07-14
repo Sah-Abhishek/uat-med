@@ -58,6 +58,9 @@ export class WorklistsService {
     } else if (q.status) {
       qb.andWhere('w.status = :s', { s: q.status }).andWhere(`NOT ${WorklistsService.COMPLETED_SQL}`);
     }
+    if (q.search?.trim()) {
+      qb.andWhere('w.worklist_number ILIKE :search', { search: `%${q.search.trim()}%` });
+    }
     if (q.clientId) qb.andWhere('w.client_id = :c', { c: q.clientId });
     if (q.locationId) qb.andWhere('w.location_id = :l', { l: q.locationId });
     if (q.primarySpecialityId) qb.andWhere('w.primary_speciality_id = :p', { p: q.primarySpecialityId });

@@ -533,12 +533,17 @@ export function ProgressBar({
 export function DualProgressBar({
   percent,
   tone = 'primary',
+  completeLabel,
 }: {
   percent: number;
   tone?: 'primary' | 'success';
+  /** When set and percent is at 100%, show this label instead of "0.00% pending"
+   *  (e.g. "Completed" on the Worklists Progress column). */
+  completeLabel?: string;
 }) {
   const completeColor = tone === 'success' ? 'text-success' : 'text-primary';
   const pendingColor = tone === 'success' ? 'text-success' : 'text-warn';
+  const isComplete = percent >= 100;
   return (
     <div className="min-w-[180px]">
       <div className="flex items-baseline justify-between text-xs mb-1.5">
@@ -546,7 +551,7 @@ export function DualProgressBar({
           {percent.toFixed(2)}%
         </span>
         <span className={cn('text-[11px]', pendingColor)}>
-          {(100 - percent).toFixed(2)}% pending
+          {isComplete && completeLabel ? completeLabel : `${(100 - percent).toFixed(2)}% pending`}
         </span>
       </div>
       <div className="flex gap-0.5 h-1.5 w-full">
