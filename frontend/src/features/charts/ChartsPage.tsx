@@ -948,7 +948,13 @@ export function ChartsPage() {
         />
       </Card>
 
-      <FilterModal open={filterOpen} onClose={() => setFilterOpen(false)} value={filters} onApply={(f) => { setFilters(f); setPage(1); }} />
+      {/* key on open state forces a fresh remount each time the modal opens, so
+          useForm re-seeds from the CURRENT applied `filters`. Without it, RHF
+          retains the last form values across the Modal's unmount (it renders
+          null when closed), and reset()-on-open does not reliably override a
+          remounted Controller — so after "Clear filters" the dropdowns still
+          showed the previously-applied selection on reopen. */}
+      <FilterModal key={String(filterOpen)} open={filterOpen} onClose={() => setFilterOpen(false)} value={filters} onApply={(f) => { setFilters(f); setPage(1); }} />
       <ColumnsPopover
         open={columnsOpen}
         anchorRef={columnsBtnRef}
