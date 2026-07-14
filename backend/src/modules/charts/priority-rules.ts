@@ -364,6 +364,11 @@ export function coderStaleCompletedSql(aliases: Aliases = {}): string {
  * managers act as coders here, so the coding-finished chain (Coding Done onward,
  * which already covers Audit Done / Closed) applies to them too.
  *
+ * An auditor "finishes" a chart two ways: they Agree (→ Audit Done), OR they give
+ * "Feedback Provided" and send it back to the coder (→ Ready to Code). Both end
+ * the auditor's work for the day, so READY_TO_CODE is a Done milestone for the
+ * AUDITOR — a chart they audited-and-bounced today still shows in their Done tab.
+ *
  * NOTE: this replaces the manual's original §4.6 rule ("timed today AND not back
  * in the ready milestone", which counted in-progress charts as Done).
  * Bind `:doneViewerId` to the viewer's user id.
@@ -372,7 +377,7 @@ export function doneSql(role: Role, aliases: Aliases = {}): string {
   const c = aliases.chart ?? 'c';
   const doneMs =
     role === Role.AUDITOR
-      ? [M.AUDIT_DONE, M.CLOSED]
+      ? [M.AUDIT_DONE, M.CLOSED, M.READY_TO_CODE]
       : /* CODER + MANAGER/TEAMLEAD (act in the coder capacity) */
         [M.CODING_DONE, M.READY_TO_AUDIT, M.AUDIT_IN_PROGRESS, M.AUDIT_DONE, M.CLOSED];
   return `(${touchedTodaySql(aliases)} AND ${c}.milestone IN (${doneMs.map((m) => `'${m}'`).join(', ')}))`;
