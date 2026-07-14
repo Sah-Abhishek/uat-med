@@ -62,6 +62,21 @@ export interface ListAllocationHistoryParams {
 export const listAllocationHistory = (params: ListAllocationHistoryParams = {}) =>
   get<Paginated<AllocationEventRow>>('/charts/allocation-history', params);
 
+/** One row of the "By user" view: how many distinct charts have ever been
+ *  allocated to this user (as coder and/or auditor), from the audit log. */
+export interface AllocationUserRow {
+  userId: number;
+  name: string | null;
+  role: string;
+  coderCharts: number;
+  auditorCharts: number;
+  totalCharts: number;
+}
+
+/** Manager-only per-user allocation totals derived from the audit log. */
+export const listAllocationHistoryByUser = () =>
+  get<{ users: AllocationUserRow[] }>('/charts/allocation-history/users');
+
 /* ── Display helpers ─────────────────────────────────────── */
 
 export const ALLOCATION_SOURCE_LABELS: Record<AllocationSource, string> = {

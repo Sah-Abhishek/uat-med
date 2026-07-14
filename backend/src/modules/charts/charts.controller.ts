@@ -106,6 +106,13 @@ export class ChartsController {
     return this.svc.allocationHistoryList(q);
   }
 
+  @Get('allocation-history/users')
+  @UseGuards(ManagerOnlyGuard)
+  @ApiOperation({ summary: 'Manager-only: per-user totals of charts ever allocated to each user (from the audit log).' })
+  allocationHistoryByUser() {
+    return this.svc.allocationHistoryByUser();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Full chart detail for the coding editor.' })
   detail(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {

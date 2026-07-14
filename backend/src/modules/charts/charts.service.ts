@@ -1132,6 +1132,43 @@ async allocationHistory(id: number) {
     };
   }
 
+  /**
+   * "By user" view for the manager audit page: how many DISTINCT charts have
+   * ever been allocated TO each user (split by the coder and auditor slots),
+   * derived from the allocation-event log. Excludes soft-deleted charts and
+   * charts orphaned by a soft-deleted worklist. Ordered by workload desc.
+   */
+  async allocationHistoryByUser() {
+    const rows: Array<Record<string, any>> = await this.allocationEvents
+      .createQueryBuilder('e')
+      .innerJoin(User, 'u', 'u.id = e.toUserId')
+      .innerJoin(Chart, 'c', 'c.id = e.chartId AND c.deletedAt IS NULL')
+      .innerJoin(Worklist, 'w', 'w.id = c.worklistId AND w.deletedAt IS NULL')
+      .select('u.id', 'userId')
+      .addSelect('u.fullName', 'name')
+      .addSelect('u.role', 'role')
+      .addSelect(`COUNT(DISTINCT e.chartId) FILTER (WHERE e.role = 'CODER')`, 'coderCharts')
+      .addSelect(`COUNT(DISTINCT e.chartId) FILTER (WHERE e.role = 'AUDITOR')`, 'auditorCharts')
+      .addSelect('COUNT(DISTINCT e.chartId)', 'totalCharts')
+      .where('e.toUserId IS NOT NULL')
+      .groupBy('u.id')
+      .addGroupBy('u.fullName')
+      .addGroupBy('u.role')
+      .orderBy('COUNT(DISTINCT e.chartId)', 'DESC')
+      .addOrderBy('u.fullName', 'ASC')
+      .getRawMany();
+    return {
+      users: rows.map((r) => ({
+        userId: Number(r.userId),
+        name: r.name ?? null,
+        role: r.role,
+        coderCharts: Number(r.coderCharts),
+        auditorCharts: Number(r.auditorCharts),
+        totalCharts: Number(r.totalCharts),
+      })),
+    };
+  }
+
   async transition(id: number, body: { milestone: string; chartStatus?: string }) {
     const c = await this.charts.findOne({ where: { id } });
     if (!c) throw new NotFoundException();

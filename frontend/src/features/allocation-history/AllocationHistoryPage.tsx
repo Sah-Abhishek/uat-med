@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, History, RefreshCw } from 'lucide-react';
+import { ArrowRight, History, RefreshCw, ListChecks, Users } from 'lucide-react';
 
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -12,17 +12,20 @@ import { useCan } from '@/hooks/useCan';
 import { listUsers } from '@/api/users';
 import {
   listAllocationHistory,
+  listAllocationHistoryByUser,
   allocationSourceLabel,
   ALLOCATION_SOURCE_LABELS,
   type AllocationEventRow,
+  type AllocationUserRow,
   type AllocationParty,
   type AllocationRole,
   type AllocationSource,
   type ListAllocationHistoryParams,
 } from '@/api/allocation-history';
-import { formatDateTime } from '@/lib/utils';
+import { cn, formatDateTime } from '@/lib/utils';
 
 const PAGE_SIZE = 25;
+type View = 'events' | 'users';
 
 const ROLES: Array<{ value: AllocationRole; label: string }> = [
   { value: 'CODER', label: 'Coder' },
@@ -71,10 +74,33 @@ function AllocationHistoryContent() {
 
   const resetFilters = () => setParams(new URLSearchParams(), { replace: true });
 
+  // Which tab is active (persisted in the URL). Defaults to the events log.
+  const view: View = params.get('view') === 'users' ? 'users' : 'events';
+  const setView = (v: View) => {
+    const next = new URLSearchParams(params);
+    if (v === 'users') next.set('view', 'users');
+    else next.delete('view');
+    setParams(next, { replace: true });
+  };
+  // Jump from a user row to the events tab pre-filtered to that user.
+  const showUserEvents = (userId: number) => {
+    const next = new URLSearchParams();
+    next.set('userId', String(userId));
+    setParams(next, { replace: true });
+  };
+
   const q = useQuery({
     queryKey: ['allocation-history', filters],
     queryFn: () => listAllocationHistory(filters),
     placeholderData: (prev) => prev,
+    enabled: view === 'events',
+  });
+
+  const byUserQ = useQuery({
+    queryKey: ['allocation-history', 'by-user'],
+    queryFn: listAllocationHistoryByUser,
+    enabled: view === 'users',
+    staleTime: 30_000,
   });
 
   // One list of everyone for both the "user involved" and "changed by" pickers
@@ -95,15 +121,27 @@ function AllocationHistoryContent() {
         actions={
           <button
             type="button"
-            onClick={() => q.refetch()}
+            onClick={() => (view === 'users' ? byUserQ.refetch() : q.refetch())}
             className="inline-flex items-center gap-2 h-9 px-3 rounded-pill border border-line text-sm font-semibold text-ink hover:bg-surface-2 transition"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${q.isFetching ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${(view === 'users' ? byUserQ.isFetching : q.isFetching) ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         }
       />
 
+      {/* View tabs */}
+      <div className="inline-flex items-center gap-1 rounded-pill border border-line p-1 bg-surface">
+        <TabButton active={view === 'events'} onClick={() => setView('events')} icon={<ListChecks className="w-3.5 h-3.5" />}>
+          Events
+        </TabButton>
+        <TabButton active={view === 'users'} onClick={() => setView('users')} icon={<Users className="w-3.5 h-3.5" />}>
+          By user
+        </TabButton>
+      </div>
+
+      {view === 'events' && (
+       <>
       <Card padding="default">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           <div>
@@ -241,7 +279,121 @@ function AllocationHistoryContent() {
           total={q.data?.total}
         />
       </Card>
+       </>
+      )}
+
+      {view === 'users' && (
+        <ByUserView
+          rows={byUserQ.data?.users}
+          isPending={byUserQ.isPending}
+          isError={byUserQ.isError}
+          onPickUser={showUserEvents}
+        />
+      )}
     </div>
+  );
+}
+
+/* ── View tab button ─────────────────────────────────────── */
+function TabButton({
+  active, onClick, icon, children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-1.5 h-8 px-3 rounded-pill text-sm font-semibold transition',
+        active ? 'bg-primary-soft text-primary-ink dark:text-primary' : 'text-ink-muted hover:text-ink hover:bg-surface-sunken',
+      )}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+/* ── By-user view ────────────────────────────────────────── */
+function ByUserView({
+  rows, isPending, isError, onPickUser,
+}: {
+  rows: AllocationUserRow[] | undefined;
+  isPending: boolean;
+  isError: boolean;
+  onPickUser: (userId: number) => void;
+}) {
+  return (
+    <Card padding="none">
+      <div className="px-4 py-3 border-b border-line">
+        <p className="text-sm font-semibold text-ink">Charts allocated per user</p>
+        <p className="text-[11px] text-ink-muted mt-0.5">
+          Distinct charts ever allocated to each user (as coder and/or auditor), from the audit log. Click a user to see their events.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px]">
+          <thead>
+            <tr>
+              <th className="table-head">User</th>
+              <th className="table-head">Role</th>
+              <th className="table-head text-right">As coder</th>
+              <th className="table-head text-right">As auditor</th>
+              <th className="table-head text-right">Total charts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isPending ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <tr key={`skel-${i}`} className="border-b border-line/60">
+                  {Array.from({ length: 5 }).map((__, j) => (
+                    <td key={j} className="table-cell">
+                      <div className="h-3 w-20 rounded bg-surface-sunken animate-pulse" />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : isError ? (
+              <tr>
+                <td colSpan={5} className="py-20 text-center text-sm text-danger">Failed to load per-user totals.</td>
+              </tr>
+            ) : !rows || rows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="py-20 text-center">
+                  <Users className="w-6 h-6 text-ink-subtle mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-ink">No allocations recorded yet</p>
+                  <p className="text-[11px] text-ink-muted mt-1">
+                    Totals accrue from the feature's deploy onward — earlier allocations aren't backfilled.
+                  </p>
+                </td>
+              </tr>
+            ) : (
+              rows.map((u) => (
+                <tr
+                  key={u.userId}
+                  onClick={() => onPickUser(u.userId)}
+                  className="border-b border-line/60 hover:bg-surface-sunken/40 transition cursor-pointer"
+                >
+                  <td className="table-cell text-sm font-medium text-ink">{u.name ?? `User #${u.userId}`}</td>
+                  <td className="table-cell">
+                    <PillBadge tone={u.role === 'AUDITOR' ? 'sky' : u.role === 'CODER' ? 'mint' : 'butter'}>
+                      {humanize(u.role)}
+                    </PillBadge>
+                  </td>
+                  <td className="table-cell text-right font-mono text-sm text-ink-muted">{u.coderCharts || '—'}</td>
+                  <td className="table-cell text-right font-mono text-sm text-ink-muted">{u.auditorCharts || '—'}</td>
+                  <td className="table-cell text-right font-mono text-sm font-semibold text-ink">{u.totalCharts}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 
