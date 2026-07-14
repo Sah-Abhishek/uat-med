@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, Pencil, Check, X } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Avatar } from '@/components/ui/Primitives';
-import { Input } from '@/components/ui/Field';
+import { Input, Textarea } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { addChartFeedback, listChartFeedback, updateChartFeedback } from '@/api/charts';
 import type { Chart } from '@/api/types';
@@ -78,7 +78,7 @@ export function ConversationLog({ chart, timerRunning }: Props) {
   };
 
   const canSend = timerRunning && text.trim().length > 0 && !post.isPending;
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && canSend) {
       e.preventDefault();
       post.mutate();
@@ -185,13 +185,15 @@ export function ConversationLog({ chart, timerRunning }: Props) {
         )}
       </div>
 
-      <div className="flex gap-1.5">
-        <Input
+      <div className="flex items-end gap-1.5">
+        <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
+          rows={3}
           placeholder={timerRunning ? 'Type a comment…' : 'Start the timer to comment'}
           disabled={!timerRunning}
+          className="resize-none"
         />
         <Button
           size="sm"
