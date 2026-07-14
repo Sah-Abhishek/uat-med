@@ -75,6 +75,9 @@ export function ProcessingInfoSection({
   codersLoading,
   auditorsLoading,
 }: Props) {
+  // Kept live for the commented-out "Allocate to Coder" field below; remove
+  // this line when that field is re-enabled.
+  void coders; void codersLoading;
   // The auditor profile locks this whole section (they work in Audit
   // Information instead). Coder QC Status is the one cell gated independently
   // (see coderQcEditable below) — per the manual it's the coder's response, so
@@ -287,6 +290,7 @@ export function ProcessingInfoSection({
             readOnly={readOnly || auditorsLoading}
             placeholder={auditorsLoading ? 'Loading auditors…' : 'Select auditor…'}
           />
+          {/* Allocate to Coder — hidden per request.
           <FormField
             label="Allocate to Coder"
             type="select"
@@ -305,6 +309,7 @@ export function ProcessingInfoSection({
             readOnly={readOnly || codersLoading}
             placeholder={codersLoading ? 'Loading coders…' : 'Select coder…'}
           />
+          */}
           <FormField
             label="Priority"
             type="select"
