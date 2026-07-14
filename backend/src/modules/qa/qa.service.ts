@@ -548,7 +548,7 @@ export class QaService {
   async worklists(clientId?: number, search?: string, limit = 10) {
     // Total available (scoped by client, ignoring search) — lets the UI decide
     // whether to show an in-dropdown search box (only when > limit exist).
-    const countWhere: string[] = [];
+    const countWhere: string[] = ['c.deleted_at IS NULL'];
     const countParams: unknown[] = [];
     if (clientId) { countParams.push(clientId); countWhere.push(`w.client_id = $${countParams.length}`); }
     const countRows = await this.ds.query(
@@ -561,7 +561,7 @@ export class QaService {
     );
     const total = Number(countRows[0]?.total ?? 0);
 
-    const where: string[] = [];
+    const where: string[] = ['c.deleted_at IS NULL'];
     const params: unknown[] = [];
     if (clientId) { params.push(clientId); where.push(`w.client_id = $${params.length}`); }
     if (search?.trim()) {
@@ -593,7 +593,7 @@ export class QaService {
    * client/location so the dropdown matches the rest of the filters.
    */
   async facilities(clientId?: number, locationId?: number) {
-    const where: string[] = [`NULLIF(trim(c.custom_fields->>'facility'), '') IS NOT NULL`];
+    const where: string[] = [`NULLIF(trim(c.custom_fields->>'facility'), '') IS NOT NULL`, `c.deleted_at IS NULL`];
     const params: unknown[] = [];
     if (clientId) { params.push(clientId); where.push(`w.client_id = $${params.length}`); }
     if (locationId) { params.push(locationId); where.push(`w.location_id = $${params.length}`); }

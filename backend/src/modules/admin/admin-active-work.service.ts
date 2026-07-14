@@ -61,6 +61,7 @@ export class AdminActiveWorkService {
       LEFT JOIN clients   cl  ON cl.id  = w.client_id
       LEFT JOIN locations loc ON loc.id = w.location_id
       WHERE t.stopped_at IS NULL
+        AND c.deleted_at IS NULL
       ORDER BY t.started_at ASC
     `);
 
@@ -108,6 +109,7 @@ export class AdminActiveWorkService {
       LEFT JOIN clients   cl  ON cl.id  = w.client_id
       LEFT JOIN locations loc ON loc.id = w.location_id
       WHERE c.custom_fields ? 'timerPaused'
+        AND c.deleted_at IS NULL
       ORDER BY c.id ASC
     `);
 
