@@ -1004,13 +1004,16 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
 
   // Priority itself is no longer nudged by milestone/status here — it is
   // computed per viewer from the chart's milestone/status/QC/received-date
-  // (see priority-rules.ts). The one exception is an explicit user override —
-  // but only when it ACTUALLY changed: the detail/Modify-Charts form echoes the
-  // chart's existing `priority` even when the user didn't touch it, and applying
-  // an unchanged (often legacy/inert 'CRITICAL') value would resurrect it as an
-  // active manual pin (Bug C). Compare against the pre-save stored value; the
-  // FE's "sends it only when changed" contract is not trusted.
-  if (nextPriority && nextPriority !== prevPinPriority) c.setManualPriority(nextPriority as Priority);
+  // (see priority-rules.ts). The one exception is an explicit user override.
+  // Apply it unless it merely re-sends the CURRENT ACTIVE pin. Compare against
+  // the ACTIVE pin (null when unpinned), NOT the stored `priority`: a chart can
+  // carry an inert legacy value (e.g. 'CRITICAL' with manual_priority_at NULL
+  // after a pin was released), and comparing to that stored value wrongly
+  // blocked a manager from deliberately re-pinning it. The detail form only
+  // sends `priority` when it differs from its seeded baseline, so a present
+  // value here is a real user change — not the Bug-C echo.
+  const prevActivePin = prevPinAt ? prevPinPriority : null;
+  if (nextPriority && nextPriority !== prevActivePin) c.setManualPriority(nextPriority as Priority);
 
   const saved = await this.charts.save(c);
   // Record any coder/auditor ownership change made by this save.
@@ -1700,12 +1703,14 @@ async allocationHistory(id: number) {
       // A bulk priority choice is a manual override (§7.3): it pins the chart to
       // that bucket until the allocated user touches it, then reverts to the
       // computed default. Applied last so it wins over anything above.
-      // Only when it ACTUALLY changed the stored value: the Modify-Charts form
-      // echoes each chart's existing `priority`, and re-applying an unchanged
-      // (often legacy/inert 'CRITICAL') value would resurrect it as an active
-      // pin — the bulk echo that has repeatedly refilled the CRITICAL bucket
-      // (Bug C). The FE "only when changed" contract is not trusted.
-      if (dto.priority && dto.priority !== c.priority) {
+      // Apply unless it merely re-sends the CURRENT ACTIVE pin. Compare against
+      // the ACTIVE pin (null when unpinned), NOT the stored `priority`: an inert
+      // legacy value (e.g. 'CRITICAL' left after a pin was released, manual_
+      // priority_at NULL) must not block a deliberate re-pin. The Modify-Charts
+      // form only sends `priority` when the user actually picks a bucket, so a
+      // present value is a deliberate choice — not the Bug-C echo.
+      const activePin = c.manualPriorityAt ? c.priority : null;
+      if (dto.priority && dto.priority !== activePin) {
         pinPending.push({ c, prevAt: c.manualPriorityAt ?? null, prevPr: c.priority ?? null });
         c.setManualPriority(dto.priority as Priority);
       }
