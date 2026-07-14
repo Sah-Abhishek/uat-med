@@ -17,7 +17,15 @@ export class ChartAllocationEvent {
   @Column({ name: 'chart_id', type: 'bigint' }) @Index() chartId: number;
   @ManyToOne(() => Chart) @JoinColumn({ name: 'chart_id' }) chart: Chart;
 
-  @Column({ type: 'varchar', length: 16 }) role: 'CODER' | 'AUDITOR';
+  /** 'ALLOCATION' (coder/auditor slot change) or 'PRIORITY' (manual pin change). */
+  @Column({ name: 'event_type', type: 'varchar', length: 16, default: 'ALLOCATION' }) @Index() eventType: 'ALLOCATION' | 'PRIORITY';
+
+  /** Set for ALLOCATION events; null for PRIORITY events. */
+  @Column({ type: 'varchar', length: 16, nullable: true }) role?: 'CODER' | 'AUDITOR' | null;
+
+  /** PRIORITY events: pin bucket before → after (null = not pinned). */
+  @Column({ name: 'from_priority', type: 'varchar', length: 16, nullable: true }) fromPriority?: string | null;
+  @Column({ name: 'to_priority', type: 'varchar', length: 16, nullable: true }) toPriority?: string | null;
 
   /** Previous holder of the slot (null = was unassigned). */
   @Column({ name: 'from_user_id', type: 'bigint', nullable: true }) fromUserId?: number | null;

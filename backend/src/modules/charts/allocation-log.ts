@@ -23,6 +23,24 @@ export interface AllocationEventInput {
   worklistId?: number | null;
 }
 
+/** How a manual priority-PIN change happened — one per code path that pins/unpins. */
+export type PrioritySource =
+  | 'DETAIL_SAVE_PIN'
+  | 'BULK_MODIFY_PIN'
+  | 'REVIEWER_COMMENT_HIGH_PIN'
+  | 'TIMER_TOUCH_UNPIN';
+
+export interface PriorityEventInput {
+  chartId: number;
+  fromPriority?: string | null;
+  toPriority?: string | null;
+  changedById?: number | null;
+  source: PrioritySource;
+  milestone?: string | null;
+  chartStatus?: string | null;
+  worklistId?: number | null;
+}
+
 const norm = (v: number | null | undefined): number | null => (v == null ? null : Number(v));
 
 /**
@@ -41,9 +59,40 @@ export async function logAllocationEvent(
   await repo.save(
     repo.create({
       chartId: e.chartId,
+      eventType: 'ALLOCATION',
       role: e.role,
       fromUserId: from,
       toUserId: to,
+      changedById: norm(e.changedById),
+      source: e.source,
+      milestone: e.milestone ?? null,
+      chartStatus: e.chartStatus ?? null,
+      worklistId: e.worklistId ?? null,
+    }),
+  );
+}
+
+/**
+ * Append a manual priority-PIN change event (event_type='PRIORITY'). `fromPriority`
+ * / `toPriority` are the pinned bucket before/after, with null meaning "not pinned"
+ * (so a pin is null→BUCKET, an unpin is BUCKET→null, a re-pin is BUCKET→BUCKET).
+ * No-ops when the effective pin didn't change. Same repo/transaction semantics as
+ * logAllocationEvent.
+ */
+export async function logPriorityEvent(
+  repo: Repository<ChartAllocationEvent>,
+  e: PriorityEventInput,
+): Promise<void> {
+  const from = e.fromPriority ?? null;
+  const to = e.toPriority ?? null;
+  if (from === to) return;
+  await repo.save(
+    repo.create({
+      chartId: e.chartId,
+      eventType: 'PRIORITY',
+      role: null,
+      fromPriority: from,
+      toPriority: to,
       changedById: norm(e.changedById),
       source: e.source,
       milestone: e.milestone ?? null,

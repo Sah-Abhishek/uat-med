@@ -20,7 +20,7 @@ import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, 
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
-import { logAllocationEvent, type AllocationSource } from './allocation-log';
+import { logAllocationEvent, logPriorityEvent, type AllocationSource, type PrioritySource } from './allocation-log';
 import { Role } from '../../common/enums/roles.enum';
 import { AuthenticatedUser } from '../../common/types/request-user.type';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
@@ -864,6 +864,10 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
   // any coder/auditor handoff (incl. reallocation) with the acting user below.
   const prevCoderId = c.allocatedCoderId ?? null;
   const prevAuditorId = c.allocatedAuditorId ?? null;
+  // Priority-pin audit: remember the pin state before this save (a rework HIGH pin
+  // or an explicit priority override below may change it).
+  const prevPinAt = c.manualPriorityAt ?? null;
+  const prevPinPriority = c.priority ?? null;
 
   // QC Status is ONE logical value per the User Manual, stored as two role
   // fields (coder = qcStatus, auditor = auditorQcStatus). Capture the pre-save
@@ -991,6 +995,8 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
   // Record any coder/auditor ownership change made by this save.
   await this.recordAlloc(saved, 'CODER', prevCoderId, user?.id ?? null, 'DETAIL_SAVE');
   await this.recordAlloc(saved, 'AUDITOR', prevAuditorId, user?.id ?? null, 'DETAIL_SAVE');
+  // Record any manual-pin change (explicit override or rework HIGH pin).
+  await this.recordPin(saved, prevPinAt, prevPinPriority, user?.id ?? null, 'DETAIL_SAVE_PIN');
   return saved;
 }
 
@@ -1020,6 +1026,33 @@ private recordAlloc(
 }
 
 /**
+ * Append one manual-priority-PIN change event (no-ops if the effective pin didn't
+ * change). The "effective pin" is the pinned bucket while `manualPriorityAt` is
+ * set, else null; pass the pre-change (`manualPriorityAt`, `priority`) and the new
+ * state is read from the chart. Covers pin, unpin, and re-pin. See allocation-log.ts.
+ * Repo/transaction repo can be passed (defaults to the request-scoped repo).
+ */
+private recordPin(
+  c: Chart,
+  prevPinnedAt: Date | null | undefined,
+  prevPriority: string | null | undefined,
+  changedById: number | null,
+  source: PrioritySource,
+  repo: Repository<ChartAllocationEvent> = this.allocationEvents,
+): Promise<void> {
+  return logPriorityEvent(repo, {
+    chartId: Number(c.id),
+    fromPriority: prevPinnedAt ? (prevPriority ?? null) : null,
+    toPriority: c.manualPriorityAt ? (c.priority ?? null) : null,
+    changedById,
+    source,
+    milestone: c.milestone,
+    chartStatus: c.chartStatus,
+    worklistId: c.worklistId ?? null,
+  });
+}
+
+/**
  * Full coder/auditor allocation history for a chart (oldest first): each hop's
  * role, from → to user, who did it, how (source), and the chart state at the
  * time. Backs GET /charts/:id/allocation-history.
@@ -1033,7 +1066,10 @@ async allocationHistory(id: number) {
     .leftJoin(User, 'tu', 'tu.id = e.toUserId')
     .leftJoin(User, 'cb', 'cb.id = e.changedById')
     .select('e.id', 'id')
+    .addSelect('e.eventType', 'eventType')
     .addSelect('e.role', 'role')
+    .addSelect('e.fromPriority', 'fromPriority')
+    .addSelect('e.toPriority', 'toPriority')
     .addSelect('e.fromUserId', 'fromUserId')
     .addSelect('fu.fullName', 'fromUserName')
     .addSelect('e.toUserId', 'toUserId')
@@ -1052,7 +1088,10 @@ async allocationHistory(id: number) {
     chartId: id,
     events: rows.map((r) => ({
       id: Number(r.id),
+      eventType: r.eventType ?? 'ALLOCATION',
       role: r.role,
+      fromPriority: r.fromPriority ?? null,
+      toPriority: r.toPriority ?? null,
       from: r.fromUserId ? { id: Number(r.fromUserId), name: r.fromUserName ?? null } : null,
       to: r.toUserId ? { id: Number(r.toUserId), name: r.toUserName ?? null } : null,
       changedBy: r.changedById ? { id: Number(r.changedById), name: r.changedByName ?? null } : null,
@@ -1088,7 +1127,10 @@ async allocationHistory(id: number) {
       .addSelect('w.worklistNumber', 'worklistNumber')
       .addSelect('cl.name', 'clientName')
       .addSelect('loc.name', 'locationName')
+      .addSelect('e.eventType', 'eventType')
       .addSelect('e.role', 'role')
+      .addSelect('e.fromPriority', 'fromPriority')
+      .addSelect('e.toPriority', 'toPriority')
       .addSelect('e.fromUserId', 'fromUserId')
       .addSelect('fu.fullName', 'fromUserName')
       .addSelect('e.toUserId', 'toUserId')
@@ -1103,6 +1145,7 @@ async allocationHistory(id: number) {
       .addOrderBy('e.id', 'DESC');
 
     if (q.chartNo)     qb.andWhere('c.chartNo ILIKE :chartNo', { chartNo: `%${q.chartNo}%` });
+    if (q.eventType)   qb.andWhere('e.eventType = :eventType', { eventType: q.eventType });
     if (q.role)        qb.andWhere('e.role = :role', { role: q.role });
     if (q.source)      qb.andWhere('e.source = :source', { source: q.source });
     if (q.userId)      qb.andWhere('(e.fromUserId = :uid OR e.toUserId = :uid)', { uid: q.userId });
@@ -1126,7 +1169,10 @@ async allocationHistory(id: number) {
         worklistNumber: r.worklistNumber ?? null,
         clientName: r.clientName ?? null,
         locationName: r.locationName ?? null,
+        eventType: r.eventType ?? 'ALLOCATION',
         role: r.role,
+        fromPriority: r.fromPriority ?? null,
+        toPriority: r.toPriority ?? null,
         from: r.fromUserId ? { id: Number(r.fromUserId), name: r.fromUserName ?? null } : null,
         to: r.toUserId ? { id: Number(r.toUserId), name: r.toUserName ?? null } : null,
         changedBy: r.changedById ? { id: Number(r.changedById), name: r.changedByName ?? null } : null,
@@ -1160,6 +1206,7 @@ async allocationHistory(id: number) {
       .addSelect(`COUNT(DISTINCT e.chartId) FILTER (WHERE e.role = 'AUDITOR')`, 'auditorCharts')
       .addSelect('COUNT(DISTINCT e.chartId)', 'totalCharts')
       .where('e.toUserId IS NOT NULL')
+      .andWhere(`e.eventType = 'ALLOCATION'`)
       .groupBy('u.id')
       .addGroupBy('u.fullName')
       .addGroupBy('u.role')
@@ -1364,6 +1411,8 @@ async allocationHistory(id: number) {
     const canAudit = user.role === Role.AUDITOR || user.role === Role.TEAMLEAD || user.role === Role.MANAGER;
     // Starting the timer is the allocated user "touching" the chart (§7.3): drop
     // any manual priority override so it reverts to its computed role bucket.
+    const prevPinAt = c.manualPriorityAt ?? null;
+    const prevPinPriority = c.priority ?? null;
     let dirty = false;
     if (c.manualPriorityAt) { c.clearManualPriority(); dirty = true; }
     // Starting the timer moves the chart into the active-work milestone. Re-opening
@@ -1379,6 +1428,8 @@ async allocationHistory(id: number) {
       dirty = true;
     }
     if (dirty) await this.charts.save(c);
+    // Audit the auto-unpin (§7.3) if the touch cleared a manual pin.
+    await this.recordPin(c, prevPinAt, prevPinPriority, user.id, 'TIMER_TOUCH_UNPIN');
     return { chartId: id, startedAt: startedAt.toISOString() };
   }
 
@@ -1584,6 +1635,8 @@ async allocationHistory(id: number) {
     // Allocation audit: remember the pre-change holder of the slot each action
     // touches, so we can log the handoff (with the acting user) after the save.
     const pending: Array<{ c: Chart; role: 'CODER' | 'AUDITOR'; from: number | null; source: AllocationSource }> = [];
+    // Priority-pin audit: (chart, pre-change pin state) to log after the save.
+    const pinPending: Array<{ c: Chart; prevAt: Date | null; prevPr: string | null }> = [];
     for (const c of updatedCharts) {
       // serviceLineId is explicitly nullable: undefined = leave as-is, null =
       // clear, number = set. So check `!== undefined`, not truthiness.
@@ -1617,10 +1670,14 @@ async allocationHistory(id: number) {
       // A bulk priority choice is a manual override (§7.3): it pins the chart to
       // that bucket until the allocated user touches it, then reverts to the
       // computed default. Applied last so it wins over anything above.
-      if (dto.priority) c.setManualPriority(dto.priority as Priority);
+      if (dto.priority) {
+        pinPending.push({ c, prevAt: c.manualPriorityAt ?? null, prevPr: c.priority ?? null });
+        c.setManualPriority(dto.priority as Priority);
+      }
     }
     await this.charts.save(updatedCharts);
     for (const p of pending) await this.recordAlloc(p.c, p.role, p.from, user?.id ?? null, p.source);
+    for (const p of pinPending) await this.recordPin(p.c, p.prevAt, p.prevPr, user?.id ?? null, 'BULK_MODIFY_PIN');
     return { updated: updatedCharts.length };
   }
 
@@ -1807,8 +1864,11 @@ async allocationHistory(id: number) {
     // stale/inert priority='CRITICAL' must not suppress it (see update() above).
     const activeCritical = chart.manualPriorityAt != null && chart.priority === Priority.CRITICAL;
     if (isReviewer && !activeCritical) {
+      const prevPinAt = chart.manualPriorityAt ?? null;
+      const prevPinPriority = chart.priority ?? null;
       chart.setManualPriority(Priority.HIGH);
       await this.charts.save(chart);
+      await this.recordPin(chart, prevPinAt, prevPinPriority, user.id, 'REVIEWER_COMMENT_HIGH_PIN');
     }
     return { id: f.id };
   }

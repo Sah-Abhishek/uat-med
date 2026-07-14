@@ -20,6 +20,7 @@ import {
   type AllocationParty,
   type AllocationRole,
   type AllocationSource,
+  type EventType,
   type ListAllocationHistoryParams,
 } from '@/api/allocation-history';
 import { cn, formatDateTime } from '@/lib/utils';
@@ -49,6 +50,7 @@ function AllocationHistoryContent() {
   const filters: ListAllocationHistoryParams = useMemo(
     () => ({
       chartNo: params.get('chartNo') || undefined,
+      eventType: (params.get('eventType') as EventType) || undefined,
       role: (params.get('role') as AllocationRole) || undefined,
       source: (params.get('source') as AllocationSource) || undefined,
       userId: params.get('userId') ? Number(params.get('userId')) : undefined,
@@ -153,6 +155,17 @@ function AllocationHistoryContent() {
             />
           </div>
           <div>
+            <Label>Event type</Label>
+            <Select
+              value={filters.eventType ?? ''}
+              onChange={(e) => updateFilters({ eventType: (e.target.value || undefined) as EventType | undefined })}
+            >
+              <option value="">Any</option>
+              <option value="ALLOCATION">Allocation</option>
+              <option value="PRIORITY">Priority (pin)</option>
+            </Select>
+          </div>
+          <div>
             <Label>Role</Label>
             <Select
               value={filters.role ?? ''}
@@ -230,7 +243,7 @@ function AllocationHistoryContent() {
                 <th className="table-head">When</th>
                 <th className="table-head">Chart</th>
                 <th className="table-head">Client / Location</th>
-                <th className="table-head">Role</th>
+                <th className="table-head">Type</th>
                 <th className="table-head">From → To</th>
                 <th className="table-head">Changed by</th>
                 <th className="table-head">Source</th>
@@ -419,15 +432,29 @@ function EventRow({ row }: { row: AllocationEventRow }) {
         {row.locationName ? <span className="text-ink-subtle"> · {row.locationName}</span> : null}
       </td>
       <td className="table-cell">
-        <PillBadge tone={row.role === 'AUDITOR' ? 'sky' : 'mint'}>
-          {row.role === 'AUDITOR' ? 'Auditor' : 'Coder'}
-        </PillBadge>
+        {row.eventType === 'PRIORITY' ? (
+          <PillBadge tone="coral">Priority</PillBadge>
+        ) : (
+          <PillBadge tone={row.role === 'AUDITOR' ? 'sky' : 'mint'}>
+            {row.role === 'AUDITOR' ? 'Auditor' : 'Coder'}
+          </PillBadge>
+        )}
       </td>
       <td className="table-cell">
         <span className="inline-flex items-center gap-1.5 text-sm">
-          <PartyName party={row.from} muted />
-          <ArrowRight className="w-3.5 h-3.5 text-ink-subtle shrink-0" />
-          <PartyName party={row.to} />
+          {row.eventType === 'PRIORITY' ? (
+            <>
+              <PinBucket bucket={row.fromPriority} muted />
+              <ArrowRight className="w-3.5 h-3.5 text-ink-subtle shrink-0" />
+              <PinBucket bucket={row.toPriority} />
+            </>
+          ) : (
+            <>
+              <PartyName party={row.from} muted />
+              <ArrowRight className="w-3.5 h-3.5 text-ink-subtle shrink-0" />
+              <PartyName party={row.to} />
+            </>
+          )}
         </span>
       </td>
       <td className="table-cell text-sm text-ink">
@@ -454,6 +481,18 @@ function PartyName({ party, muted }: { party: AllocationParty | null; muted?: bo
   return (
     <span className={muted ? 'text-ink-muted' : 'text-ink font-medium'}>
       {party.name ?? `User #${party.id}`}
+    </span>
+  );
+}
+
+/** A pin bucket (or "Unpinned" for a null value). `muted` styles the "from" side. */
+function PinBucket({ bucket, muted }: { bucket: string | null; muted?: boolean }) {
+  if (!bucket) {
+    return <span className="text-xs italic text-ink-subtle">Unpinned</span>;
+  }
+  return (
+    <span className={muted ? 'text-ink-muted' : 'text-ink font-medium'}>
+      {humanize(bucket)}
     </span>
   );
 }

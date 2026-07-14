@@ -16,6 +16,16 @@ export const ALLOCATION_SOURCES = [
   'AUDIT_REALLOCATION',
 ] as const;
 
+/** Priority-PIN change sources (mirrors PrioritySource in allocation-log.ts). */
+export const PRIORITY_SOURCES = [
+  'DETAIL_SAVE_PIN',
+  'BULK_MODIFY_PIN',
+  'REVIEWER_COMMENT_HIGH_PIN',
+  'TIMER_TOUCH_UNPIN',
+] as const;
+
+export const EVENT_SOURCES = [...ALLOCATION_SOURCES, ...PRIORITY_SOURCES] as const;
+
 /**
  * Filters for the global allocation-history (audit trail) list. All optional;
  * an empty query returns the whole log, newest first, paginated.
@@ -24,12 +34,17 @@ export class QueryAllocationHistoryDto extends PageParamsDto {
   /** Partial, case-insensitive match on the chart number. */
   @ApiPropertyOptional() @IsOptional() @IsString() chartNo?: string;
 
+  /** 'ALLOCATION' (coder/auditor change) or 'PRIORITY' (manual pin change). */
+  @ApiPropertyOptional({ enum: ['ALLOCATION', 'PRIORITY'] })
+  @IsOptional() @IsIn(['ALLOCATION', 'PRIORITY'])
+  eventType?: 'ALLOCATION' | 'PRIORITY';
+
   @ApiPropertyOptional({ enum: ['CODER', 'AUDITOR'] })
   @IsOptional() @IsIn(['CODER', 'AUDITOR'])
   role?: 'CODER' | 'AUDITOR';
 
-  @ApiPropertyOptional({ enum: ALLOCATION_SOURCES })
-  @IsOptional() @IsIn(ALLOCATION_SOURCES as unknown as string[])
+  @ApiPropertyOptional({ enum: EVENT_SOURCES })
+  @IsOptional() @IsIn(EVENT_SOURCES as unknown as string[])
   source?: string;
 
   /** Match events where this user is the previous OR new holder (from OR to). */
