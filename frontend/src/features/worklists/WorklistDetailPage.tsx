@@ -147,6 +147,23 @@ export function WorklistDetailPage() {
             <StatMini label="Total charts" value={formatNumber(data.totalCharts)} />
           </div>
 
+          {/* Deleted serials — deleting charts leaves permanent gaps (no
+              re-sequencing); surface which serials were removed. */}
+          {(data.deletedSerials?.length ?? 0) > 0 && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft/40 px-3 py-2 text-sm text-ink">
+              <Trash2 className="w-4 h-4 shrink-0 text-danger mt-0.5" />
+              <span>
+                <span className="font-semibold">
+                  {formatNumber(data.deletedSerials!.length)} deleted{' '}
+                  serial{data.deletedSerials!.length === 1 ? '' : 's'}:
+                </span>{' '}
+                <span className="tabular-nums line-through decoration-danger/70">
+                  {formatRanges(data.deletedSerials!)}
+                </span>
+              </span>
+            </div>
+          )}
+
           {/* Documents status — makes it explicit when nothing has been uploaded. */}
           <div
             className={cn(
@@ -1438,8 +1455,10 @@ function ManageChartsModal({
   }
 
   const chartsQ = useQuery({
+    // includeDeleted: show soft-deleted charts struck-through in place (their
+    // serials are permanent gaps now that delete no longer re-sequences).
     queryKey: ['worklist', worklistId, 'manage-charts'],
-    queryFn: () => fetchAllCharts(worklistId),
+    queryFn: () => fetchAllCharts(worklistId, true),
     enabled: open && !!worklistId,
   });
 
@@ -1455,7 +1474,9 @@ function ManageChartsModal({
     });
   }, [charts, search]);
 
-  const allFilteredIds = filtered.map((c) => c.id);
+  // Deleted charts are shown for reference (struck-through) but can't be
+  // selected or re-deleted, so exclude them from select-all / bulk actions.
+  const allFilteredIds = filtered.filter((c) => !c.isDeleted).map((c) => c.id);
   const allFilteredSelected =
     allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
   const someFilteredSelected =
@@ -1756,31 +1777,46 @@ function ManageChartsModal({
                   </thead>
                   <tbody>
                     {filtered.map((c) => {
-                      const isSel = selected.has(c.id);
+                      const deleted = !!c.isDeleted;
+                      const isSel = selected.has(c.id) && !deleted;
                       return (
                         <tr
                           key={c.id}
                           className={cn(
-                            'border-t border-line cursor-pointer transition',
-                            isSel ? 'bg-danger-soft/30' : 'hover:bg-surface-sunken/40',
+                            'border-t border-line transition',
+                            deleted
+                              // Deleted → struck-through, dimmed, non-interactive.
+                              ? 'line-through opacity-60 cursor-not-allowed'
+                              : cn('cursor-pointer', isSel ? 'bg-danger-soft/30' : 'hover:bg-surface-sunken/40'),
                           )}
-                          onClick={() => toggleOne(c.id)}
+                          onClick={deleted ? undefined : () => toggleOne(c.id)}
                         >
-                          <td className="table-cell">
+                          <td className="table-cell no-underline">
                             <input
                               type="checkbox"
                               className="checkbox"
                               checked={isSel}
+                              disabled={deleted}
                               onChange={() => toggleOne(c.id)}
                               onClick={(e) => e.stopPropagation()}
-                              aria-label={`Select chart ${c.chartNo ?? c.serialNo}`}
+                              aria-label={
+                                deleted
+                                  ? `Chart ${c.chartNo ?? c.serialNo} is deleted`
+                                  : `Select chart ${c.chartNo ?? c.serialNo}`
+                              }
                             />
                           </td>
                           <td className="table-cell text-xs text-ink-muted tabular-nums">{c.serialNo}</td>
                           <td className="table-cell font-semibold text-ink">{c.chartNo ?? '—'}</td>
                           <td className="table-cell text-ink-muted">{c.mrNumber ?? '—'}</td>
                           <td className="table-cell text-xs">
-                            <MilestoneChip milestone={c.milestone} />
+                            {deleted ? (
+                              <span className="no-underline inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-danger-soft text-danger">
+                                Deleted
+                              </span>
+                            ) : (
+                              <MilestoneChip milestone={c.milestone} />
+                            )}
                           </td>
                           <td className="table-cell text-ink-muted text-sm">
                             {c.allocatedCoderName ?? <span className="text-ink-subtle">Unallocated</span>}
@@ -1905,7 +1941,7 @@ function formatRanges(serials: number[]): string {
  * Fetch every chart in the worklist, paginating in chunks of 200 (the backend
  * cap). This is fine for worklists up to a few thousand charts.
  */
-async function fetchAllCharts(worklistId: string) {
+async function fetchAllCharts(worklistId: string, includeDeleted = false) {
   const PAGE_SIZE = 200;
   type Item = Awaited<ReturnType<typeof listCharts>>['items'][number];
   const all: Item[] = [];
@@ -1913,6 +1949,7 @@ async function fetchAllCharts(worklistId: string) {
   while (true) {
     const res = await listCharts({
       worklistId,
+      includeDeleted,
       page,
       pageSize: PAGE_SIZE,
       sortBy: 'serialNo',

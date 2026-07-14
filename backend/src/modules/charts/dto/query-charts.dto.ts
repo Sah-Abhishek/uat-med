@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { PageParamsDto } from '../../../common/dto/page-params.dto';
 import { ChartMilestone, ChartStatus, Priority } from '../../../common/enums';
@@ -55,6 +55,13 @@ export class QueryChartsDto extends PageParamsDto {
   @IsIn([Priority.CRITICAL, Priority.HIGH, Priority.MEDIUM, Priority.LOW, 'DONE', Priority.FINALIZED])
   priority?: Priority | 'DONE';
   @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) worklistId?: number[];
+  /** Manage-Charts opt-in: include soft-deleted charts (rendered struck-through
+   * in place). Only honoured for a worklist-scoped list; ignored otherwise. */
+  @ApiPropertyOptional({ type: Boolean })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  includeDeleted?: boolean;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() serialFrom?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() serialTo?: number;
   @ApiPropertyOptional({ type: [Number] }) @IsOptional() @Transform(toNumberArray) @IsInt({ each: true }) allocatedUserId?: number[];

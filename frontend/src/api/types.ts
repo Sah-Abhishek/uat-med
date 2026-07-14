@@ -116,6 +116,10 @@ export interface WorklistDetail extends Worklist {
   netChange: number;
   /** Total documents uploaded across this worklist's charts. */
   documentsCount: number;
+  /** Serial numbers of deleted charts (permanent gaps — delete no longer
+   * re-sequences). Optional for backend version skew. */
+  deletedSerials?: number[];
+  deletedCount?: number;
   chartSummary: {
     total: number;
     allocated: number;
@@ -185,6 +189,9 @@ export interface Chart {
   serialNo: number;
   chartNo: string | null;
   mrNumber: string | null;
+  /** Soft-deleted flag — set only in the Manage-Charts (includeDeleted) view,
+   * where deleted charts are shown struck-through in place. */
+  isDeleted?: boolean;
   milestone: ChartMilestone;
   chartStatus: ChartStatus;
   priority: Priority;

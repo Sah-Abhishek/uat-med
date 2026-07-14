@@ -378,6 +378,19 @@ export class ChartsService {
     // Hide charts orphaned by a soft-deleted worklist (see helper).
     this.excludeOrphanedCharts(qb);
 
+    // Manage-Charts (worklist-scoped) can opt to SHOW soft-deleted charts so the
+    // popup renders them struck-through in place. QueryBuilder hides soft-deleted
+    // rows by default; withDeleted() lifts that ONLY for this opt-in view.
+    // Orphans (soft-deleted worklist) stay hidden via excludeOrphanedCharts above.
+    if (q.includeDeleted && (q.worklistId?.length ?? 0) > 0) {
+      qb.withDeleted();
+      // Legacy artifact: charts deleted under the OLD re-sequencing code were
+      // parked at large-negative serials (their real serial is lost), so there's
+      // no gap to show — keep them out of this view. Active charts always have
+      // serial >= 1, so this only drops the legacy negative-parked deleted rows.
+      qb.andWhere('c.serial_no >= 1');
+    }
+
     if (globalEncounterSearch) {
       // Match on the encounter id alone — all other filters and the priority tab
       // are dropped so the chart surfaces no matter what's selected in the grid.
@@ -451,6 +464,9 @@ export class ChartsService {
       const alloc = allocByChart.get(Number(rest.id)) ?? {};
       return {
         ...rest,
+        // Soft-deleted flag — the Manage-Charts popup (includeDeleted) renders
+        // deleted rows struck-through in place at their original serial_no.
+        isDeleted: !!rest.deletedAt,
         // Priority is computed per viewer role (falls back to the stored value
         // only for the touched-today "Done" tab, where a finished chart may have
         // left every priority bucket). In the Finalized tab every row is, by
@@ -988,8 +1004,13 @@ async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
 
   // Priority itself is no longer nudged by milestone/status here — it is
   // computed per viewer from the chart's milestone/status/QC/received-date
-  // (see priority-rules.ts). The one exception is an explicit user override:
-  if (nextPriority) c.setManualPriority(nextPriority as Priority);
+  // (see priority-rules.ts). The one exception is an explicit user override —
+  // but only when it ACTUALLY changed: the detail/Modify-Charts form echoes the
+  // chart's existing `priority` even when the user didn't touch it, and applying
+  // an unchanged (often legacy/inert 'CRITICAL') value would resurrect it as an
+  // active manual pin (Bug C). Compare against the pre-save stored value; the
+  // FE's "sends it only when changed" contract is not trusted.
+  if (nextPriority && nextPriority !== prevPinPriority) c.setManualPriority(nextPriority as Priority);
 
   const saved = await this.charts.save(c);
   // Record any coder/auditor ownership change made by this save.
@@ -1645,8 +1666,14 @@ async allocationHistory(id: number) {
         if (dto.allocation.action === 'ALLOCATE_CODING' && dto.allocation.assigneeId) {
           const from = c.allocatedCoderId ?? null;
           c.allocatedCoderId = dto.allocation.assigneeId;
-          // Fresh coder allocation → LOW priority bucket (mirrors worklist-allocate).
-          c.markCoderAllocated();
+          // Re-stamp the allocation timestamp ONLY when the coder actually
+          // changes. The Modify-Charts form echoes the existing coder, and
+          // re-stamping on a no-op reallocation makes old charts falsely read as
+          // "allocated today" (Defect A). markCoderAllocated no longer touches
+          // priority — it only sets last_coder_allocated_at.
+          // Number() both sides: allocated_coder_id is a bigint TypeORM returns
+          // as a string, so a raw !== against the numeric assigneeId is always true.
+          if (Number(from) !== Number(dto.allocation.assigneeId)) c.markCoderAllocated();
           // First coder allocation lifts the chart out of "Ready to allocate"
           // into the coding queue (mirrors the worklist-allocate path).
           if (c.milestone === ChartMilestone.READY_TO_ALLOCATE) c.setMilestone(ChartMilestone.READY_TO_CODE);
@@ -1663,14 +1690,22 @@ async allocationHistory(id: number) {
         if (dto.allocation.action === 'REALLOCATE_TO_ORIGINAL_CODER') {
           const from = c.allocatedCoderId ?? null;
           c.allocatedCoderId = c.originalCoderId ?? c.allocatedCoderId;
-          c.markCoderAllocated();
+          // Only re-stamp when ownership actually changed (Defect A) — a chart
+          // already with its original coder is a no-op reallocation. Number()
+          // both sides: allocated_coder_id is a bigint TypeORM returns as string.
+          if (Number(from) !== Number(c.allocatedCoderId)) c.markCoderAllocated();
           pending.push({ c, role: 'CODER', from, source: 'BULK_REALLOCATE_TO_ORIGINAL' });
         }
       }
       // A bulk priority choice is a manual override (§7.3): it pins the chart to
       // that bucket until the allocated user touches it, then reverts to the
       // computed default. Applied last so it wins over anything above.
-      if (dto.priority) {
+      // Only when it ACTUALLY changed the stored value: the Modify-Charts form
+      // echoes each chart's existing `priority`, and re-applying an unchanged
+      // (often legacy/inert 'CRITICAL') value would resurrect it as an active
+      // pin — the bulk echo that has repeatedly refilled the CRITICAL bucket
+      // (Bug C). The FE "only when changed" contract is not trusted.
+      if (dto.priority && dto.priority !== c.priority) {
         pinPending.push({ c, prevAt: c.manualPriorityAt ?? null, prevPr: c.priority ?? null });
         c.setManualPriority(dto.priority as Priority);
       }
@@ -1738,17 +1773,19 @@ async allocationHistory(id: number) {
   }
 
   /**
-   * Soft-delete the given charts AND clean up the worklist they belong to so
-   * the page doesn't show stale totals or serial-number gaps:
+   * Soft-delete the given charts and refresh the worklist's counter:
    *   1. Soft-delete the rows (deleted_at = now()).
-   *   2. Recompute `worklists.total_charts` from the actual row count — the
+   *   2. Recompute `worklists.total_charts` from the surviving row count — the
    *      column was set at creation and never decremented, which is why the
    *      detail card kept showing "12" after deleting 2 of 12.
-   *   3. Re-sequence the surviving charts' serial_no to 1..N so the
-   *      Allocate / Manage Charts UIs aren't full of holes. The unique
-   *      constraint on (worklist_id, serial_no) means we have to bounce
-   *      through negative numbers first.
-   * All three steps run in one transaction; an early failure rolls back.
+   *
+   * We deliberately DO NOT re-sequence the survivors' serial_no. A deleted
+   * chart keeps its serial as a permanent GAP: the Manage-Charts popup renders
+   * it struck-through in place and the worklist detail lists the deleted
+   * serials. The old re-sequence (renumber survivors to 1..N via a negative
+   * bounce) both erased those gaps AND tripped the (worklist_id, serial_no)
+   * unique constraint mid-renumber — the constraint-violation bug this fixes.
+   * Both steps run in one transaction; an early failure rolls back.
    */
   async bulkDelete(chartIds: number[]) {
     if (!chartIds || chartIds.length === 0) return { deleted: 0 };
@@ -1757,8 +1794,7 @@ async allocationHistory(id: number) {
       const cRepo = manager.getRepository(Chart);
       const wRepo = manager.getRepository(Worklist);
 
-      // Snapshot the worklists touched by this delete so we know which ones
-      // need their counter + serials reflowed.
+      // Snapshot the worklists touched by this delete so we can refresh counters.
       const affected = await cRepo.find({
         where: { id: In(chartIds) },
         select: ['id', 'worklistId'],
@@ -1768,54 +1804,8 @@ async allocationHistory(id: number) {
       const result = await cRepo.softDelete(chartIds);
 
       for (const worklistId of affectedWorklistIds) {
-        // Step 1: park every soft-deleted chart in this worklist (including
-        // ones from prior delete operations) at a far-negative serial. The
-        // (worklist_id, serial_no) unique constraint is not partial — it
-        // applies even to deleted_at IS NOT NULL rows — so if we left these
-        // sitting at, say, serial_no = 3, the re-sequence below would try
-        // to assign 3 to a survivor and Postgres would raise a unique-
-        // constraint violation. ROW_NUMBER() guarantees the parked values
-        // are unique among themselves; the 1_000_000 offset keeps them well
-        // clear of any survivor (worklists never reach that size in
-        // practice and survivors only ever reach the row count, not 1M+).
-        await manager.query(
-          `WITH parked AS (
-             SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn
-               FROM charts
-              WHERE worklist_id = $1 AND deleted_at IS NOT NULL
-           )
-           UPDATE charts SET serial_no = -(1000000 + parked.rn)
-             FROM parked
-            WHERE charts.id = parked.id`,
-          [worklistId],
-        );
-        // Step 2: bounce surviving charts into negative space too, so we
-        // can safely re-issue 1..N without temporarily colliding with their
-        // own current positives.
-        await manager.query(
-          `UPDATE charts
-             SET serial_no = -serial_no
-           WHERE worklist_id = $1 AND deleted_at IS NULL`,
-          [worklistId],
-        );
-        // Step 3: re-issue 1..N in the original order (smallest old serial
-        // first → smallest new serial). We sort DESC over the now-negative
-        // numbers because -1 (was 1) is the largest negative; flip the
-        // direction so the chart that used to be #1 stays #1 if it survived.
-        await manager.query(
-          `WITH ranked AS (
-             SELECT id, ROW_NUMBER() OVER (ORDER BY serial_no DESC) AS new_serial
-               FROM charts
-              WHERE worklist_id = $1 AND deleted_at IS NULL
-           )
-           UPDATE charts SET serial_no = ranked.new_serial
-             FROM ranked
-            WHERE charts.id = ranked.id`,
-          [worklistId],
-        );
-        // Step 4: refresh the stored counter so it never drifts above the
-        // real row count. The list/detail endpoints still take MAX(declared,
-        // rowCount), so we need this column to come down on its own.
+        // Refresh the stored counter to the surviving (active) row count so
+        // "total charts" reflects real work; count() excludes soft-deleted rows.
         const rowCount = await cRepo.count({ where: { worklistId } });
         await wRepo.update({ id: worklistId }, { totalCharts: rowCount });
       }

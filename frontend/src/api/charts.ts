@@ -29,6 +29,9 @@ export interface ChartListParams {
   // Filter fields below accept a single value (other callers) OR an array
   // (the multi-select chart filters). The backend matches with IN(...).
   worklistId?: number | string | Array<number | string>;
+  /** Manage-Charts opt-in: include soft-deleted charts (shown struck-through in
+   * place). Only honoured server-side for a worklist-scoped list. */
+  includeDeleted?: boolean;
   serialFrom?: number;
   serialTo?: number;
   allocatedUserId?: number | string | Array<number | string>;

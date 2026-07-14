@@ -251,6 +251,22 @@ export class WorklistsService {
       .getCount();
     const aiNone = Math.max(0, rowCount - aiQueued - aiProcessing - aiErrored - aiDone);
 
+    // Serial numbers of soft-deleted charts in this worklist — surfaced so the
+    // detail page can show which serials were deleted (we no longer re-sequence
+    // survivors on delete, so these are permanent gaps). withDeleted() lifts the
+    // default soft-delete filter; we then keep only the deleted rows.
+    const deletedRows = await this.charts.createQueryBuilder('c')
+      .withDeleted()
+      .select('c.serial_no', 'serialNo')
+      .where('c.worklist_id = :id', { id })
+      .andWhere('c.deleted_at IS NOT NULL')
+      // Exclude legacy negative-parked deletes (old re-sequence code) — their
+      // real serial is lost, so they aren't meaningful "gaps".
+      .andWhere('c.serial_no >= 1')
+      .orderBy('c.serial_no', 'ASC')
+      .getRawMany();
+    const deletedSerials = deletedRows.map((r) => Number(r.serialNo));
+
     return {
       id: w.id,
       worklistNumber: w.worklistNumber,
@@ -281,6 +297,10 @@ export class WorklistsService {
       totalCharts: w.totalCharts,
       netChange: w.netChange,
       documentsCount: Number(counts.documentsCount ?? 0),
+      // Serials of deleted charts (permanent gaps) + their count, for the
+      // detail page's "deleted serials" readout.
+      deletedSerials,
+      deletedCount: deletedSerials.length,
       chartSummary: {
         total,
         allocated,
@@ -355,12 +375,35 @@ export class WorklistsService {
         where: { worklistId: id, serialNo: In(wanted) },
         select: { serialNo: true },
       });
+      // `find` excludes soft-deleted rows, so a DELETED serial is "missing" here.
       const present = new Set(existing.map((c) => Number(c.serialNo)));
       const missing = wanted.filter((s) => !present.has(s));
       if (missing.length) {
-        issues.push(
-          `Range ${from}–${to}: serial${missing.length === 1 ? '' : 's'} ${formatMissingSerials(missing)} ${missing.length === 1 ? 'does' : 'do'} not exist (they may have been deleted).`,
-        );
+        // Split "missing" into deleted charts (soft-deleted rows still occupy
+        // the serial as a permanent gap — we no longer re-sequence) vs serials
+        // that never existed, so the manager gets a precise, actionable message.
+        // Either way the whole batch is rejected — deleted charts are never
+        // (re)allocated.
+        const deletedRows = await this.charts.createQueryBuilder('c')
+          .withDeleted()
+          .select('c.serial_no', 'serialNo')
+          .where('c.worklist_id = :id', { id })
+          .andWhere('c.deleted_at IS NOT NULL')
+          .andWhere('c.serial_no IN (:...missing)', { missing })
+          .getRawMany();
+        const deletedSet = new Set(deletedRows.map((r) => Number(r.serialNo)));
+        const deleted = missing.filter((s) => deletedSet.has(s));
+        const nonexistent = missing.filter((s) => !deletedSet.has(s));
+        if (deleted.length) {
+          issues.push(
+            `Range ${from}–${to} includes deleted serial${deleted.length === 1 ? '' : 's'} ${formatMissingSerials(deleted)} — deleted charts can't be allocated; narrow the range to exclude ${deleted.length === 1 ? 'it' : 'them'}.`,
+          );
+        }
+        if (nonexistent.length) {
+          issues.push(
+            `Range ${from}–${to}: serial${nonexistent.length === 1 ? '' : 's'} ${formatMissingSerials(nonexistent)} ${nonexistent.length === 1 ? 'does' : 'do'} not exist.`,
+          );
+        }
       }
     }
     if (issues.length) {
