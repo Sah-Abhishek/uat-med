@@ -1761,6 +1761,11 @@ function SelfAllocateConfirm({
   onComplete: () => void;
 }) {
   const qc = useQueryClient();
+  const user = useAuth((s) => s.user);
+  // Team-Lead / Manager self-allocate seizes BOTH slots; an auditor only the
+  // auditor slot. Either way, charts already allocated to others are reassigned
+  // (not skipped) — only charts someone is actively timing are skipped.
+  const takesBothSlots = user?.role === 'TEAMLEAD' || user?.role === 'MANAGER';
   const [result, setResult] = useState<SelfAllocateResult | null>(null);
   const mutation = useMutation({
     mutationFn: () => selfAllocateCharts(selectedIds.map(Number)),
@@ -1787,7 +1792,7 @@ function SelfAllocateConfirm({
         open={open && !result}
         onClose={onClose}
         onConfirm={() => mutation.mutate()}
-        message={`Allocate ${selectedIds.length} chart${selectedIds.length === 1 ? '' : 's'} to yourself? Charts someone else is actively working on will be skipped.`}
+        message={`Allocate ${selectedIds.length} chart${selectedIds.length === 1 ? '' : 's'} to yourself? Any chart already allocated to another user will be reassigned to you${takesBothSlots ? ' (taking over both the coder and auditor slots)' : ''}. Only charts someone is actively timing are skipped.`}
         variant="primary"
         confirmLabel="Allocate"
         cancelLabel="Cancel"

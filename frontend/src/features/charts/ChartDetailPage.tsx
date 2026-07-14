@@ -648,6 +648,21 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       setTakeoverError((err as { message?: string })?.message ?? 'Could not allocate this chart.');
     },
   });
+  // Takeover reassigns the chart AWAY from its current assignees: a Team-Lead /
+  // Manager grabs BOTH slots (coder + auditor), an auditor grabs the auditor
+  // slot. Spell out who gets displaced so it's never a silent surprise.
+  const takeoverTakesBoth = user?.role === 'TEAMLEAD' || user?.role === 'MANAGER';
+  const takeoverDisplaced = (takeoverTakesBoth
+    ? [
+        chart.allocatedCoderName ? `${chart.allocatedCoderName} (coder)` : null,
+        chart.allocatedAuditorName ? `${chart.allocatedAuditorName} (auditor)` : null,
+      ]
+    : [chart.allocatedAuditorName ? `${chart.allocatedAuditorName} (auditor)` : null]
+  ).filter(Boolean).join(' and ');
+  const takeoverMessage =
+    `Self-allocating assigns ${takeoverTakesBoth ? 'both the coder and auditor slots' : 'the auditor slot'} to you` +
+    (takeoverDisplaced ? `, reassigning this chart away from ${takeoverDisplaced}` : '') +
+    `. It closes the read-only QA view and reopens the chart in editing mode so you can start the timer.`;
   // Team leads can audit in addition to coding; only block the audit section
   // when the viewer is neither role and the timer is off.
   const auditDisabled = !(isAuditor || isTeamLead || isManager) || !timerRunning || isPaused;
@@ -730,20 +745,23 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
   }, [hasAuditFeedback, setDraft]);
 
   // When the auditor flags QC "Feedback Provided" the chart is going back to the
-  // coder for rework — default the Audit-section "Allocate to Coder" to the
-  // chart's ORIGINAL coder (the one who held it before audit; `originalCoderId`
-  // is stamped once at first allocation and never overwritten). Fill only when
-  // the field is empty so a deliberate pick is never clobbered, and use setDraft
-  // (not update) so seeding the default never marks the form dirty on its own —
-  // the auditor's QC change already did.
+  // coder for rework — default the Audit-section "Allocate to Coder" to the coder
+  // who ACTUALLY worked it: the chart's current allocated coder (the coder slot
+  // isn't cleared when an auditor is assigned, so it still holds whoever finished
+  // coding). Fall back to the first-ever coder (`originalCoderId`) only if the
+  // slot is somehow empty. Preferring the current coder avoids silently yanking a
+  // chart that was reassigned mid-stream back to the first-ever coder. Fill only
+  // when the field is empty so a deliberate pick is never clobbered, and use
+  // setDraft (not update) so seeding the default never marks the form dirty on
+  // its own — the auditor's QC change already did.
   useEffect(() => {
     if (!isAuditStageChart || draft.auditorQcStatus !== 'Feedback Provided') return;
-    const originalCoder = chart.originalCoderId ?? chart.allocatedCoderId;
-    if (!originalCoder) return;
+    const reworkCoder = chart.allocatedCoderId ?? chart.originalCoderId;
+    if (!reworkCoder) return;
     setDraft((d) =>
-      d.auditAllocateCoder ? d : { ...d, auditAllocateCoder: String(originalCoder) },
+      d.auditAllocateCoder ? d : { ...d, auditAllocateCoder: String(reworkCoder) },
     );
-  }, [isAuditStageChart, draft.auditorQcStatus, chart.originalCoderId, chart.allocatedCoderId, setDraft]);
+  }, [isAuditStageChart, draft.auditorQcStatus, chart.allocatedCoderId, chart.originalCoderId, setDraft]);
 
   const cfg = useFieldConfig(chart);
 
@@ -1246,7 +1264,7 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         open={takeoverOpen}
         onClose={() => setTakeoverOpen(false)}
         onConfirm={() => takeoverMut.mutate()}
-        message="This chart isn't allocated to you. Self-allocating assigns it to you, closes the read-only QA view, and reopens it in editing mode so you can start the timer and work on it."
+        message={takeoverMessage}
         confirmLabel="Self-allocate & open"
         cancelLabel="Cancel"
         variant="primary"
