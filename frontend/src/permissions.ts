@@ -19,7 +19,10 @@ export const PERMISSIONS = {
   'user.deactivate': ['TEAMLEAD', 'MANAGER'],
   'user.changeRole': ['TEAMLEAD', 'MANAGER'],
   'user.list': ['TEAMLEAD', 'MANAGER'],
-  'config.view': ['TEAMLEAD', 'MANAGER'],
+  // Auditors get read-only access to the Configurations page (view lists, no
+  // edits). The page renders read-only when `config.edit` is false, and the
+  // backend already allows AUDITOR on every config GET; writes stay TEAMLEAD-only.
+  'config.view': ['TEAMLEAD', 'MANAGER', 'AUDITOR'],
   'config.edit': ['TEAMLEAD', 'MANAGER'],
   'dashboard.team': ['TEAMLEAD', 'MANAGER'],
   'reports.run': ['AUDITOR', 'TEAMLEAD', 'MANAGER'],
