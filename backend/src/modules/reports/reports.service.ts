@@ -175,10 +175,20 @@ const FIELDS: FieldDef[] = [
   // sort. Substring-filterable so "I10" matches any chart carrying that code.
   { key: 'secondaryDiagnoses',label: 'Secondary Dx (Sdx)', sql: `(SELECT string_agg(code, ', ' ORDER BY code) FROM (SELECT trim(x) AS code FROM custom_field_configs cfc CROSS JOIN LATERAL regexp_split_to_table(COALESCE(c.custom_fields->>(cfc.id::text),''), ',') AS x WHERE cfc.location_id = wl.location_id AND cfc.name ILIKE 'Secondary Diagnosis' UNION SELECT trim(e->>'code') FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.custom_fields#>'{aiPrediction,secondary}')='array' THEN c.custom_fields#>'{aiPrediction,secondary}' ELSE '[]'::jsonb END) AS e) codes WHERE code IS NOT NULL AND code <> '')`, filterable: true, sortable: false, filterKind: 'text' },
   { key: 'emLevel',           label: 'E/M Level',          sql: 'c.em_level',                               filterable: true,  sortable: true },
-  // Modifier — the chart's final modifier codes, from submitted code decisions
-  // (code_type = MODIFIER). Uses the edited code when the decision was EDITED,
-  // else the original value; rejected modifiers are excluded. Substring filter.
-  { key: 'modifier',          label: 'Modifier',           sql: `(SELECT string_agg(DISTINCT COALESCE(NULLIF(cd.edited_code, ''), cd.code_value), ', ') FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.code_type = 'MODIFIER' AND cd.decision <> 'REJECTED')`, filterable: true, sortable: false, filterKind: 'text' },
+  // Modifier — read from the per-location "Modifier" custom field, which is where
+  // coders actually record modifiers. This previously read chart_code_decisions
+  // (code_type = MODIFIER) and was blank on every chart: MODIFIER is a valid
+  // CodeReviewType, but the Review/Edit modal only ever writes PRIMARY /
+  // SECONDARY / PROCEDURE decisions (see ReviewEditModal codeTypeToCategory —
+  // EM_LEVEL and MODIFIER map to null and are skipped), so no MODIFIER row has
+  // ever been written. Same shape as the `pos` / `providerName` columns below.
+  // The field is a free-text input at some locations and a multi-select (jsonb
+  // array) at others, so handle both: an array is joined to "FS, AI" rather than
+  // exported as raw JSON. Values are user-entered and messy ("0", "NA", "-") —
+  // exported as-is apart from stripping whitespace. btrim with an explicit
+  // character set, not trim(): plain trim() strips spaces only, and real values
+  // carry trailing newlines (e.g. "25\n" from the form). Substring filter.
+  { key: 'modifier',          label: 'Modifier',           sql: `(SELECT CASE WHEN jsonb_typeof(c.custom_fields->(cfc.id::text)) = 'array' THEN (SELECT string_agg(btrim(t.val, E' \\t\\r\\n'), ', ') FROM jsonb_array_elements_text(c.custom_fields->(cfc.id::text)) AS t(val) WHERE btrim(t.val, E' \\t\\r\\n') <> '') ELSE NULLIF(btrim(c.custom_fields->>(cfc.id::text), E' \\t\\r\\n'), '') END FROM custom_field_configs cfc WHERE LOWER(cfc.name) = 'modifier' AND cfc.location_id = wl.location_id LIMIT 1)`, filterable: true, sortable: false, filterKind: 'text' },
   // Procedure Codes — the chart's final submitted procedure codes, from code
   // decisions (code_type = PROCEDURE). Uses the edited code when the decision was
   // EDITED, else the original value; rejected procedures are excluded. Mirrors the
