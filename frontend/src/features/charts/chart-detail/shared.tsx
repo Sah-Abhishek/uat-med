@@ -168,6 +168,15 @@ export function CodeSearchListInput({
   const [debounced, setDebounced] = useState('');
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  // Portalled + fixed, because this field can sit last in its CollapsibleCard —
+  // and that card is `overflow-hidden`, which would clip an in-flow dropdown.
+  // When flipping above the input we pin `bottom` rather than `top`: the panel's
+  // height varies with the number of hits, so a computed `top` would leave a
+  // short list floating away from the field.
+  const [position, setPosition] = useState<
+    { top?: number; bottom?: number; left: number; width: number; maxHeight: number } | null
+  >(null);
 
   const trimmed = text.trim();
   const canSuggest = !readOnly && trimmed.length >= 2;
@@ -187,16 +196,53 @@ export function CodeSearchListInput({
   });
   const hits = q.data?.codes ?? [];
   const showDropdown = open && canSuggest && hits.length > 0;
+  const showEmpty = open && canSuggest && !q.isFetching && hits.length === 0;
+  const showPanel = showDropdown || showEmpty;
 
-  // Close the dropdown when focus/click leaves the widget.
+  // Anchor the panel to the input in viewport coords, flipping above when there
+  // isn't room below (this field is often the last one on the card).
+  useLayoutEffect(() => {
+    if (!showPanel) return;
+    const PANEL_MAX_H = 256;
+    const MIN_USABLE_H = 120;
+    const reposition = () => {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom - 8;
+      const spaceAbove = rect.top - 8;
+      const flipUp = spaceBelow < MIN_USABLE_H && spaceAbove > spaceBelow;
+      setPosition({
+        ...(flipUp
+          ? { bottom: window.innerHeight - rect.top + 4 }
+          : { top: rect.bottom + 4 }),
+        left: rect.left,
+        width: rect.width,
+        // Never spill past the viewport edge; scroll inside instead.
+        maxHeight: Math.min(PANEL_MAX_H, Math.max(MIN_USABLE_H, flipUp ? spaceAbove : spaceBelow)),
+      });
+    };
+    reposition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [showPanel]);
+
+  // Close when the click lands outside BOTH the input and the portalled panel —
+  // the panel is no longer a DOM child of wrapRef, so it must be checked too.
   useEffect(() => {
-    if (!showDropdown) return;
+    if (!showPanel) return;
     const onDoc = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
-  }, [showDropdown]);
+  }, [showPanel]);
 
   const pick = (hit: { code: string; description: string }) => {
     if (!values.some((v) => v.code.toLowerCase() === hit.code.toLowerCase())) {
@@ -259,29 +305,40 @@ export function CodeSearchListInput({
             onFocus={() => setOpen(true)}
             placeholder={placeholder ?? 'Type a code (min 2 chars)…'}
           />
-          {showDropdown && (
-            <div className="absolute z-30 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-line bg-surface shadow-card">
-              {hits.map((hit) => (
-                <button
-                  key={hit.code}
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(hit);
-                  }}
-                  className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-surface-sunken"
-                >
-                  <span className="font-mono font-semibold text-xs text-ink shrink-0">{hit.code}</span>
-                  <span className="text-xs text-ink-muted">{hit.description}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {open && canSuggest && !q.isFetching && hits.length === 0 && (
-            <div className="absolute z-30 mt-1 w-full rounded-lg border border-line bg-surface shadow-card px-3 py-2 text-xs text-ink-subtle">
-              No matching codes
-            </div>
-          )}
+          {showPanel && position && typeof document !== 'undefined' &&
+            createPortal(
+              <div
+                ref={popRef}
+                style={{
+                  top: position.top,
+                  bottom: position.bottom,
+                  left: position.left,
+                  width: position.width,
+                  maxHeight: position.maxHeight,
+                }}
+                className="fixed z-[100] overflow-auto rounded-lg border border-line bg-surface shadow-pop dark:shadow-pop-dark"
+              >
+                {showDropdown ? (
+                  hits.map((hit) => (
+                    <button
+                      key={hit.code}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        pick(hit);
+                      }}
+                      className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-surface-sunken"
+                    >
+                      <span className="font-mono font-semibold text-xs text-ink shrink-0">{hit.code}</span>
+                      <span className="text-xs text-ink-muted">{hit.description}</span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-3 py-2 text-xs text-ink-subtle">No matching codes</div>
+                )}
+              </div>,
+              document.body,
+            )}
         </div>
       )}
     </div>
