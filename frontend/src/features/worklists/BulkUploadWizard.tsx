@@ -478,10 +478,15 @@ function Step1ExcelUpload({
           <Button
             onClick={() => file && importMut.mutate(file)}
             loading={importMut.isPending}
-            disabled={!preview || preview.validRows === 0}
+            // A duplicate chart # makes the backend refuse the whole file, so
+            // there's nothing to import until the file is fixed — block here
+            // rather than let the click come back as a 409.
+            disabled={!preview || preview.validRows === 0 || preview.duplicateRows > 0}
             rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
           >
-            Import {preview ? `${preview.validRows} chart${preview.validRows === 1 ? '' : 's'}` : 'Charts'}
+            {preview && preview.duplicateRows > 0
+              ? 'Resolve duplicates to import'
+              : `Import ${preview ? `${preview.validRows} chart${preview.validRows === 1 ? '' : 's'}` : 'Charts'}`}
           </Button>
         }
       />
@@ -492,8 +497,21 @@ function Step1ExcelUpload({
 function PreviewTable({ preview }: { preview: BulkImportPreview }) {
   const ok = preview.validRows;
   const bad = preview.totalRows - preview.validRows;
+  const dupes = preview.duplicateRows;
   return (
     <div>
+      {dupes > 0 && (
+        <div className="mb-3 flex items-start gap-2 px-3 py-2 rounded-card bg-danger-soft text-danger text-[13px]">
+          <AlertCircle className="w-4 h-4 mt-px shrink-0" />
+          <span>
+            <strong>
+              {dupes} duplicate chart {dupes === 1 ? 'number' : 'numbers'}
+            </strong>{' '}
+            — nothing will be imported until {dupes === 1 ? 'it is' : 'they are'} removed or corrected. Chart numbers
+            are listed against each row below.
+          </span>
+        </div>
+      )}
       <div className="flex items-center gap-3 mb-3 text-[13px]">
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-pill bg-success-soft text-success font-semibold">
           <CheckCircle2 className="w-3.5 h-3.5" /> {ok} valid

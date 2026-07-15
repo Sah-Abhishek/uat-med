@@ -22,8 +22,8 @@ export class ConfigurationsController {
 
   // 17.2 Clients & locations
   @Get('clients') @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER) listClients(@Query('includeInactive') includeInactive?: string) { return this.svc.listClients(includeInactive === 'true'); }
-  @Post('clients') @Roles(Role.TEAMLEAD) createClient(@Body() body: { name: string; code?: string; isActive?: boolean }) { return this.svc.createClient(body); }
-  @Patch('clients/:id') @Roles(Role.TEAMLEAD) updateClient(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string; code?: string; isActive?: boolean }) { return this.svc.updateClient(id, body); }
+  @Post('clients') @Roles(Role.TEAMLEAD) createClient(@Body() body: { name: string; code?: string; isActive?: boolean; allowDuplicateChartNumbers?: boolean }) { return this.svc.createClient(body); }
+  @Patch('clients/:id') @Roles(Role.TEAMLEAD) updateClient(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string; code?: string; isActive?: boolean; allowDuplicateChartNumbers?: boolean }) { return this.svc.updateClient(id, body); }
   @Delete('clients/:id') @Roles(Role.TEAMLEAD) deleteClient(@Param('id', ParseIntPipe) id: number) { return this.svc.deactivateClient(id); }
   @Delete('clients/:id/cascade') @Roles(Role.TEAMLEAD) cascadeDeleteClient(@Param('id', ParseIntPipe) id: number) { return this.svc.cascadeDeleteClient(id); }
 

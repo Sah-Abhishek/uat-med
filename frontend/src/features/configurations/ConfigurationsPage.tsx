@@ -929,7 +929,9 @@ function AddClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
   const { register, handleSubmit } = useForm<{ name: string }>({ defaultValues: { name: '' } });
   const [err, setErr] = useState<string | null>(null);
   const m = useMutation({
-    mutationFn: (d: { name: string }) => createClient({ ...d, isActive: true }),
+    // New clients start on the strict chart-number rule; Edit Client flips it
+    // for the few clients that re-use numbers across dates of service.
+    mutationFn: (d: { name: string }) => createClient({ ...d, isActive: true, allowDuplicateChartNumbers: false }),
     onSuccess: () => {
       onSaved();
       onClose();
@@ -3479,13 +3481,18 @@ function EditClientModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { register, handleSubmit, control } = useForm<{ name: string; code: string; isActive: boolean }>({
-    defaultValues: { name: client.name, code: client.code ?? '', isActive: client.isActive },
+  const { register, handleSubmit, control } = useForm<{ name: string; code: string; isActive: boolean; allowDuplicateChartNumbers: boolean }>({
+    defaultValues: {
+      name: client.name,
+      code: client.code ?? '',
+      isActive: client.isActive,
+      allowDuplicateChartNumbers: client.allowDuplicateChartNumbers,
+    },
   });
   const [err, setErr] = useState<string | null>(null);
   const m = useMutation({
-    mutationFn: (d: { name: string; code: string; isActive: boolean }) =>
-      updateClient(client.id, { name: d.name, code: d.code, isActive: d.isActive }),
+    mutationFn: (d: { name: string; code: string; isActive: boolean; allowDuplicateChartNumbers: boolean }) =>
+      updateClient(client.id, { name: d.name, code: d.code, isActive: d.isActive, allowDuplicateChartNumbers: d.allowDuplicateChartNumbers }),
     onSuccess: () => { onSaved(); onClose(); },
     onError: (e) => setErr((e as unknown as ApiErrorShape).message),
   });
@@ -3510,6 +3517,18 @@ function EditClientModal({
               onChange={field.onChange}
               label="Active"
               description="Inactive clients are hidden from pickers and creation flows."
+            />
+          )}
+        />
+        <Controller
+          control={control}
+          name="allowDuplicateChartNumbers"
+          render={({ field }) => (
+            <Switch
+              checked={field.value}
+              onChange={field.onChange}
+              label="Allow repeated chart numbers on a different date of service"
+              description="Off: a chart number may be used only once for this client. On: the same chart number may repeat, but each occurrence needs a different date of service. Either way, the exact same chart number and date of service can never be entered twice."
             />
           )}
         />

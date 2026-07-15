@@ -39,6 +39,7 @@ import {
 } from './ai-predictor.service';
 import { DocumentStorageService } from './document-storage.service';
 import { DocumentConversionService } from './document-conversion.service';
+import { ChartNumberService } from './chart-number.service';
 
 /** Allowed milestone transitions (see §21.2 of the spec). */
 const TRANSITIONS: Record<ChartMilestone, ChartMilestone[]> = {
@@ -177,6 +178,7 @@ export class ChartsService {
     private readonly conversion: DocumentConversionService,
     private readonly aiGateway: AiGatewayClient,
     private readonly config: ConfigService,
+    private readonly chartNumbers: ChartNumberService,
   ) {}
 
   /** Read the encounter ID we previously persisted from the AI pipeline,
@@ -875,6 +877,21 @@ export class ChartsService {
 async update(id: number, dto: UpdateChartDto, user?: AuthenticatedUser) {
   const c = await this.charts.findOne({ where: { id } });
   if (!c) throw new NotFoundException();
+
+  // A hand-edit must not create the duplicate the import path would have
+  // refused. DOS matters as much as the number here: on a client that permits
+  // repeated chart numbers, what keeps a repeat legal IS the differing DOS, so
+  // moving a chart's DOS onto its twin's is just as much a duplicate. Unlike
+  // bulk import there's no row to skip — one deliberate edit gets a hard error.
+  const chartNoChanged = dto.chartNo !== undefined && (dto.chartNo ?? '').trim() !== (c.chartNo ?? '').trim();
+  const dosChanged = dto.dos !== undefined && (dto.dos ?? '') !== (c.dos ?? '');
+  if (chartNoChanged || dosChanged) {
+    const nextChartNo = dto.chartNo !== undefined ? dto.chartNo : c.chartNo;
+    const nextDos = dto.dos !== undefined ? dto.dos : c.dos;
+    const checker = await this.chartNumbers.forChart(id, [nextChartNo]);
+    const reason = checker.check(nextChartNo, nextDos);
+    if (reason) throw new ConflictException({ error: { code: 'conflict', field: 'chartNo', message: reason } });
+  }
 
   // Allocation audit: remember who held each slot BEFORE this save so we can log
   // any coder/auditor handoff (incl. reallocation) with the acting user below.

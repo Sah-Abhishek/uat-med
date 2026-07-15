@@ -90,6 +90,10 @@ export interface BulkPreviewRow {
 export interface BulkImportPreview {
   totalRows: number;
   validRows: number;
+  /** Rows whose chart # duplicates a live chart or an earlier row in this file.
+   * Any duplicate blocks the whole import (the backend refuses the file), so the
+   * wizard disables Import while this is > 0 rather than letting it 409. */
+  duplicateRows: number;
   rows: BulkPreviewRow[];
   errors: Array<{ row: number; field?: string; message: string }>;
 }

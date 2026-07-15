@@ -23,6 +23,9 @@ export interface Client {
   name: string;
   code?: string;
   isActive: boolean;
+  /** When true, this client may re-use a chart number across DIFFERENT dates of
+   * service. Default false = chart numbers must be unique within the client. */
+  allowDuplicateChartNumbers: boolean;
   locations?: Location[];
 }
 

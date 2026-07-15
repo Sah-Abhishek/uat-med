@@ -10,7 +10,9 @@ import { AiPipelineWatcher } from './ai-pipeline-watcher.service';
 import { ManualPinClearService } from './manual-pin-clear.service';
 import { DocumentStorageService } from './document-storage.service';
 import { DocumentConversionService } from './document-conversion.service';
+import { ChartNumberService } from './chart-number.service';
 import { Chart } from '../../entities/chart.entity';
+import { Client } from '../../entities/client.entity';
 import { ChartAllocation } from '../../entities/chart-allocation.entity';
 import { ChartAllocationEvent } from '../../entities/chart-allocation-event.entity';
 import { ChartFeedback } from '../../entities/chart-feedback.entity';
@@ -24,13 +26,13 @@ import { User } from '../../entities/user.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Chart, ChartAllocation, ChartAllocationEvent, ChartFeedback, ChartCodeDecision, ChartCodeAudit, ChartCodeDecisionDraft, ChartTimeLog, CodeReviewReason, Worklist, User]),
+    TypeOrmModule.forFeature([Chart, ChartAllocation, ChartAllocationEvent, ChartFeedback, ChartCodeDecision, ChartCodeAudit, ChartCodeDecisionDraft, ChartTimeLog, CodeReviewReason, Worklist, User, Client]),
     // memoryStorage keeps file bytes in RAM so we can stream them straight to
     // the ICD gateway without touching disk. 50 MB matches the gateway limit.
     MulterModule.register({ storage: memoryStorage() }),
   ],
   controllers: [ChartsController],
-  providers: [ChartsService, AiPredictorService, AiPipelineWatcher, ManualPinClearService, DocumentStorageService, DocumentConversionService],
-  exports: [DocumentStorageService, AiPredictorService, DocumentConversionService],
+  providers: [ChartsService, AiPredictorService, AiPipelineWatcher, ManualPinClearService, DocumentStorageService, DocumentConversionService, ChartNumberService],
+  exports: [DocumentStorageService, AiPredictorService, DocumentConversionService, ChartNumberService],
 })
 export class ChartsModule {}

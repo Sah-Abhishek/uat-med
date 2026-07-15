@@ -18,6 +18,7 @@ import { ChartMilestone, ChartStatus, Priority } from '../../common/enums';
 import { DocumentStorageService } from '../charts/document-storage.service';
 import { DocumentConversionService } from '../charts/document-conversion.service';
 import { AiPredictorService, type ReportType, type InboundFile } from '../charts/ai-predictor.service';
+import { ChartNumberService, type ChartNumberChecker } from '../charts/chart-number.service';
 import { CreateWorklistDto } from './dto/create-worklist.dto';
 import { AddChartsDto } from './dto/add-charts.dto';
 
@@ -37,6 +38,13 @@ interface ParsedRow {
 export interface BulkImportPreview {
   totalRows: number;
   validRows: number;
+  /**
+   * Rows refused because their chart # duplicates a live chart (or an earlier
+   * row in this file). Called out separately from ordinary validation errors
+   * because it's the one issue that blocks the ENTIRE import rather than just
+   * skipping the row — the wizard uses it to disable the Import button.
+   */
+  duplicateRows: number;
   rows: ParsedRow[];
   errors: Array<{ row: number; field?: string; message: string }>;
 }
@@ -148,6 +156,7 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
     private readonly storage: DocumentStorageService,
     private readonly conversion: DocumentConversionService,
     private readonly aiPredictor: AiPredictorService,
+    private readonly chartNumbers: ChartNumberService,
   ) {}
 
   onModuleInit() {
@@ -323,6 +332,11 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
     if (!file) throw new BadRequestException({ error: { code: 'bad_request', message: 'No file uploaded.' } });
 
     const { rows, headerErrors } = await this.parseExcel(file);
+    // Surface duplicate chart numbers here, not just at import time, so the team
+    // lead sees exactly which rows will be refused before committing the upload.
+    const checker = await this.chartNumbers.forWorklist(worklistId, rows.map((r) => r.chartNo));
+    const duplicateRows = this.flagDuplicateChartNos(rows, checker);
+
     const errors: BulkImportPreview['errors'] = [...headerErrors];
     for (const r of rows) {
       for (const m of r.errors) errors.push({ row: r.row, message: m });
@@ -330,9 +344,77 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
     return {
       totalRows: rows.length,
       validRows: rows.filter((r) => r.errors.length === 0).length,
+      duplicateRows,
       rows,
       errors,
     };
+  }
+
+  /**
+   * Append a duplicate-chart-number reason to every row whose chart # is already
+   * taken for the client — or repeated earlier in this same file, which the DB
+   * snapshot alone can't see (that's what `remember` is for). Rows that already
+   * failed validation are skipped: they won't be imported regardless, and their
+   * chart # may well be the thing that's malformed.
+   */
+  private flagDuplicateChartNos(rows: ParsedRow[], checker: ChartNumberChecker): number {
+    let flagged = 0;
+    for (const r of rows) {
+      if (r.errors.length > 0) continue;
+      const reason = checker.check(r.chartNo, r.dos);
+      if (reason) {
+        r.errors.push(reason);
+        flagged += 1;
+      } else {
+        checker.remember(r.chartNo, r.dos);
+      }
+    }
+    return flagged;
+  }
+
+  /**
+   * Refuse an ENTIRE batch if any row carries a duplicate chart number, naming
+   * every offender so the file can be fixed in one pass.
+   *
+   * All-or-nothing is deliberate. Importing the clean rows and skipping the rest
+   * leaves the team lead reconciling which of 500 rows actually landed, and a
+   * re-upload of the corrected file would then trip over the rows that did — so
+   * a duplicate stops the whole upload and nothing is written.
+   *
+   * Rows that already failed validation are ignored here: they can't be imported
+   * anyway, and their chart # may be the malformed field.
+   */
+  private assertNoDuplicateChartNos(
+    candidates: Array<{ row: number; chartNo?: string; dos?: string; errors?: string[] }>,
+    checker: ChartNumberChecker,
+    nothingHappened: string,
+  ): void {
+    const dupes: Array<{ row: number; chartNo: string; locus: string }> = [];
+    for (const c of candidates) {
+      if (c.errors && c.errors.length > 0) continue;
+      if (checker.check(c.chartNo, c.dos)) {
+        // Capture the locus now — `remember()` for a later row would widen it.
+        dupes.push({ row: c.row, chartNo: (c.chartNo ?? '').trim(), locus: checker.locus(c.chartNo) });
+      } else {
+        checker.remember(c.chartNo, c.dos);
+      }
+    }
+    if (dupes.length === 0) return;
+
+    const SHOWN = 10;
+    const list = dupes
+      .slice(0, SHOWN)
+      .map((d) => `${d.chartNo} (row ${d.row}${d.locus ? `, ${d.locus}` : ''})`)
+      .join('; ');
+    const more = dupes.length > SHOWN ? `; +${dupes.length - SHOWN} more` : '';
+    const head = dupes.length === 1 ? '1 duplicate chart number' : `${dupes.length} duplicate chart numbers`;
+    throw new ConflictException({
+      error: {
+        code: 'conflict',
+        field: 'chartNo',
+        message: `${nothingHappened} ${head}: ${list}${more}. ${checker.ruleSummary} Fix and try again.`,
+      },
+    });
   }
 
   /* ── Excel import (transactional insert) ───────────────── */
@@ -364,26 +446,18 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
         .getRawOne<{ max: string | number }>();
       let serial = Number(maxRow?.max ?? 0);
 
-      // Surface chart-number duplicates against existing rows in this worklist
-      // so the team lead doesn't silently double-import the same encounters.
-      const incomingChartNos = valid.map((r) => r.chartNo);
-      const existing = await cRepo
-        .createQueryBuilder('c')
-        .where('c.worklist_id = :w', { w: worklistId })
-        .andWhere('c.chart_no IN (:...nos)', { nos: incomingChartNos })
-        .getMany();
-      const existingSet = new Set(existing.map((c) => c.chartNo));
+      // Refuse chart numbers already taken anywhere under this CLIENT (not just
+      // this worklist — double-importing the same encounters into a second
+      // worklist is exactly the duplicate we're here to catch), and repeats
+      // within this one file. Any duplicate aborts the whole import.
+      const checker = await this.chartNumbers.forWorklist(worklistId, valid.map((r) => r.chartNo), { manager });
+      this.assertNoDuplicateChartNos(valid, checker, 'Nothing was imported.');
 
       const toInsert: Chart[] = [];
       const errors: BulkImportResult['errors'] = [];
       let skipped = 0;
 
       for (const r of valid) {
-        if (existingSet.has(r.chartNo)) {
-          skipped += 1;
-          errors.push({ row: r.row, field: 'chartNo', message: `Chart ${r.chartNo} already exists in this worklist — skipped.` });
-          continue;
-        }
         serial += 1;
         const c = cRepo.create({
           worklistId,
@@ -466,29 +540,21 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
         .getRawOne<{ max: string | number }>();
       let serial = Number(maxRow?.max ?? 0);
 
-      // Duplicate chart-#s are checked against existing rows in this worklist
-      // AND within this batch, so the same chart-# can't slip in twice.
-      const incomingChartNos = detailed.map((d) => d.chartNo).filter((n): n is string => !!n);
-      const existing = incomingChartNos.length
-        ? await cRepo
-            .createQueryBuilder('c')
-            .where('c.worklist_id = :w', { w: worklistId })
-            .andWhere('c.chart_no IN (:...nos)', { nos: incomingChartNos })
-            .getMany()
-        : [];
-      const seenChartNos = new Set(existing.map((c) => c.chartNo));
+      // Duplicate chart-#s are checked against every live chart under this
+      // CLIENT and within this batch, so the same chart-# can't slip in twice.
+      // Any duplicate rejects the whole submission — nothing is added.
+      const checker = await this.chartNumbers.forWorklist(worklistId, detailed.map((d) => d.chartNo), { manager });
+      this.assertNoDuplicateChartNos(
+        detailed.map((d, i) => ({ row: i + 1, chartNo: d.chartNo, dos: d.dos })),
+        checker,
+        'No charts were added.',
+      );
 
       const toInsert: Chart[] = [];
       const errors: BulkImportResult['errors'] = [];
       let skipped = 0;
 
       detailed.forEach((d, i) => {
-        if (d.chartNo && seenChartNos.has(d.chartNo)) {
-          skipped += 1;
-          errors.push({ row: i + 1, field: 'chartNo', message: `Chart ${d.chartNo} already exists in this worklist — skipped.` });
-          return;
-        }
-        if (d.chartNo) seenChartNos.add(d.chartNo);
         serial += 1;
         toInsert.push(
           cRepo.create({
@@ -841,6 +907,11 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
     // Worklist-number conflict short-circuits the transaction.
     const existing = await this.worklists.findOne({ where: { worklistNumber: dto.worklistNumber } });
     if (existing) throw new ConflictException({ error: { code: 'conflict', message: 'worklistNumber already exists.' } });
+
+    // Resolve chart-number duplicates against the target CLIENT *before* the
+    // worklist exists — a refused file must not leave an empty worklist behind.
+    const dupChecker = await this.chartNumbers.forClient(dto.clientId, valid.map((r) => r.chartNo));
+    this.assertNoDuplicateChartNos(valid, dupChecker, 'The worklist was not created and nothing was imported.');
 
     return this.ds.transaction(async (manager) => {
       const wRepo = manager.getRepository(Worklist);

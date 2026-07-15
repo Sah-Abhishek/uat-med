@@ -162,12 +162,13 @@ export class ConfigurationsService {
       name: c.name,
       code: c.code ?? '',
       isActive: c.isActive ?? true,
+      allowDuplicateChartNumbers: c.allowDuplicateChartNumbers ?? false,
       locations: (c as any).locations ?? [],
     }));
     return { items };
   }
 
-  async createClient(body: { name: string; code?: string; isActive?: boolean }) {
+  async createClient(body: { name: string; code?: string; isActive?: boolean; allowDuplicateChartNumbers?: boolean }) {
     const code = body.code?.trim();
     const client = this.clientsRepo.create({
       name: body.name,
@@ -176,12 +177,15 @@ export class ConfigurationsService {
       // Postgres permits many NULLs.
       code: code ? code : null,
       isActive: body.isActive ?? true,
+      // Strict chart-number uniqueness is the default; a new client only relaxes
+      // it if whoever created it deliberately said so.
+      allowDuplicateChartNumbers: body.allowDuplicateChartNumbers ?? false,
     });
     const saved = await this.clientsRepo.save(client);
     return { id: saved.id };
   }
 
-  async updateClient(id: number, body: { name?: string; code?: string; isActive?: boolean }) {
+  async updateClient(id: number, body: { name?: string; code?: string; isActive?: boolean; allowDuplicateChartNumbers?: boolean }) {
     const client = await this.clientsRepo.findOne({ where: { id } });
     if (!client) {
       throw new NotFoundException({ error: { code: 'not_found', message: `Client ${id} not found.` } });
@@ -190,6 +194,7 @@ export class ConfigurationsService {
     // Normalise empty code to NULL — see createClient (unique index on code).
     if (body.code !== undefined) client.code = body.code.trim() || null;
     if (body.isActive !== undefined) client.isActive = body.isActive;
+    if (body.allowDuplicateChartNumbers !== undefined) client.allowDuplicateChartNumbers = body.allowDuplicateChartNumbers;
     await this.clientsRepo.save(client);
     return { id: client.id };
   }
