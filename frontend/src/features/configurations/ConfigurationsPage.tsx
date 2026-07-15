@@ -31,6 +31,7 @@ import {
   listPrimarySpecialities,
   updateCustomChartField,
   deleteCustomChartField,
+  copyCustomChartFields,
   listHccFieldConfig,
   createHccField,
   updateHccField,
@@ -2049,6 +2050,7 @@ function ChartFieldsEditor({
   const [editingField, setEditingField] = useState<CustomChartField | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [specialityId, setSpecialityId] = useState<number | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
 
   const specs = useQuery({
     queryKey: ['configurations', 'primary-specialities', clientId],
@@ -2107,6 +2109,14 @@ function ChartFieldsEditor({
   return (
     <div className="space-y-6">
       {error && <div className="text-xs px-3 py-2 rounded-lg bg-danger-soft text-danger">{error}</div>}
+
+      {canEdit && (
+        <div className="flex justify-end">
+          <Button variant="ghost" size="sm" onClick={() => setCopyOpen(true)}>
+            Copy custom fields from another scope…
+          </Button>
+        </div>
+      )}
 
       {/* Primary Speciality scope picker */}
       <Card>
@@ -2333,7 +2343,135 @@ function ChartFieldsEditor({
           loading={deleteCustom.isPending}
         />
       )}
+
+      {copyOpen && (
+        <CopyCustomChartFieldsModal
+          targetClientId={clientId}
+          targetLocationId={locationId}
+          targetSpecialityId={specialityId}
+          onClose={() => setCopyOpen(false)}
+          onCopied={invalidateChartFields}
+        />
+      )}
     </div>
+  );
+}
+
+function CopyCustomChartFieldsModal({
+  targetClientId,
+  targetLocationId,
+  targetSpecialityId,
+  onClose,
+  onCopied,
+}: {
+  targetClientId: number;
+  targetLocationId: number;
+  targetSpecialityId: number | null;
+  onClose: () => void;
+  onCopied: () => void;
+}) {
+  const [sourceClient, setSourceClient] = useState<number | null>(null);
+  const [sourceLocation, setSourceLocation] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<{ fieldsAdded: number } | null>(null);
+
+  const clients = useQuery({ queryKey: ['configurations', 'clients'], queryFn: () => listClients() });
+  const locations = useQuery({
+    queryKey: ['configurations', 'locations', sourceClient],
+    queryFn: () => listLocations(sourceClient!),
+    enabled: !!sourceClient,
+  });
+
+  const m = useMutation({
+    mutationFn: () =>
+      copyCustomChartFields({
+        source: { clientId: sourceClient!, locationId: sourceLocation! },
+        destination: {
+          clientId: targetClientId,
+          locationId: targetLocationId,
+          specialityId: targetSpecialityId,
+        },
+      }),
+    onSuccess: (r) => {
+      setResult({ fieldsAdded: r.fieldsAdded });
+      onCopied();
+    },
+    onError: (e) => setErr((e as unknown as ApiErrorShape).message ?? 'Copy failed.'),
+  });
+
+  const isSameScope = sourceClient === targetClientId && sourceLocation === targetLocationId;
+  const canCopy = !!sourceClient && !!sourceLocation && !isSameScope;
+
+  return (
+    <Modal open onClose={onClose} title="Copy custom chart fields" size="md">
+      <div className="space-y-3">
+        {err && <div className="text-xs px-3 py-2 rounded bg-danger-soft text-danger">{err}</div>}
+        {result && (
+          <div className="text-xs px-3 py-2 rounded bg-success-soft text-success">
+            {result.fieldsAdded > 0
+              ? `Added ${result.fieldsAdded} custom field(s). Existing ones were kept.`
+              : 'Nothing new to add — every source field already exists here.'}
+          </div>
+        )}
+
+        <p className="text-xs text-ink-muted">
+          Copies the source Client / Location's custom chart fields into this scope
+          {targetSpecialityId != null ? ' (current speciality override)' : ' (All-specialities baseline)'}.
+          Fields with a name already here are kept unchanged (idempotent — safe to re-run).
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label required>Source client</Label>
+            <Select
+              value={sourceClient ?? ''}
+              onChange={(e) => {
+                setSourceClient(e.target.value ? Number(e.target.value) : null);
+                setSourceLocation(null);
+              }}
+              placeholder="Select…"
+            >
+              {clients.data?.items.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label required>Source location</Label>
+            <Select
+              value={sourceLocation ?? ''}
+              onChange={(e) => setSourceLocation(e.target.value ? Number(e.target.value) : null)}
+              disabled={!sourceClient || locations.isPending}
+              placeholder="Select…"
+            >
+              {locations.data?.items.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </Select>
+          </div>
+        </div>
+
+        {isSameScope && (
+          <p className="text-xs text-warn">Source and target are the same — pick a different scope.</p>
+        )}
+      </div>
+
+      <ModalFooter>
+        <Button variant="ghost" type="button" onClick={onClose}>Close</Button>
+        <Button
+          type="button"
+          loading={m.isPending}
+          disabled={!canCopy}
+          onClick={() => {
+            setErr(null);
+            setResult(null);
+            m.mutate();
+          }}
+        >
+          Copy fields
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 

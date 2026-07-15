@@ -892,6 +892,70 @@ export class ConfigurationsService {
     return { status: 'deleted' };
   }
 
+  /**
+   * Copy the source Client/Location's custom chart fields into the destination
+   * scope. Only the source location's baseline (specialityId IS NULL) fields are
+   * copied — that's the location-wide set that ports cleanly across clients
+   * (speciality ids aren't shared between clients). They land at the
+   * destination's currently-selected speciality scope (usually the baseline).
+   * Matched by name so it's idempotent — anything already present is left as-is.
+   */
+  async copyCustomChartFields(body: {
+    source?: { clientId?: number; locationId?: number };
+    destination?: { clientId?: number; locationId?: number; specialityId?: number | null };
+  }) {
+    const src = this.requireScope(body.source ?? {});
+    const dest = this.requireScope(body.destination ?? {});
+    await this.requireLocation(src.clientId, src.locationId);
+    await this.requireLocation(dest.clientId, dest.locationId);
+    const destSpecialityId = body.destination?.specialityId ?? null;
+
+    // Source's location-wide (baseline) custom fields.
+    const srcRows = await this.customFieldsRepo.find({
+      where: { locationId: src.locationId, specialityId: IsNull() },
+      order: { id: 'ASC' },
+    });
+
+    // Existing fields in the destination scope — matched by name so re-running
+    // the copy never creates duplicates (also respects the unique index on
+    // (location_id, speciality_id, name)).
+    const destRows = await this.customFieldsRepo.find({
+      where: {
+        locationId: dest.locationId,
+        specialityId: destSpecialityId === null ? IsNull() : destSpecialityId,
+      } as any,
+    });
+    const have = new Set(destRows.map((r) => r.name));
+    const toAdd = srcRows.filter((r) => !have.has(r.name));
+
+    if (toAdd.length) {
+      await this.customFieldsRepo.save(
+        toAdd.map((r) =>
+          this.customFieldsRepo.create({
+            locationId: dest.locationId,
+            specialityId: destSpecialityId,
+            name: r.name,
+            type: r.type,
+            isMultiSelect: r.isMultiSelect,
+            validation: r.validation,
+            placement: r.placement,
+            options: r.options ?? undefined,
+          }),
+        ),
+      );
+    }
+
+    return {
+      status: 'ok',
+      fieldsAdded: toAdd.length,
+      ...(await this.chartFields({
+        clientId: dest.clientId,
+        locationId: dest.locationId,
+        specialityId: destSpecialityId,
+      })),
+    };
+  }
+
   /* ── HCC Fields (stub) ────────────────────────────────── */
 
   private customHccFields: any[] = [

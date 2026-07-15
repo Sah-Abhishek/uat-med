@@ -296,6 +296,15 @@ export const deleteCustomChartField = (id: number) =>
     `/configurations/specialities/chart-fields/custom/${id}`,
   );
 
+export const copyCustomChartFields = (dto: {
+  source: { clientId: number; locationId: number };
+  destination: { clientId: number; locationId: number; specialityId?: number | null };
+}) =>
+  post<{ status: string; fieldsAdded: number } & ChartFieldsConfig>(
+    '/configurations/specialities/chart-fields/custom/copy',
+    dto,
+  );
+
 /* ── HCC Fields config ─────────────────────────────────── */
 
 export const listHccFieldConfig = () =>

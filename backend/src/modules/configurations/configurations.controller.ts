@@ -193,6 +193,11 @@ export class ConfigurationsController {
   @Roles(Role.TEAMLEAD)
   deleteCustomChartField(@Param('id', ParseIntPipe) id: number) { return this.svc.deleteCustomChartField(id); }
 
+  @Post('specialities/chart-fields/custom/copy')
+  @Roles(Role.TEAMLEAD)
+  @ApiOperation({ summary: 'Copy custom chart fields from another client/location scope.' })
+  copyCustomChartFields(@Body() body: any) { return this.svc.copyCustomChartFields(body); }
+
   // 17.X Code Review Reasons (per client+location, codeType × action)
   @Get('code-review-reasons')
   @Roles(Role.CODER, Role.AUDITOR, Role.MANAGER)
