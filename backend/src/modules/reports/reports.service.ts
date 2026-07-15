@@ -401,7 +401,7 @@ export class ReportsService {
         key,
         width: Math.min(40, Math.max(12, f.label.length + 4)),
         style: f.type === 'date'
-          ? { numFmt: 'yyyy-mm-dd' }
+          ? { numFmt: 'mm/dd/yyyy' }
           : f.type === 'number'
           ? { numFmt: '0' }
           : undefined,
@@ -422,8 +422,14 @@ export class ReportsService {
       const row: Record<string, unknown> = {};
       for (const k of columns) {
         const f = FIELD_BY_KEY.get(k)!;
-        const v = r[k];
-        row[k] = f.type === 'date' && v ? new Date(v as string) : normalizeCell(v);
+        const cell = normalizeCell(r[k]);
+        // Hand Excel a real Date so the mm/dd/yyyy numFmt applies and the column
+        // sorts as a date. It must be built at UTC midnight: ExcelJS converts a
+        // Date to a serial number via its UTC instant, so a local-midnight Date
+        // under Asia/Kolkata would serialize back to the previous day.
+        row[k] = f.type === 'date' && typeof cell === 'string' && cell
+          ? new Date(`${cell}T00:00:00Z`)
+          : cell;
       }
       ws.addRow(row);
     }
@@ -619,9 +625,29 @@ export class ReportsService {
  */
 function normalizeCell(v: unknown): string | number | null {
   if (v == null) return null;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (v instanceof Date) return toLocalISODate(v);
   if (Array.isArray(v)) return v.join(', ');
   if (typeof v === 'object') return JSON.stringify(v);
   if (typeof v === 'bigint') return Number(v);
   return v as string | number;
+}
+
+/**
+ * Render a Date as its calendar day in the server's timezone.
+ *
+ * node-postgres parses a `date` column (OID 1082) into a Date at LOCAL
+ * midnight, so under a non-UTC TZ (this app runs Asia/Kolkata) reading it back
+ * with toISOString() re-interprets that instant in UTC and lands on the
+ * PREVIOUS day: 2026-03-20 00:00 IST -> "2026-03-19". Reading the local
+ * components instead round-trips the stored day exactly.
+ *
+ * For the timestamptz-backed columns here (Date of Coding, Audit Done Date,
+ * Date of Completion) this reports the local business day rather than the UTC
+ * day, which is what these columns are meant to convey.
+ */
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
