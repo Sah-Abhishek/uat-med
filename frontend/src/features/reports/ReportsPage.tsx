@@ -931,8 +931,12 @@ function CustomizeTemplateModal({
   ];
   const orderedFilterKeys = filterableFields.filter((f) => selectedFilters.has(f.key)).map((f) => f.key);
 
-  const colFiltered = fields.filter((f) => f.label.toLowerCase().includes(colSearch.toLowerCase()));
-  const filterFiltered = filterableFields.filter((f) => f.label.toLowerCase().includes(filterSearch.toLowerCase()));
+  // Both panes list fields A→Z by label so a field is easy to find by eye.
+  // Display order only — the applied/saved column order above (current order
+  // first, newly-checked fields in catalog order) is deliberately untouched.
+  const byLabel = (a: ReportField, b: ReportField) => a.label.localeCompare(b.label);
+  const colFiltered = fields.filter((f) => f.label.toLowerCase().includes(colSearch.toLowerCase())).sort(byLabel);
+  const filterFiltered = filterableFields.filter((f) => f.label.toLowerCase().includes(filterSearch.toLowerCase())).sort(byLabel);
 
   const dto = () => ({ name: name.trim(), columns: orderedColumns, filters: {}, filterKeys: orderedFilterKeys });
 
