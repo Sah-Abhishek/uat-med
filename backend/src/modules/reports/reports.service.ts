@@ -189,13 +189,20 @@ const FIELDS: FieldDef[] = [
   // character set, not trim(): plain trim() strips spaces only, and real values
   // carry trailing newlines (e.g. "25\n" from the form). Substring filter.
   { key: 'modifier',          label: 'Modifier',           sql: `(SELECT CASE WHEN jsonb_typeof(c.custom_fields->(cfc.id::text)) = 'array' THEN (SELECT string_agg(btrim(t.val, E' \\t\\r\\n'), ', ') FROM jsonb_array_elements_text(c.custom_fields->(cfc.id::text)) AS t(val) WHERE btrim(t.val, E' \\t\\r\\n') <> '') ELSE NULLIF(btrim(c.custom_fields->>(cfc.id::text), E' \\t\\r\\n'), '') END FROM custom_field_configs cfc WHERE LOWER(cfc.name) = 'modifier' AND cfc.location_id = wl.location_id LIMIT 1)`, filterable: true, sortable: false, filterKind: 'text' },
-  // Procedure Codes — the chart's final submitted procedure codes, from code
-  // decisions (code_type = PROCEDURE). Uses the edited code when the decision was
-  // EDITED, else the original value; rejected procedures are excluded. Mirrors the
-  // Modifier column's source (the coder's confirmed output, not the AI guess in
-  // aiPrediction.procedures). Substring-filterable so "69210" matches any chart
-  // carrying that procedure code.
-  { key: 'procedureCodes',    label: 'Procedure Codes',    sql: `(SELECT string_agg(DISTINCT COALESCE(NULLIF(cd.edited_code, ''), cd.code_value), ', ') FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.code_type = 'PROCEDURE' AND cd.decision <> 'REJECTED')`, filterable: true, sortable: false, filterKind: 'text' },
+  // Procedure Codes — the chart's final submitted procedure codes. Sources, in
+  // precedence order (first non-empty wins):
+  //  1. Code decisions (code_type = PROCEDURE): the edited code when the
+  //     decision was EDITED, else the original value; rejected excluded. The
+  //     curated source — when it coexists with the form field it's the clean
+  //     one (the form text carries "NA"/junk on those charts).
+  //  2. The coder form's free-text "Procedure Code" field
+  //     (_formDraft.procedureCode). Most coders type codes ONLY here and never
+  //     touch the decision flow — reading decisions alone left ~2.9k prod
+  //     charts (e.g. V00005004016) exporting a blank despite having codes.
+  //     btrim: the form text often carries stray whitespace.
+  //  3. The IP PCS-code picker (_formDraft.pcsCodes → [{code, description}]).
+  // Substring-filterable so "69210" matches any chart carrying that code.
+  { key: 'procedureCodes',    label: 'Procedure Codes',    sql: `COALESCE((SELECT string_agg(DISTINCT COALESCE(NULLIF(cd.edited_code, ''), cd.code_value), ', ') FROM chart_code_decisions cd WHERE cd.chart_id = c.id AND cd.code_type = 'PROCEDURE' AND cd.decision <> 'REJECTED'), NULLIF(btrim(c.custom_fields#>>'{_formDraft,procedureCode}'), ''), (SELECT string_agg(p->>'code', ', ') FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.custom_fields#>'{_formDraft,pcsCodes}') = 'array' THEN c.custom_fields#>'{_formDraft,pcsCodes}' ELSE '[]'::jsonb END) AS p WHERE COALESCE(p->>'code','') <> ''))`, filterable: true, sortable: false, filterKind: 'text' },
   // Code-decision counts, mirroring the QA accuracy metric (accepted / decisions).
   // Total Codes = every submitted code decision on the chart; Corrected Codes =
   // the ones the coder changed from the AI suggestion (EDITED / REJECTED / ADDED,
