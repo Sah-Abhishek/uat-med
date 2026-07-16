@@ -646,7 +646,19 @@ export class ChartsService {
     const queued = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.QUEUED).getCount();
     const processing = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.PROCESSING).getCount();
     const errored = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.ERRORED).getCount();
-    const done = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.DONE).getCount();
+    // "AI Done" tile is TODAY-scoped (product change 2026-07-16): predictions
+    // completed during the current IST day, read from the aiPrediction blob's
+    // own stamp (completedAt, falling back to generatedAt — predictions from
+    // before processing metadata existed carry only generatedAt). All-time it
+    // counted a coder's lifetime backlog — for rjain 32 charts, every one
+    // hidden stale-completed work, so the AI Status = Done filter showed 0.
+    // Queued/Processing are live "right now" states and Errored stays all-time
+    // because it feeds the manager's "Retry all errored" button, which retries
+    // every errored chart regardless of age. The list's AI filter is also
+    // unchanged (all-time).
+    const done = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.DONE)
+      .andWhere(`((COALESCE(c.custom_fields->'aiPrediction'->>'completedAt', c.custom_fields->'aiPrediction'->>'generatedAt'))::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = ${businessTodaySql()}`)
+      .getCount();
 
     // Today's completed count — matches the dashboard self() tile for the
     // same user, using `chart_status_changed_at` so that bulk touches of

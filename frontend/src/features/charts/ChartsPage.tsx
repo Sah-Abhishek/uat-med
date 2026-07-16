@@ -803,10 +803,10 @@ export function ChartsPage() {
               info="Charts the AI pipeline is working on right now. Refreshes automatically every few seconds."
             />
             <SummaryTile
-              label="AI Done"
+              label="AI Done Today"
               value={summary.data.aiStatusCounts.done}
               tone="mint"
-              info="Charts with a completed AI prediction, ready to review while coding."
+              info="Charts whose AI prediction completed today. Older predictions aren't counted here — use the AI Status filter to find a chart's prediction."
             />
             <SummaryTile
               label="AI Errored"
