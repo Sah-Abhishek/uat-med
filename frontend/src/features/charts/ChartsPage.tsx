@@ -730,11 +730,36 @@ export function ChartsPage() {
       {/* Summary tiles */}
       {summary.data && (
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <SummaryTile label="Ready to Code" value={summary.data.milestones.readyToCode} tone="sky" />
-          <SummaryTile label="Coding Done Today" value={summary.data.milestones.codingDoneToday} tone="mint" />
-          <SummaryTile label="Ready to Audit" value={summary.data.milestones.readyToAudit} tone="indigo" />
-          <SummaryTile label="Audit Done Today" value={summary.data.milestones.auditDoneToday} tone="teal" />
-          <SummaryTile label="Complete Today" value={summary.data.statusToday.complete} tone="mint" />
+          <SummaryTile
+            label="Ready to Code"
+            value={summary.data.milestones.readyToCode}
+            tone="sky"
+            info="Charts at the Ready to Code milestone — the coding queue. All-time count, not just today."
+          />
+          <SummaryTile
+            label="Coding Done Today"
+            value={summary.data.milestones.codingDoneToday}
+            tone="mint"
+            info="Charts currently at Coding Done whose milestone changed today. A chart that has already moved on (e.g. into audit) today no longer counts."
+          />
+          <SummaryTile
+            label="Ready to Audit"
+            value={summary.data.milestones.readyToAudit}
+            tone="indigo"
+            info="Charts at the Ready to Audit milestone — coded and waiting for an auditor. All-time count, not just today."
+          />
+          <SummaryTile
+            label="Audit Done Today"
+            value={summary.data.milestones.auditDoneToday}
+            tone="teal"
+            info="Charts currently at Audit Done whose milestone changed today."
+          />
+          <SummaryTile
+            label="Complete Today"
+            value={summary.data.statusToday.complete}
+            tone="mint"
+            info="Charts whose Chart Status was set to Complete today."
+          />
           <SummaryTile
             label="Incomplete Today"
             value={summary.data.statusToday.incomplete}
@@ -765,10 +790,30 @@ export function ChartsPage() {
             )}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <SummaryTile label="AI Queued" value={summary.data.aiStatusCounts.queued} tone="sky" />
-            <SummaryTile label="AI Processing" value={summary.data.aiStatusCounts.processing} tone="butter" />
-            <SummaryTile label="AI Done" value={summary.data.aiStatusCounts.done} tone="mint" />
-            <SummaryTile label="AI Errored" value={summary.data.aiStatusCounts.errored} tone="coral" />
+            <SummaryTile
+              label="AI Queued"
+              value={summary.data.aiStatusCounts.queued}
+              tone="sky"
+              info="Charts waiting in line for AI code prediction — queued but not yet picked up."
+            />
+            <SummaryTile
+              label="AI Processing"
+              value={summary.data.aiStatusCounts.processing}
+              tone="butter"
+              info="Charts the AI pipeline is working on right now. Refreshes automatically every few seconds."
+            />
+            <SummaryTile
+              label="AI Done"
+              value={summary.data.aiStatusCounts.done}
+              tone="mint"
+              info="Charts with a completed AI prediction, ready to review while coding."
+            />
+            <SummaryTile
+              label="AI Errored"
+              value={summary.data.aiStatusCounts.errored}
+              tone="coral"
+              info="Charts whose last AI prediction attempt failed. A manager can re-run these with Retry all errored."
+            />
           </div>
         </div>
       )}
@@ -1009,21 +1054,23 @@ function SummaryTile({ label, value, tone, info }: { label: string; value: numbe
     <div className={cn('rounded-card p-4', toneMap[tone])}>
       <p className="text-2xl font-bold leading-none tracking-tightish">{formatNumber(value)}</p>
       <p className="text-[11px] font-semibold mt-1.5 flex items-center gap-1">
-        {label}
         {info && (
-          // Hover-only explainer. Pure CSS (group-hover) — no tooltip primitive
-          // exists in the UI kit and this is static text. Right-aligned so it
-          // can't spill past the viewport on the grid's last column.
+          // Hover-only explainer at the far left of the tile's bottom row.
+          // Pure CSS (group-hover) — no tooltip primitive exists in the UI kit
+          // and this is static text. The panel is left-anchored to the icon so
+          // it opens rightward over the page, never past the viewport's left
+          // edge on the grid's first column.
           <span className="relative group/info inline-flex" aria-label={info}>
             <Info className="w-3 h-3 opacity-60 cursor-help" />
             <span
               role="tooltip"
-              className="pointer-events-none absolute right-0 top-full mt-1.5 hidden group-hover/info:block w-60 rounded-md bg-slate-900 dark:bg-slate-700 px-2.5 py-1.5 text-[11px] font-medium leading-snug text-white shadow-lg z-20"
+              className="pointer-events-none absolute left-0 top-full mt-1.5 hidden group-hover/info:block w-60 rounded-md bg-slate-900 dark:bg-slate-700 px-2.5 py-1.5 text-[11px] font-medium leading-snug text-white shadow-lg z-20"
             >
               {info}
             </span>
           </span>
         )}
+        {label}
       </p>
     </div>
   );
