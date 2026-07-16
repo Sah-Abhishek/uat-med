@@ -529,29 +529,23 @@ export class ChartsService {
     user: AuthenticatedUser,
     q: QueryChartsDto = {} as QueryChartsDto,
   ) {
-    // Query params arrive as string / string[] / number — normalize to number[].
-    const toNums = (v: unknown): number[] =>
-      v == null || v === ''
-        ? []
-        : (Array.isArray(v) ? v : [v]).map(Number).filter((n) => Number.isFinite(n));
-    const cids = toNums(q.clientId);
-    const lids = toNums(q.locationId);
-    const qb = this.charts.createQueryBuilder('c');
+    const qb = this.charts.createQueryBuilder('c')
+      .leftJoin('c.worklist', 'worklist')
+      .leftJoin('worklist.subSpeciality', 'subSpeciality');
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
     // Auditors see all charts (mirrors list()), so no auditor-scoped filter here —
     // the tiles / tab counts stay in step with the full list they now see.
     // Keep the tiles / tab counts in step with list(): exclude orphaned charts.
     // Applied to the base qb before any clone so every count below inherits it.
     this.excludeOrphanedCharts(qb);
-    // Global header scope (Client / Location). summary() doesn't join the
-    // worklist by default, so join it here (alias `ws` — `w` is taken by the
-    // orphan-guard subquery) only when a scope is set. Chart→worklist is
-    // many-to-one, so the join can't inflate the COUNTs below.
-    if (cids.length || lids.length) {
-      qb.innerJoin('worklists', 'ws', 'ws.id = c.worklist_id');
-      if (cids.length) qb.andWhere('ws.client_id IN (:...cids)', { cids });
-      if (lids.length) qb.andWhere('ws.location_id IN (:...lids)', { lids });
-    }
+    // Tiles reflect the SAME filtered set the grid shows (product change
+    // 2026-07-16): apply every grid filter — including the Client/Location
+    // header scope, which applyChartFilters handles via the `worklist` join,
+    // exactly as list() does. Only the active priority tab is dropped
+    // (matching the tab-count convention below) so switching tabs doesn't
+    // zero out the queue tiles. Chart→worklist is many-to-one, so the joins
+    // can't inflate the COUNTs below.
+    this.applyChartFilters(qb, { ...q, priority: undefined });
 
     // Priority-tab counts must reflect the SAME filtered set the grid shows, so
     // they run over a fully-filtered query (all grid filters via the shared
