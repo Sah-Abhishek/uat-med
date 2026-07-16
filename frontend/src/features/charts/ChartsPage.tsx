@@ -1054,23 +1054,23 @@ function SummaryTile({ label, value, tone, info }: { label: string; value: numbe
     <div className={cn('rounded-card p-4', toneMap[tone])}>
       <p className="text-2xl font-bold leading-none tracking-tightish">{formatNumber(value)}</p>
       <p className="text-[11px] font-semibold mt-1.5 flex items-center gap-1">
+        {label}
         {info && (
-          // Hover-only explainer at the far left of the tile's bottom row.
-          // Pure CSS (group-hover) — no tooltip primitive exists in the UI kit
-          // and this is static text. The panel is left-anchored to the icon so
-          // it opens rightward over the page, never past the viewport's left
-          // edge on the grid's first column.
-          <span className="relative group/info inline-flex" aria-label={info}>
+          // Hover-only explainer pushed to the far right of the tile's bottom
+          // row (ml-auto). Pure CSS (group-hover) — no tooltip primitive exists
+          // in the UI kit and this is static text. The panel is right-anchored
+          // to the icon so it opens leftward over the page, never past the
+          // viewport's right edge on the grid's last column.
+          <span className="relative group/info inline-flex ml-auto" aria-label={info}>
             <Info className="w-3 h-3 opacity-60 cursor-help" />
             <span
               role="tooltip"
-              className="pointer-events-none absolute left-0 top-full mt-1.5 hidden group-hover/info:block w-60 rounded-md bg-slate-900 dark:bg-slate-700 px-2.5 py-1.5 text-[11px] font-medium leading-snug text-white shadow-lg z-20"
+              className="pointer-events-none absolute right-0 top-full mt-1.5 hidden group-hover/info:block w-60 rounded-md bg-slate-900 dark:bg-slate-700 px-2.5 py-1.5 text-[11px] font-medium leading-snug text-white shadow-lg z-20"
             >
               {info}
             </span>
           </span>
         )}
-        {label}
       </p>
     </div>
   );
