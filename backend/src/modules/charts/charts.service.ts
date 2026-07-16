@@ -623,12 +623,18 @@ export class ChartsService {
       if (r.milestone === ChartMilestone.READY_TO_CODE) ms.readyToCode = Number(r.count);
       if (r.milestone === ChartMilestone.READY_TO_AUDIT) ms.readyToAudit = Number(r.count);
     });
+    // NOTE: the base qb is filter-scoped, so applyChartFilters' param names
+    // are already bound on every clone (e.g. array :cs / :m for the Chart
+    // Status / Milestone IN-filters). The tile predicates below MUST use
+    // distinct names — rebinding :cs / :m with a scalar clobbers the array and
+    // the IN-spread expansion throws ("value.map is not a function"), 500-ing
+    // the whole summary.
     ms.codingDoneToday = await qb.clone()
-      .andWhere('c.milestone = :m', { m: ChartMilestone.CODING_DONE })
+      .andWhere('c.milestone = :msCd', { msCd: ChartMilestone.CODING_DONE })
       .andWhere('c.milestone_changed_at >= :t', { t: today })
       .getCount();
     ms.auditDoneToday = await qb.clone()
-      .andWhere('c.milestone = :m', { m: ChartMilestone.AUDIT_DONE })
+      .andWhere('c.milestone = :msAd', { msAd: ChartMilestone.AUDIT_DONE })
       .andWhere('c.milestone_changed_at >= :t', { t: today })
       .getCount();
 
@@ -659,7 +665,7 @@ export class ChartsService {
     // `updated_at` (priority bumps, AI prediction writes, etc.) don't inflate
     // the number. Reuses the `today` boundary from above.
     const completeToday = await qb.clone()
-      .andWhere('c.chart_status = :cs', { cs: ChartStatus.COMPLETE })
+      .andWhere('c.chart_status = :csComplete', { csComplete: ChartStatus.COMPLETE })
       .andWhere('c.chart_status_changed_at >= :t', { t: today })
       .getCount();
     // "Incomplete Today" (product change 2026-07-16): charts CURRENTLY showing
@@ -681,7 +687,7 @@ export class ChartsService {
               AND (t.started_at AT TIME ZONE 'Asia/Kolkata')::date = ${businessTodaySql()}
           )`;
     const incompleteToday = await qb.clone()
-      .andWhere('c.chart_status = :cs', { cs: ChartStatus.INCOMPLETE })
+      .andWhere('c.chart_status = :csIncomplete', { csIncomplete: ChartStatus.INCOMPLETE })
       .andWhere(workedTodaySql, { doneViewerId: Number(user.id) })
       .getCount();
 
