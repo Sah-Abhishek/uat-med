@@ -16,7 +16,7 @@ import { Client } from '../../entities/client.entity';
 import { Location } from '../../entities/location.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
-import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, coderStaleCompletedSql, effectiveQc, type ComputedBucket } from './priority-rules';
+import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, coderStaleCompletedSql, effectiveQc, touchedTodaySql, businessTodaySql, type ComputedBucket } from './priority-rules';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';
@@ -648,17 +648,35 @@ export class ChartsService {
     const errored = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.ERRORED).getCount();
     const done = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.DONE).getCount();
 
-    // Today's completed / incomplete count — matches the dashboard self()
-    // tiles for the same user, using `chart_status_changed_at` so that bulk
-    // touches of `updated_at` (priority bumps, AI prediction writes, etc.)
-    // don't inflate the number. Reuses the `today` boundary from above.
+    // Today's completed count — matches the dashboard self() tile for the
+    // same user, using `chart_status_changed_at` so that bulk touches of
+    // `updated_at` (priority bumps, AI prediction writes, etc.) don't inflate
+    // the number. Reuses the `today` boundary from above.
     const completeToday = await qb.clone()
       .andWhere('c.chart_status = :cs', { cs: ChartStatus.COMPLETE })
       .andWhere('c.chart_status_changed_at >= :t', { t: today })
       .getCount();
+    // "Incomplete Today" (product change 2026-07-16): charts CURRENTLY showing
+    // Incomplete among today's worked charts — an old Incomplete chart
+    // reworked today counts alongside those marked Incomplete today. The
+    // previous status-changed-today test missed the reworked chart, so the
+    // tile disagreed with the grid's Chart Status = Incomplete filter over the
+    // coder's day (19 vs 20). "Worked today" = a timer started during the IST
+    // business day — the viewer's own timer for a coder (whose tiles are
+    // allocation-scoped), anyone's timer for the unscoped TL/Manager/Auditor
+    // view. NOTE: this deliberately diverges from the dashboard self() tile,
+    // which still counts status changes.
+    const workedTodaySql =
+      user.role === Role.CODER
+        ? touchedTodaySql()
+        : `EXISTS (
+            SELECT 1 FROM chart_time_logs t
+            WHERE t.chart_id = c.id
+              AND (t.started_at AT TIME ZONE 'Asia/Kolkata')::date = ${businessTodaySql()}
+          )`;
     const incompleteToday = await qb.clone()
       .andWhere('c.chart_status = :cs', { cs: ChartStatus.INCOMPLETE })
-      .andWhere('c.chart_status_changed_at >= :t', { t: today })
+      .andWhere(workedTodaySql, { doneViewerId: Number(user.id) })
       .getCount();
 
     return {

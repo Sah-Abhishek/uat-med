@@ -64,6 +64,7 @@ import { cn, formatDate, formatNumber } from '@/lib/utils';
 import {
   Filter as FilterIcon,
   Columns3,
+  Info,
   Sparkles,
   UserPlus,
   UserCheck,
@@ -734,7 +735,12 @@ export function ChartsPage() {
           <SummaryTile label="Ready to Audit" value={summary.data.milestones.readyToAudit} tone="indigo" />
           <SummaryTile label="Audit Done Today" value={summary.data.milestones.auditDoneToday} tone="teal" />
           <SummaryTile label="Complete Today" value={summary.data.statusToday.complete} tone="mint" />
-          <SummaryTile label="Incomplete Today" value={summary.data.statusToday.incomplete} tone="coral" />
+          <SummaryTile
+            label="Incomplete Today"
+            value={summary.data.statusToday.incomplete}
+            tone="coral"
+            info="Charts worked on today that currently show Incomplete — includes older Incomplete charts reworked today, not just those marked Incomplete today."
+          />
         </div>
       )}
 
@@ -990,7 +996,7 @@ export function ChartsPage() {
 }
 
 /* ── Summary tile ────────────────────────────────────────── */
-function SummaryTile({ label, value, tone }: { label: string; value: number; tone: 'mint' | 'sky' | 'indigo' | 'teal' | 'coral' | 'butter' }) {
+function SummaryTile({ label, value, tone, info }: { label: string; value: number; tone: 'mint' | 'sky' | 'indigo' | 'teal' | 'coral' | 'butter'; info?: string }) {
   const toneMap = {
     mint: 'bg-tile-mint text-success',
     sky: 'bg-tile-sky text-info',
@@ -1002,7 +1008,23 @@ function SummaryTile({ label, value, tone }: { label: string; value: number; ton
   return (
     <div className={cn('rounded-card p-4', toneMap[tone])}>
       <p className="text-2xl font-bold leading-none tracking-tightish">{formatNumber(value)}</p>
-      <p className="text-[11px] font-semibold mt-1.5">{label}</p>
+      <p className="text-[11px] font-semibold mt-1.5 flex items-center gap-1">
+        {label}
+        {info && (
+          // Hover-only explainer. Pure CSS (group-hover) — no tooltip primitive
+          // exists in the UI kit and this is static text. Right-aligned so it
+          // can't spill past the viewport on the grid's last column.
+          <span className="relative group/info inline-flex" aria-label={info}>
+            <Info className="w-3 h-3 opacity-60 cursor-help" />
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute right-0 top-full mt-1.5 hidden group-hover/info:block w-60 rounded-md bg-slate-900 dark:bg-slate-700 px-2.5 py-1.5 text-[11px] font-medium leading-snug text-white shadow-lg z-20"
+            >
+              {info}
+            </span>
+          </span>
+        )}
+      </p>
     </div>
   );
 }
