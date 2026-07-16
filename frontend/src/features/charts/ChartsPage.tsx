@@ -594,6 +594,10 @@ export function ChartsPage() {
     // priority tab itself, so every bucket count stays visible.
     queryKey: ['charts', 'summary', filters],
     queryFn: () => getChartsSummary(filters),
+    // Tiles render only while data exists, so hold the previous counts during
+    // a filter-change refetch — otherwise the whole tile row unmounts and
+    // flashes back. Same pattern as the list query below.
+    placeholderData: (prev) => prev,
     // Keep the AI Queued / Processing tiles moving while any chart on the
     // current page is in flight — same trigger as the list refetch below.
     refetchInterval: (query) => {
