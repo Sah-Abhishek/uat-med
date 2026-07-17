@@ -1957,11 +1957,11 @@ async allocationHistory(id: number) {
     files: Express.Multer.File[],
     body: ProcessDocumentsDto,
   ) {
-    // Load the service line and the worklist's sub-speciality so both names
-    // can be forwarded to the AI gateway.
+    // Load the service line and the worklist's sub-speciality + client so their
+    // names can be forwarded to the AI gateway.
     const c = await this.charts.findOne({
       where: { id },
-      relations: { serviceLine: true, worklist: { subSpeciality: true } },
+      relations: { serviceLine: true, worklist: { subSpeciality: true, client: true } },
     });
     if (!c) throw new NotFoundException();
 
@@ -2025,6 +2025,8 @@ async allocationHistory(id: number) {
       // it for now. Passed through so it's a one-line flip when the gateway adds
       // the field — the value is already persisted on the chart regardless.
       serviceLine: this.optionalString(c.serviceLine?.name),
+      // Client name (from the worklist) — forwarded as `client_name`.
+      client: this.optionalString(c.worklist?.client?.name),
     });
 
     // Stitch the gateway's report_ids back onto each stored doc in the same
@@ -2231,7 +2233,7 @@ async allocationHistory(id: number) {
   async reprocess(id: number) {
     const c = await this.charts.findOne({
       where: { id },
-      relations: { serviceLine: true, worklist: { subSpeciality: true } },
+      relations: { serviceLine: true, worklist: { subSpeciality: true, client: true } },
     });
     if (!c) throw new NotFoundException();
     if (c.customFields?.pendingPrediction) {
@@ -2270,6 +2272,8 @@ async allocationHistory(id: number) {
       // Deferred — see process-documents call site. Forwarded once the gateway
       // accepts it; persisted on the chart in the meantime.
       serviceLine: this.optionalString(c.serviceLine?.name),
+      // Client name (from the worklist) — forwarded as `client_name`.
+      client: this.optionalString(c.worklist?.client?.name),
     });
 
     // New encounter → new report_ids, parallel to uploadedDocs order.

@@ -43,6 +43,12 @@ export interface EncounterChartInfo {
    * regardless; forwarding is a one-line change once the gateway is ready.
    */
   serviceLine?: string;
+  /**
+   * Client name (from the chart's worklist). Forwarded to the gateway as
+   * `client_name` so encounters can be attributed/scoped to the right client.
+   * Optional & additive — an empty/unknown value just runs the normal flow.
+   */
+  client?: string;
 }
 
 export interface PredictedCode {
@@ -179,6 +185,9 @@ export class AiPredictorService {
     // from `primary_speciality` on 2026-06-16 — see
     // encounter_primary_speciality_change.md.
     if (chart.subSpeciality?.trim()) encounterBody.sub_speciality = chart.subSpeciality.trim();
+    // Client name (exact key `client_name`, snake_case). Optional & additive so
+    // the gateway can attribute/scope the encounter to the right client.
+    if (chart.client?.trim()) encounterBody.client_name = chart.client.trim();
     // ── DEFERRED: service line forwarding ──────────────────
     // The ICD gateway does not accept a service_line field yet. The chart
     // already stores it (charts.service_line_id); when the gateway adds support,
