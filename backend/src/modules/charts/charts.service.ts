@@ -226,7 +226,7 @@ export class ChartsService {
     if (q.worklistId?.length) qb.andWhere('c.worklist_id IN (:...w)', { w: q.worklistId });
     if (q.serialFrom) qb.andWhere('c.serial_no >= :sf', { sf: q.serialFrom });
     if (q.serialTo) qb.andWhere('c.serial_no <= :st', { st: q.serialTo });
-    if (q.chartNo) qb.andWhere('c.chart_no ILIKE :cn', { cn: `%${q.chartNo}%` });
+    this.applyChartNoFilter(qb, q.chartNo);
     this.applyEncounterIdFilter(qb, q.encounterId);
     if (q.chartStatus?.length) qb.andWhere('c.chart_status IN (:...cs)', { cs: q.chartStatus });
     if (q.milestone?.length) qb.andWhere('c.milestone IN (:...m)', { m: q.milestone });
@@ -264,6 +264,16 @@ export class ChartsService {
     if (q.dateOfServiceFrom) qb.andWhere('c.dos >= :dosf', { dosf: q.dateOfServiceFrom });
     if (q.dateOfServiceTo) qb.andWhere('c.dos <= :dost', { dost: q.dateOfServiceTo });
     return qb;
+  }
+
+  /**
+   * Match a fragment of the chart number, case-insensitively. Shared by the
+   * normal grid-filter path and the global chart-# lookup in list()/neighbors()
+   * so the two predicates never drift (mirrors applyEncounterIdFilter).
+   */
+  private applyChartNoFilter(qb: SelectQueryBuilder<Chart>, chartNo?: string): void {
+    const cn = chartNo?.trim();
+    if (cn) qb.andWhere('c.chart_no ILIKE :cn', { cn: `%${cn}%` });
   }
 
   /**
@@ -359,12 +369,15 @@ export class ChartsService {
       .leftJoinAndSelect('worklist.process', 'process')
       .leftJoinAndSelect('c.serviceLine', 'serviceLine');
 
-    // Searching by encounter id is a *global* lookup: it finds the chart
-    // anywhere in the system, ignoring the viewer's role/allocation scope and
-    // every active grid filter (client/location/worklist/priority tab/dates/…),
-    // so a specific chart can always be pulled up by its id. Orphaned charts
-    // (soft-deleted worklist) stay hidden — those are deleted, not out of scope.
+    // Searching by chart # or encounter id is a *global* lookup: it finds the
+    // chart anywhere in the system, ignoring the viewer's role/allocation scope
+    // and every active grid filter (client/location/worklist/priority tab/dates/…),
+    // so a specific chart can always be pulled up by its number or id. Orphaned
+    // charts (soft-deleted worklist) stay hidden — those are deleted, not out of
+    // scope.
+    const globalChartNoSearch = !!q.chartNo?.trim();
     const globalEncounterSearch = !!q.encounterId?.trim();
+    const globalSearch = globalChartNoSearch || globalEncounterSearch;
 
     // Role-scoped visibility: coders see only their own queue — every tab,
     // including Done. The Done tab therefore lists a coder's charts that are
@@ -372,9 +385,9 @@ export class ChartsService {
     // applyPriorityScope); a chart worked today but since reallocated to another
     // user no longer appears. Auditors — like team-leads / managers — see every
     // chart and self-allocate one to work on it (the startTimer guard still
-    // enforces allocation before timing). A global encounter-id lookup
+    // enforces allocation before timing). A global chart-# / encounter-id lookup
     // deliberately bypasses this scope.
-    if (user.role === Role.CODER && !globalEncounterSearch)
+    if (user.role === Role.CODER && !globalSearch)
       qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
 
     // Hide charts orphaned by a soft-deleted worklist (see helper).
@@ -393,9 +406,11 @@ export class ChartsService {
       qb.andWhere('c.serial_no >= 1');
     }
 
-    if (globalEncounterSearch) {
-      // Match on the encounter id alone — all other filters and the priority tab
-      // are dropped so the chart surfaces no matter what's selected in the grid.
+    if (globalSearch) {
+      // Match on the chart # and/or encounter id alone — all other filters and
+      // the priority tab are dropped so the chart surfaces no matter what's
+      // selected in the grid.
+      this.applyChartNoFilter(qb, q.chartNo);
       this.applyEncounterIdFilter(qb, q.encounterId);
     } else {
       this.applyChartFilters(qb, q);
@@ -1332,14 +1347,24 @@ async allocationHistory(id: number) {
       .leftJoin('worklist.subSpeciality', 'subSpeciality')
       .leftJoin('worklist.process', 'process');
 
-    // Role scope must match list(): only coders are pinned to their own queue;
-    // auditors / team-leads / managers step through every chart the grid shows.
-    if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
+    // Role/scope must match list() exactly, including the global chart-# /
+    // encounter-id lookup that bypasses coder scoping and every grid filter — so
+    // Prev/Next walks the same global result set when the grid is in search mode.
+    const globalSearch = !!q.chartNo?.trim() || !!q.encounterId?.trim();
+
+    // Only coders are pinned to their own queue; auditors / team-leads / managers
+    // step through every chart the grid shows. A global lookup bypasses this.
+    if (user.role === Role.CODER && !globalSearch) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
 
     this.excludeOrphanedCharts(qb);
-    this.applyChartFilters(qb, q);
-    const scopedToWorklist = (q.worklistId?.length ?? 0) > 0;
-    this.applyPriorityScope(qb, user.role, q.priority, Number(user.id), !scopedToWorklist);
+    if (globalSearch) {
+      this.applyChartNoFilter(qb, q.chartNo);
+      this.applyEncounterIdFilter(qb, q.encounterId);
+    } else {
+      this.applyChartFilters(qb, q);
+      const scopedToWorklist = (q.worklistId?.length ?? 0) > 0;
+      this.applyPriorityScope(qb, user.role, q.priority, Number(user.id), !scopedToWorklist);
+    }
     this.applySort(qb, q.sortBy, q.sortDir, user.role);
 
     const rows = await qb.select('c.id', 'id').getRawMany<{ id: string }>();
