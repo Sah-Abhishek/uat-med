@@ -497,9 +497,8 @@ function saveVisibleColumns(visible: Set<string>) {
 export function ChartsPage() {
   const user = useAuth((s) => s.user)!;
   const isManager = can(user, 'chart.bulkModify');
-  // The §4.7 Finalized bucket exists only for the Manager role (a Team-Lead may
-  // hold bulkModify but still gets the §4.6 Done bucket instead).
-  const isManagerRole = user.role === 'MANAGER';
+  // The §4.7 Finalized bucket is available to Manager and Team-Lead roles.
+  const isManagerRole = user.role === 'MANAGER' || user.role === 'TEAMLEAD';
   // Auditor / admin can pull charts to themselves; coders are assigned charts
   // by a TL/Manager and no longer self-allocate.
   const canSelfAllocate = can(user, 'chart.selfAllocate');
@@ -706,7 +705,7 @@ export function ChartsPage() {
   }
 
   const pc = summary.data?.priorityCounts;
-  // Managers get the "Finalized" bucket (§4.7); everyone else gets "Done" (§4.6).
+  // Managers/Team-Leads get the "Finalized" bucket (§4.7); everyone else gets "Done" (§4.6).
   const priorityTabs: Array<{ key: 'ALL' | PriorityTab; label: string }> = [
     ...BASE_PRIORITY_TABS,
     isManagerRole ? { key: 'FINALIZED', label: 'Finalized' } : { key: 'DONE', label: 'Done' },

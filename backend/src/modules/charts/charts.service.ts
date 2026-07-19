@@ -335,7 +335,7 @@ export class ChartsService {
       // a coder to their own charts; managers/auditors see all as usual.
       qb.andWhere(doneSql(role), { doneViewerId: viewerId });
     } else if (tab === 'FINALIZED') {
-      // "Finalized" (§4.7, Managers only) = Coding/Audit Done + Complete.
+      // "Finalized" (§4.7, Manager/TeamLead) = Coding/Audit Done + Complete.
       qb.andWhere(finalizedSql());
     } else if (tab) {
       // A specific computed bucket: match by membership (not the single highest
@@ -576,9 +576,9 @@ export class ChartsService {
     // Per-bucket counts use membership (not a GROUP BY the single highest
     // bucket) so the manual's legitimate two-bucket overlap is counted under
     // each tab; `allBucketed` is the distinct count for the "All" tab (each
-    // chart once). Finalized (§4.7) is a Managers-only bucket.
+    // chart once). Finalized (§4.7) is a Manager/TeamLead-only bucket.
     const sum = (cond: string) => `SUM(CASE WHEN ${cond} THEN 1 ELSE 0 END)`;
-    const isManagerView = user.role === Role.MANAGER;
+    const isManagerView = user.role === Role.MANAGER || user.role === Role.TEAMLEAD;
     // "All" tab visibility must match applyPriorityScope()'s ALL branch: for a
     // coder it also counts their own completed (Coding Done+) charts, which the
     // list now shows below active work.
