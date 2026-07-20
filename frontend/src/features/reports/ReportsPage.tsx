@@ -33,7 +33,10 @@ import {
   LayoutTemplate,
   FileText,
   ChevronRight,
+  ChevronLeft,
   Plus,
+  CalendarDays,
+  Download,
 } from 'lucide-react';
 
 /** A date-range filter — either bound may be unset. */
@@ -205,6 +208,11 @@ export function ReportsPage() {
         onLoad={loadTemplate}
         onNew={newReport}
       />
+
+      {/* ── Auditor quick monthly export ──────────────────── */}
+      {currentUser?.role === 'AUDITOR' && (
+        <AuditorMonthlyExport onError={setDownloadError} />
+      )}
 
       {/* ── Active template banner ────────────────────────── */}
       {activeTemplate && (
@@ -444,6 +452,171 @@ function SavedTemplatesSection({
         }}
       />
     </>
+  );
+}
+
+/* ── Auditor quick monthly export ───────────────────────── */
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Auditor-only shortcut: pick a saved template, then a month, and the report
+ * downloads immediately — filtered to that month's Received Date range
+ * (1st … last day, inclusive) using the template's own columns/sort. No filter
+ * values are carried over; the month range is the only filter applied.
+ */
+function AuditorMonthlyExport({ onError }: { onError: (msg: string | null) => void }) {
+  const templatesQ = useQuery({
+    queryKey: ['reports', 'templates'],
+    queryFn: () => listReportTemplates(1, 50),
+  });
+  const templates = templatesQ.data?.items ?? [];
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = templates.find((t) => String(t.id) === String(selectedId)) ?? null;
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  // Which month is currently downloading (index 0–11), so only that button spins.
+  const [busyMonth, setBusyMonth] = useState<number | null>(null);
+
+  async function downloadMonth(t: ReportTemplate, month: number) {
+    const mm = String(month + 1).padStart(2, '0');
+    const from = `${year}-${mm}-01`;
+    // Day 0 of the *next* month = last day of this one (handles 28/29/30/31).
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const to = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+
+    setBusyMonth(month);
+    onError(null);
+    try {
+      await downloadReportXlsx(
+        {
+          columns: t.columns,
+          filters: { receivedDate: { from, to } },
+          sort: t.sort ?? [],
+        },
+        `${t.name} ${MONTHS_SHORT[month]} ${year}`,
+      );
+    } catch (e) {
+      onError((e as unknown as ApiErrorShape)?.message ?? 'Excel export failed.');
+    } finally {
+      setBusyMonth(null);
+    }
+  }
+
+  return (
+    <Card padding="none">
+      <div className="flex items-center gap-3.5 px-5 py-4 border-b border-line">
+        <div className="w-10 h-10 rounded-xl bg-primary-soft text-primary-ink dark:text-primary flex items-center justify-center shrink-0">
+          <CalendarDays className="w-5 h-5" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink">Monthly export</p>
+          <p className="text-xs text-ink-muted">
+            Pick a saved template, then a month — downloads that template filtered to the month’s Received Date.
+          </p>
+        </div>
+      </div>
+
+      <div className="p-5 space-y-4">
+        {templatesQ.isPending ? (
+          <div className="py-8 text-center">
+            <Loader2 className="w-5 h-5 animate-spin inline text-ink-muted" />
+          </div>
+        ) : templates.length === 0 ? (
+          <div className="py-8 text-center text-sm text-ink-muted">
+            No saved templates yet. Build a report below and save it as a template first.
+          </div>
+        ) : (
+          <>
+            {/* Step 1 — choose a template */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle mb-2">
+                1 · Choose a template
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {templates.map((t) => {
+                  const active = String(t.id) === String(selectedId);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setSelectedId(active ? null : String(t.id))}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 h-9 px-3 rounded-pill border text-sm font-medium transition',
+                        active
+                          ? 'border-primary bg-primary-soft text-primary-ink dark:text-primary'
+                          : 'border-line text-ink hover:bg-surface-sunken',
+                      )}
+                    >
+                      <FileText className="w-3.5 h-3.5 shrink-0" />
+                      {t.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Step 2 — choose a month (appears once a template is picked) */}
+            {selected && (
+              <div className="rounded-card border border-line bg-surface-sunken/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
+                    2 · Pick a month for <span className="text-ink normal-case">{selected.name}</span>
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setYear((y) => y - 1)}
+                      aria-label="Previous year"
+                      className="w-7 h-7 inline-flex items-center justify-center rounded-lg border border-line text-ink-muted hover:bg-surface hover:text-ink transition"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="min-w-[3.5rem] text-center text-sm font-semibold text-ink tabular-nums">
+                      {year}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setYear((y) => y + 1)}
+                      aria-label="Next year"
+                      className="w-7 h-7 inline-flex items-center justify-center rounded-lg border border-line text-ink-muted hover:bg-surface hover:text-ink transition"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                  {MONTHS_SHORT.map((label, m) => {
+                    const busy = busyMonth === m;
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        disabled={busyMonth !== null}
+                        onClick={() => downloadMonth(selected, m)}
+                        title={`Download ${selected.name} — ${label} ${year}`}
+                        className={cn(
+                          'inline-flex items-center justify-center gap-1.5 h-10 rounded-lg border border-line bg-surface text-sm font-medium text-ink transition',
+                          'hover:border-primary hover:bg-primary-soft hover:text-primary-ink dark:hover:text-primary',
+                          busyMonth !== null && !busy && 'opacity-50',
+                          'disabled:cursor-not-allowed',
+                        )}
+                      >
+                        {busy ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Download className="w-3.5 h-3.5 opacity-60" />
+                        )}
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
 

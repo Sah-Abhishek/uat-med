@@ -627,13 +627,11 @@ export class ChartsService {
       doneToday: Number(doneTodayRow?.count ?? 0),
     };
 
-    // Queue tiles (`readyToCode` / `readyToAudit`) are all-time counts of the
-    // user's queue. "Done" tiles (`codingDoneToday` / `auditDoneToday`) are
-    // explicitly today-scoped — matching the dashboard self() tiles — so the
-    // two pages don't disagree on what "Coding Done" means.
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const ms = { readyToCode: 0, codingDoneToday: 0, readyToAudit: 0, auditDoneToday: 0 };
+    // All tiles (queue AND done) are counts within the current profile scope +
+    // the applied grid filters — NOT time-boxed to today (product change
+    // 2026-07-20). With no date filter they are all-time; a Received / Coding /
+    // Service date filter narrows them via the shared filter-scoped base qb.
+    const ms = { readyToCode: 0, codingDone: 0, readyToAudit: 0, auditDone: 0 };
     milestoneRows.forEach(r => {
       if (r.milestone === ChartMilestone.READY_TO_CODE) ms.readyToCode = Number(r.count);
       if (r.milestone === ChartMilestone.READY_TO_AUDIT) ms.readyToAudit = Number(r.count);
@@ -644,13 +642,11 @@ export class ChartsService {
     // distinct names — rebinding :cs / :m with a scalar clobbers the array and
     // the IN-spread expansion throws ("value.map is not a function"), 500-ing
     // the whole summary.
-    ms.codingDoneToday = await qb.clone()
+    ms.codingDone = await qb.clone()
       .andWhere('c.milestone = :msCd', { msCd: ChartMilestone.CODING_DONE })
-      .andWhere('c.milestone_changed_at >= :t', { t: today })
       .getCount();
-    ms.auditDoneToday = await qb.clone()
+    ms.auditDone = await qb.clone()
       .andWhere('c.milestone = :msAd', { msAd: ChartMilestone.AUDIT_DONE })
-      .andWhere('c.milestone_changed_at >= :t', { t: today })
       .getCount();
 
     // AI pipeline status counts (mutually exclusive: pending takes precedence
@@ -661,55 +657,30 @@ export class ChartsService {
     const queued = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.QUEUED).getCount();
     const processing = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.PROCESSING).getCount();
     const errored = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.ERRORED).getCount();
-    // "AI Done" tile is TODAY-scoped (product change 2026-07-16): predictions
-    // completed during the current IST day, read from the aiPrediction blob's
-    // own stamp (completedAt, falling back to generatedAt — predictions from
-    // before processing metadata existed carry only generatedAt). All-time it
-    // counted a coder's lifetime backlog — for rjain 32 charts, every one
-    // hidden stale-completed work, so the AI Status = Done filter showed 0.
-    // Queued/Processing are live "right now" states and Errored stays all-time
-    // because it feeds the manager's "Retry all errored" button, which retries
-    // every errored chart regardless of age. The list's AI filter is also
-    // unchanged (all-time).
-    const done = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.DONE)
-      .andWhere(`((COALESCE(c.custom_fields->'aiPrediction'->>'completedAt', c.custom_fields->'aiPrediction'->>'generatedAt'))::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = ${businessTodaySql()}`)
-      .getCount();
+    // "AI Done" tile: charts with a completed AI prediction, within the applied
+    // grid filters — all-time unless a date filter is set (product change
+    // 2026-07-20; previously time-boxed to the current IST day). Queued/Processing
+    // are live "right now" states; Errored stays all-time because it feeds the
+    // manager's "Retry all errored" button, which retries every errored chart
+    // regardless of age.
+    const done = await this.applyAiStatusFilter(aiBase.clone(), AiStatusFilter.DONE).getCount();
 
-    // Today's completed count — matches the dashboard self() tile for the
-    // same user, using `chart_status_changed_at` so that bulk touches of
-    // `updated_at` (priority bumps, AI prediction writes, etc.) don't inflate
-    // the number. Reuses the `today` boundary from above.
-    const completeToday = await qb.clone()
+    // Complete / Incomplete counts within the applied grid filters — all-time
+    // unless a date filter is set (product change 2026-07-20; previously
+    // time-boxed to today via chart_status_changed_at / a timer-started-today
+    // test). They now match the grid's Chart Status = Complete / Incomplete
+    // filter over the same scope.
+    const complete = await qb.clone()
       .andWhere('c.chart_status = :csComplete', { csComplete: ChartStatus.COMPLETE })
-      .andWhere('c.chart_status_changed_at >= :t', { t: today })
       .getCount();
-    // "Incomplete Today" (product change 2026-07-16): charts CURRENTLY showing
-    // Incomplete among today's worked charts — an old Incomplete chart
-    // reworked today counts alongside those marked Incomplete today. The
-    // previous status-changed-today test missed the reworked chart, so the
-    // tile disagreed with the grid's Chart Status = Incomplete filter over the
-    // coder's day (19 vs 20). "Worked today" = a timer started during the IST
-    // business day — the viewer's own timer for a coder (whose tiles are
-    // allocation-scoped), anyone's timer for the unscoped TL/Manager/Auditor
-    // view. NOTE: this deliberately diverges from the dashboard self() tile,
-    // which still counts status changes.
-    const workedTodaySql =
-      user.role === Role.CODER
-        ? touchedTodaySql()
-        : `EXISTS (
-            SELECT 1 FROM chart_time_logs t
-            WHERE t.chart_id = c.id
-              AND (t.started_at AT TIME ZONE 'Asia/Kolkata')::date = ${businessTodaySql()}
-          )`;
-    const incompleteToday = await qb.clone()
+    const incomplete = await qb.clone()
       .andWhere('c.chart_status = :csIncomplete', { csIncomplete: ChartStatus.INCOMPLETE })
-      .andWhere(workedTodaySql, { doneViewerId: Number(user.id) })
       .getCount();
 
     return {
       priorityCounts: pc,
       milestones: ms,
-      statusToday: { complete: completeToday, incomplete: incompleteToday },
+      status: { complete, incomplete },
       aiStatusCounts: { queued, processing, done, errored },
     };
   }

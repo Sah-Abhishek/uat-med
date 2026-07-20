@@ -907,6 +907,11 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
         // Auditor QC status also drives the auditor priority buckets, so it must
         // be persisted (it was previously dropped from this blob).
         auditorQcStatus: draft.auditorQcStatus,
+        // Feedback Type — the required dropdown under the Audit Information
+        // table. It was collected into the draft but never written to this blob,
+        // so every auditor's choice was silently discarded on save and the
+        // Reports "Feedback Type" column was blank for every chart.
+        feedbackType: draft.feedbackType,
         // Audit Information table — per-area Total Codes / Correct Codes /
         // Feedback Category. Persisted here so it survives save + refresh, is
         // visible to other users, and is exported in Reports (Audit Total Codes,

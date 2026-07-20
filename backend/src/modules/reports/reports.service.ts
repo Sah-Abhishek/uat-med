@@ -227,13 +227,29 @@ const FIELDS: FieldDef[] = [
   { key: 'pos',               label: 'POS',                sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE LOWER(cfc.name)='pos' AND cfc.location_id=wl.location_id LIMIT 1)`,           filterable: true,  sortable: true,  filterKind: 'select' },
   { key: 'providerName',      label: 'Provider Name',      sql: `(SELECT c.custom_fields->>(cfc.id::text) FROM custom_field_configs cfc WHERE LOWER(cfc.name)='provider name' AND cfc.location_id=wl.location_id LIMIT 1)`, filterable: true,  sortable: true,  filterKind: 'select' },
   { key: 'qcStatus',          label: 'QC Status',          sql: `c.custom_fields#>>'{_formDraft,qcStatus}'`,             filterable: true,  sortable: false, options: QC_STATUS_OPTIONS },
+  // Auditor QC Status — the required dropdown under the Audit Information table
+  // (_formDraft.auditorQcStatus), set by the auditor. Distinct from "QC Status"
+  // above, which is the CODER's field (_formDraft.qcStatus): on an audited chart
+  // the coder's value is typically blank, so "QC Status" exported nothing for the
+  // very charts an auditor had signed off. Both are exposed rather than merged so
+  // an existing saved template/filter on "QC Status" keeps its meaning. Filter
+  // options reuse the full QC list — the form offers auditors only Agree /
+  // Feedback Provided, but legacy rows carry other values and must stay findable.
+  { key: 'auditorQcStatus',   label: 'Auditor QC Status',  sql: `c.custom_fields#>>'{_formDraft,auditorQcStatus}'`,      filterable: true,  sortable: false, options: QC_STATUS_OPTIONS },
   // Feedback Category — distinct feedback categories across the Audit
   // Information rows in _formDraft.audit (each row's value is a string or a
   // string[]). The old top-level custom_fields->>'feedbackCategory' key was
   // never written by the form, so this column was always blank; sourced from the
   // audit table it now reflects what auditors actually pick. Substring-filterable.
   { key: 'feedbackCategory',  label: 'Feedback Category',  sql: `(SELECT string_agg(DISTINCT trim(fc.val), ', ' ORDER BY trim(fc.val)) FROM jsonb_each(CASE WHEN jsonb_typeof(c.custom_fields#>'{_formDraft,audit}')='object' THEN c.custom_fields#>'{_formDraft,audit}' ELSE '{}'::jsonb END) AS e CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(e.value->'feedbackCategory')='array' THEN e.value->'feedbackCategory' WHEN COALESCE(e.value->>'feedbackCategory','')<>'' THEN jsonb_build_array(e.value->>'feedbackCategory') ELSE '[]'::jsonb END) AS fc(val) WHERE trim(fc.val) <> '')`,     filterable: true,  sortable: false, filterKind: 'text' },
-  { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields->>'feedbackType'`,         filterable: true,  sortable: false },
+  // Feedback Type — the required dropdown under the Audit Information table.
+  // Same bug as Feedback Category above: this read the top-level
+  // custom_fields->>'feedbackType' key, which the form never wrote, so the column
+  // was blank on all 10.6k charts. Now sourced from _formDraft.feedbackType,
+  // which ChartDetailPage persists. Options come from the feedback_types master
+  // rather than live-distinct chart values: no chart carried one before this fix,
+  // so a data-sourced dropdown would stay empty until charts are re-saved.
+  { key: 'feedbackType',      label: 'Feedback Type',      sql: `c.custom_fields#>>'{_formDraft,feedbackType}'`, filterable: true,  sortable: false, valuesFrom: { table: 'feedback_types', column: 'name', activeColumn: 'is_active' } },
   // ── Additional auditor-report columns ──
   // The "Employee Code" columns carry the coder's / auditor's NAME (no codes in DB).
   { key: 'coderEmployeeCode',   label: 'Coder Employee Code',   sql: CODER_NAME_SQL,   filterable: true, sortable: true },
