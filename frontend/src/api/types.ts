@@ -358,11 +358,11 @@ export interface ChartSummary {
   };
   milestones: {
     readyToCode: number;
-    codingDoneToday: number;
+    codingDone: number;
     readyToAudit: number;
-    auditDoneToday: number;
+    auditDone: number;
   };
-  statusToday: {
+  status: {
     complete: number;
     incomplete: number;
   };
@@ -475,11 +475,11 @@ export interface DashboardUnallocated {
 
 export interface DashboardSelf {
   readyToCode: number;
-  codingDoneToday: number;
+  codingDone: number;
   readyToAudit: number;
-  auditDoneToday: number;
-  completeToday: number;
-  incompleteToday: number;
+  auditDone: number;
+  complete: number;
+  incomplete: number;
   inProgressChart: { id: string; chartNo: string } | null;
   inProgressStartedAt: string | null;
 }

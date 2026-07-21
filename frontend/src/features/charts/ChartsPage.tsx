@@ -737,37 +737,37 @@ export function ChartsPage() {
             label="Ready to Code"
             value={summary.data.milestones.readyToCode}
             tone="sky"
-            info="Charts at the Ready to Code milestone — the coding queue. All-time count, not just today."
+            info="Charts at the Ready to Code milestone — the coding queue. Reflects the applied filters; all-time when no date filter is set."
           />
           <SummaryTile
-            label="Coding Done Today"
-            value={summary.data.milestones.codingDoneToday}
+            label="Coding Done"
+            value={summary.data.milestones.codingDone}
             tone="mint"
-            info="Charts currently at Coding Done whose milestone changed today. A chart that has already moved on (e.g. into audit) today no longer counts."
+            info="Charts currently at the Coding Done milestone. Reflects the applied filters; all-time when no date filter is set."
           />
           <SummaryTile
             label="Ready to Audit"
             value={summary.data.milestones.readyToAudit}
             tone="indigo"
-            info="Charts at the Ready to Audit milestone — coded and waiting for an auditor. All-time count, not just today."
+            info="Charts at the Ready to Audit milestone — coded and waiting for an auditor. Reflects the applied filters; all-time when no date filter is set."
           />
           <SummaryTile
-            label="Audit Done Today"
-            value={summary.data.milestones.auditDoneToday}
+            label="Audit Done"
+            value={summary.data.milestones.auditDone}
             tone="teal"
-            info="Charts currently at Audit Done whose milestone changed today."
+            info="Charts currently at the Audit Done milestone. Reflects the applied filters; all-time when no date filter is set."
           />
           <SummaryTile
-            label="Complete Today"
-            value={summary.data.statusToday.complete}
+            label="Complete"
+            value={summary.data.status.complete}
             tone="mint"
-            info="Charts whose Chart Status was set to Complete today."
+            info="Charts whose Chart Status is Complete. Reflects the applied filters; all-time when no date filter is set."
           />
           <SummaryTile
-            label="Incomplete Today"
-            value={summary.data.statusToday.incomplete}
+            label="Incomplete"
+            value={summary.data.status.incomplete}
             tone="coral"
-            info="Charts worked on today that currently show Incomplete — includes older Incomplete charts reworked today, not just those marked Incomplete today."
+            info="Charts whose Chart Status is Incomplete. Reflects the applied filters; all-time when no date filter is set."
           />
         </div>
       )}
@@ -806,10 +806,10 @@ export function ChartsPage() {
               info="Charts the AI pipeline is working on right now. Refreshes automatically every few seconds."
             />
             <SummaryTile
-              label="AI Done Today"
+              label="AI Done"
               value={summary.data.aiStatusCounts.done}
               tone="mint"
-              info="Charts whose AI prediction completed today. Older predictions aren't counted here — use the AI Status filter to find a chart's prediction."
+              info="Charts with a completed AI prediction. Reflects the applied filters; all-time when no date filter is set."
             />
             <SummaryTile
               label="AI Errored"

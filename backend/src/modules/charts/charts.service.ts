@@ -16,7 +16,7 @@ import { Client } from '../../entities/client.entity';
 import { Location } from '../../entities/location.entity';
 import { User } from '../../entities/user.entity';
 import { ChartMilestone, ChartStatus, CodeAuditVerdict, CodeReviewAction, CodeReviewDecision, Priority, UserStatus } from '../../common/enums';
-import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, coderStaleCompletedSql, effectiveQc, touchedTodaySql, businessTodaySql, type ComputedBucket } from './priority-rules';
+import { priorityBucketSql, priorityRankSql, bucketMembershipSql, finalizedSql, doneSql, codingFinishedSql, coderStaleCompletedSql, effectiveQc, type ComputedBucket } from './priority-rules';
 import { SaveCodeDecisionDraftDto, SubmitCodeDecisionsDto } from './dto/code-decisions.dto';
 import { SubmitCodeAuditsDto } from './dto/code-audits.dto';
 import { AiGatewayClient, type PredictedCodeReviewItem, type ReviewActionPayload } from '../ai-gateway/ai-gateway.service';

@@ -224,14 +224,14 @@ export function DashboardPage() {
                 variant="complete"
                 value={status.data?.complete ?? 0}
                 label="Complete"
-                sublabel="Today's Count"
+                sublabel="Total"
                 loading={status.isPending}
               />
               <IllustrationStatCard
                 variant="incomplete"
                 value={status.data?.incomplete ?? 0}
                 label="Incomplete"
-                sublabel="Today's Count"
+                sublabel="Total"
                 loading={status.isPending}
               />
             </div>
@@ -581,11 +581,11 @@ function SelfOnlyTopRow({ data, loading }: { data: ReturnType<typeof useQuery>['
       <SectionLabel tone="primary">Your queue</SectionLabel>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <TintedStatCard tint="indigo" value={d?.readyToCode ?? 0} label="Ready to code" icon={<FileClock className="w-4 h-4" />} loading={loading} />
-        <TintedStatCard tint="mint" value={d?.codingDoneToday ?? 0} label="Coding done today" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="mint" value={d?.codingDone ?? 0} label="Coding done" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
         <TintedStatCard tint="sky" value={d?.readyToAudit ?? 0} label="Ready to audit" icon={<FileSearch className="w-4 h-4" />} loading={loading} />
-        <TintedStatCard tint="mint" value={d?.auditDoneToday ?? 0} label="Audit done today" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
-        <TintedStatCard tint="mint" value={d?.completeToday ?? 0} label="Complete today" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
-        <TintedStatCard tint="butter" value={d?.incompleteToday ?? 0} label="Incomplete today" icon={<FileClock className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="mint" value={d?.auditDone ?? 0} label="Audit done" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="mint" value={d?.complete ?? 0} label="Complete" icon={<FileCheck2 className="w-4 h-4" />} loading={loading} />
+        <TintedStatCard tint="butter" value={d?.incomplete ?? 0} label="Incomplete" icon={<FileClock className="w-4 h-4" />} loading={loading} />
       </div>
     </div>
   );

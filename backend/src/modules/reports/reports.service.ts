@@ -153,7 +153,7 @@ const FIELDS: FieldDef[] = [
   { key: 'dateOfCompletion',  label: 'Date of Completion', sql: `CASE WHEN c.chart_status = 'COMPLETE' THEN c.updated_at ELSE NULL END`, filterable: true, sortable: true, type: 'date' },
   { key: 'codingCompletedAt', label: 'Date of Coding',     sql: 'c.coding_completed_at',                     filterable: true,  sortable: true,  type: 'date' },
   // Audit Done date — the day the chart reached the AUDIT_DONE milestone. Mirrors
-  // the "Audit Done Today" summary tile (milestone = AUDIT_DONE, milestone_changed_at).
+  // the "Audit Done" summary tile (milestone = AUDIT_DONE, milestone_changed_at).
   // Blank once the chart moves on to CLOSED, since milestone_changed_at then reflects
   // that later transition rather than the audit-done moment.
   { key: 'auditDoneDate',     label: 'Audit Done Date',    sql: `CASE WHEN c.milestone = 'AUDIT_DONE' THEN c.milestone_changed_at ELSE NULL END`, filterable: true, sortable: true, type: 'date' },

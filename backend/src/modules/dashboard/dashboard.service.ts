@@ -316,34 +316,28 @@ export class DashboardService {
     if (user.role === Role.CODER) qb.andWhere('c.allocated_coder_id = :uid', { uid: user.id });
     else if (user.role === Role.AUDITOR) qb.andWhere('c.allocated_auditor_id = :uid', { uid: user.id });
 
-    // "Today" filters use the dedicated `milestone_changed_at` /
-    // `chart_status_changed_at` columns, which are stamped only when those
-    // fields actually change. The general `updated_at` column is bumped by
-    // any save (priority bumps, AI prediction writes, allocation churn) and
-    // would over-count work that didn't happen today.
-    const today = startOfDayMinusDays(0);
+    // Tiles are all-time counts of the user's own queue — NOT time-boxed to
+    // today (product change 2026-07-20; previously the done/complete tiles used
+    // `milestone_changed_at` / `chart_status_changed_at >= today`). The self view
+    // has no date filter, so these stay all-time.
     const readyToCode = await qb.clone().andWhere('c.milestone = :m', { m: ChartMilestone.READY_TO_CODE }).getCount();
     const readyToAudit = await qb.clone().andWhere('c.milestone = :m', { m: ChartMilestone.READY_TO_AUDIT }).getCount();
-    const codingDoneToday = await qb.clone()
+    const codingDone = await qb.clone()
       .andWhere('c.milestone = :m', { m: ChartMilestone.CODING_DONE })
-      .andWhere('c.milestone_changed_at >= :t', { t: today })
       .getCount();
-    const auditDoneToday = await qb.clone()
+    const auditDone = await qb.clone()
       .andWhere('c.milestone = :m', { m: ChartMilestone.AUDIT_DONE })
-      .andWhere('c.milestone_changed_at >= :t', { t: today })
       .getCount();
-    const completeToday = await qb.clone()
+    const complete = await qb.clone()
       .andWhere('c.chart_status = :s', { s: ChartStatus.COMPLETE })
-      .andWhere('c.chart_status_changed_at >= :t', { t: today })
       .getCount();
-    const incompleteToday = await qb.clone()
+    const incomplete = await qb.clone()
       .andWhere('c.chart_status = :s', { s: ChartStatus.INCOMPLETE })
-      .andWhere('c.chart_status_changed_at >= :t', { t: today })
       .getCount();
 
     return {
-      readyToCode, codingDoneToday, readyToAudit, auditDoneToday,
-      completeToday, incompleteToday,
+      readyToCode, codingDone, readyToAudit, auditDone,
+      complete, incomplete,
       inProgressChart: null, inProgressStartedAt: null,
     };
   }
