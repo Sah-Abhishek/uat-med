@@ -129,6 +129,10 @@ export interface WorklistDetail extends Worklist {
     closed: number;
     /** Coding done + audit done + closed — drives the progress % / donut. */
     completed: number;
+    /** Highest live serial number — can exceed `total` when charts were
+     * deleted (permanent gaps, no re-sequencing). Optional for backend
+     * version skew. */
+    maxSerialNo?: number;
   };
   /**
    * AI pipeline counts. Optional to tolerate deployment version skew: an older

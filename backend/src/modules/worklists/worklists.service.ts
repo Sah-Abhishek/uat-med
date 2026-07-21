@@ -209,6 +209,12 @@ export class WorklistsService {
     if (!w) throw new NotFoundException();
     const counts = await this.charts.createQueryBuilder('c')
       .select('COUNT(*)', 'rowCount')
+      // Live charts don't re-sequence on delete (permanent gaps — see
+      // bulkDelete's doc comment), so the highest LIVE serial can exceed the
+      // live row count. The allocate-range picker needs this, not rowCount,
+      // as its upper bound or it wrongly rejects ranges that include charts
+      // added after some earlier ones were deleted.
+      .addSelect('MAX(c.serial_no)', 'maxSerialNo')
       .addSelect(`SUM(CASE WHEN c.allocated_coder_id IS NOT NULL OR c.allocated_auditor_id IS NOT NULL THEN 1 ELSE 0 END)`, 'allocated')
       .addSelect(`SUM(CASE WHEN c.milestone = 'READY_TO_CODE' THEN 1 ELSE 0 END)`, 'notStarted')
       .addSelect(`SUM(CASE WHEN c.milestone IN ('CODING_IN_PROGRESS','AUDIT_IN_PROGRESS') THEN 1 ELSE 0 END)`, 'inProgress')
@@ -230,6 +236,7 @@ export class WorklistsService {
     const total = Math.max(declared, rowCount);
     const allocated = Number(counts.allocated ?? 0);
     const unallocated = Math.max(0, total - allocated);
+    const maxSerialNo = Number(counts.maxSerialNo ?? 0);
 
     // AI pipeline status counts — same mutually-exclusive ordering as
     // charts.summary() so the worklist progress card never disagrees with
@@ -312,6 +319,10 @@ export class WorklistsService {
         inProgress: Number(counts.inProgress ?? 0),
         closed: Number(counts.closed ?? 0),
         completed: Number(counts.completed ?? 0),
+        // Highest LIVE serial number — the real upper bound for an allocation
+        // range, since deleted charts leave permanent gaps and can make this
+        // exceed `total` (the live row count).
+        maxSerialNo,
       },
       aiStatusCounts: {
         queued: aiQueued,

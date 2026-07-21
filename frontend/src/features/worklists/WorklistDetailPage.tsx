@@ -295,7 +295,7 @@ export function WorklistDetailPage() {
           <AllocateFreshVolume
             worklistId={id!}
             unallocatedCount={s.unallocated}
-            totalCharts={s.total}
+            maxSerialNo={s.maxSerialNo ?? s.total}
           />
         )}
       </div>
@@ -843,11 +843,11 @@ interface CommittedAllocation {
 function AllocateFreshVolume({
   worklistId,
   unallocatedCount,
-  totalCharts,
+  maxSerialNo,
 }: {
   worklistId: string;
   unallocatedCount: number;
-  totalCharts: number;
+  maxSerialNo: number;
 }) {
   const qc = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -926,8 +926,8 @@ function AllocateFreshVolume({
     if (!from.trim() || !to.trim()) return { error: 'Enter a From and To chart number.' };
     if (!Number.isInteger(f) || !Number.isInteger(t) || f < 1 || t < 1)
       return { error: 'Enter whole chart numbers (1 or higher).' };
-    if (totalCharts > 0 && (f > totalCharts || t > totalCharts))
-      return { error: `Chart numbers go up to ${totalCharts}.` };
+    if (maxSerialNo > 0 && (f > maxSerialNo || t > maxSerialNo))
+      return { error: `Chart numbers go up to ${maxSerialNo}.` };
     if (f > t) return { error: 'From must be less than or equal to To.' };
     if (!assigneeId) return { error: 'Pick a coder to assign these charts to.' };
     const name =
@@ -949,7 +949,7 @@ function AllocateFreshVolume({
     const next = [...committed, built];
     setCommitted(next);
     const nextStart = Math.max(...next.map((c) => c.to)) + 1;
-    setFrom(totalCharts > 0 && nextStart > totalCharts ? '' : String(nextStart));
+    setFrom(maxSerialNo > 0 && nextStart > maxSerialNo ? '' : String(nextStart));
     setTo('');
     setAssigneeId(0);
   }
@@ -1099,12 +1099,12 @@ function AllocateFreshVolume({
       <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
         <div>
           <Label className="text-[11px]">
-            From {totalCharts > 0 && <span className="text-ink-subtle font-normal">(1–{totalCharts})</span>}
+            From {maxSerialNo > 0 && <span className="text-ink-subtle font-normal">(1–{maxSerialNo})</span>}
           </Label>
           <Input
             type="number"
             min={1}
-            max={totalCharts > 0 ? totalCharts : undefined}
+            max={maxSerialNo > 0 ? maxSerialNo : undefined}
             placeholder="From"
             value={from}
             onChange={(e) => {
@@ -1115,12 +1115,12 @@ function AllocateFreshVolume({
         </div>
         <div>
           <Label className="text-[11px]">
-            To {totalCharts > 0 && <span className="text-ink-subtle font-normal">(1–{totalCharts})</span>}
+            To {maxSerialNo > 0 && <span className="text-ink-subtle font-normal">(1–{maxSerialNo})</span>}
           </Label>
           <Input
             type="number"
             min={1}
-            max={totalCharts > 0 ? totalCharts : undefined}
+            max={maxSerialNo > 0 ? maxSerialNo : undefined}
             placeholder="To"
             value={to}
             onChange={(e) => {
