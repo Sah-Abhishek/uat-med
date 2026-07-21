@@ -2566,7 +2566,7 @@ function AiReasoning({ item }: { item: CodeItem }) {
   );
 }
 
-type CardMode = 'summary' | 'pick' | 'accept' | 'reject' | 'edit';
+type CardMode = 'summary' | 'pick' | 'accept' | 'reject';
 
 function DecisionCard({
   item,
@@ -2586,48 +2586,19 @@ function DecisionCard({
   // Working copy. Edits live here and only land in committed state on Save, so
   // the code pill, reviewed-count and validation don't shift until the coder
   // commits. Seeded from committed state each time a panel is opened.
-  const [draftCode, setDraftCode] = useState(st.editedCode);
-  const [draftDesc, setDraftDesc] = useState(st.editedDescription);
   const [draftDropdown, setDraftDropdown] = useState(st.reasonDropdown);
   const [draftNotes, setDraftNotes] = useState(st.rejectReason);
 
-  // Mirror of AddCodeModal: tracks whether the description currently shown was
-  // machine-filled (from a picked suggestion / exact-code match) rather than
-  // the coder's own wording. Starts false in edit mode because the seeded
-  // description is the real existing one — so a same-code exact match never
-  // clobbers it. Picking a new code from the dropdown flips it true again.
-  const descAutoFilledRef = useRef(false);
-  const descRef = useRef(draftDesc);
-  useEffect(() => {
-    descRef.current = draftDesc;
-  }, [draftDesc]);
-
-  // Stable identity (empty deps) so the autocomplete's exact-match effect isn't
-  // re-subscribed every render. Auto-fills the description only when it's empty
-  // or was itself auto-filled — never over the coder's manual wording.
-  const applyAutoDescription = useCallback((_code: string, desc: string) => {
-    if (!desc) return;
-    if (descRef.current.trim() === '' || descAutoFilledRef.current) {
-      setDraftDesc(desc);
-      descAutoFilledRef.current = true;
-    }
-  }, []);
-
-  const enter = (m: 'accept' | 'reject' | 'edit') => {
-    setDraftCode(st.editedCode);
-    setDraftDesc(st.editedDescription);
+  const enter = (m: 'accept' | 'reject') => {
     setDraftDropdown(st.reasonDropdown);
     setDraftNotes(st.rejectReason);
-    // Re-seeded description is the existing one, not auto-filled.
-    descAutoFilledRef.current = false;
     setMode(m);
   };
 
-  const action = mode === 'reject' ? 'REJECT' : 'EDIT';
   const reasonOptions =
     codeType !== null
       ? reasonRows
-          .filter((r) => r.codeType === codeType && r.action === action && r.isActive)
+          .filter((r) => r.codeType === codeType && r.action === 'REJECT' && r.isActive)
           .sort((a, b) => a.displayOrder - b.displayOrder || a.text.localeCompare(b.text))
       : [];
 
@@ -2635,16 +2606,15 @@ function DecisionCard({
   const notesOk = notesChars >= REASON_MIN_CHARS;
   const dropdownOk = draftDropdown.trim().length > 0;
   const canSaveReject = dropdownOk && notesOk;
-  const canSaveEdit =
-    draftCode.trim().length > 0 && draftDesc.trim().length > 0 && dropdownOk && notesOk;
 
   // Commit, then settle this card onto its verdict summary. When there's a next
   // pending code the parent advances and this card remounts (so the summary is
   // a no-op); when this was the last one, selection stays put and the summary is
   // what the coder should now see instead of the still-open action panel.
-  // Accept/Reject keep the AI's original code; Edit commits the new values. All
-  // three carry their reason fields so the committed state is internally
-  // consistent regardless of what the coder did before.
+  // Both keep the AI's original code and carry their reason fields so the
+  // committed state is internally consistent regardless of what the coder did
+  // before. (The Edit action — replacing the AI's code with a different one —
+  // was disabled 2026-07-21; only Accept/Reject/Add remain.)
   const saveAccept = () => {
     onSaveAndNext({
       decision: 'accepted',
@@ -2658,16 +2628,6 @@ function DecisionCard({
       decision: 'rejected',
       editedCode: item.code,
       editedDescription: item.description,
-      reasonDropdown: draftDropdown.trim(),
-      rejectReason: draftNotes.trim(),
-    });
-    setMode('summary');
-  };
-  const saveEdit = () => {
-    onSaveAndNext({
-      decision: 'edited',
-      editedCode: draftCode.trim(),
-      editedDescription: draftDesc.trim(),
       reasonDropdown: draftDropdown.trim(),
       rejectReason: draftNotes.trim(),
     });
@@ -2695,54 +2655,11 @@ function DecisionCard({
         disabled={mode !== 'pick' && mode !== 'summary'}
       />
 
-      {/* Code: read display everywhere except the Edit panel, where it becomes
-          editable fields. */}
+      {/* Code: read-only display. Editing an AI code into a different one is
+          disabled (2026-07-21) — Accept/Reject/Add are the only actions. */}
       <div className="mt-3">
-        {mode === 'edit' ? (
-          <div className="space-y-2">
-            <div>
-              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
-                Code
-              </label>
-              <IcdCodeAutocomplete
-                value={draftCode}
-                onChange={setDraftCode}
-                onPick={(picked, desc) => {
-                  setDraftCode(picked);
-                  // Auto-fill the description from the reference data; the coder
-                  // can still edit it before saving.
-                  setDraftDesc(desc);
-                  descAutoFilledRef.current = true;
-                }}
-                // Auto-fill the description as soon as a full, valid code is
-                // typed — not only when picked from the dropdown.
-                onExactMatch={applyAutoDescription}
-                // CPT/Procedure codes aren't in the ICD-10-CM reference DB.
-                enabled={item.category !== 'PROCEDURE'}
-                placeholder={item.category === 'PROCEDURE' ? 'e.g. 99213' : 'e.g. E11.9'}
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
-                Description
-              </label>
-              <Input
-                value={draftDesc}
-                onChange={(e) => {
-                  setDraftDesc(e.target.value);
-                  // The coder is writing their own wording — stop auto-filling.
-                  descAutoFilledRef.current = false;
-                }}
-              />
-            </div>
-          </div>
-        ) : (
-          <>
-            <CodeDisplay st={st} />
-            <CoderEditComparison item={item} st={st} />
-          </>
-        )}
+        <CodeDisplay st={st} />
+        <CoderEditComparison item={item} st={st} />
       </div>
 
       <AiReasoning item={item} />
@@ -2772,7 +2689,7 @@ function DecisionCard({
           <p className="text-xs font-semibold text-ink-muted mb-2.5">
             How do you want to handle this code?
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <ActionTile
               tone="success"
               icon={<Check className="w-4 h-4" />}
@@ -2788,14 +2705,6 @@ function DecisionCard({
               hint="Doesn't apply"
               active={st.decision === 'rejected'}
               onClick={() => enter('reject')}
-            />
-            <ActionTile
-              tone="info"
-              icon={<Pencil className="w-4 h-4" />}
-              label="Edit"
-              hint="Change code"
-              active={st.decision === 'edited'}
-              onClick={() => enter('edit')}
             />
           </div>
         </div>
@@ -2837,32 +2746,11 @@ function DecisionCard({
         </div>
       )}
 
-      {/* ── Edit ── */}
-      {mode === 'edit' && (
-        <div className="mt-5 space-y-3">
-          <ReasonFields
-            tone="info"
-            label="Reason for editing"
-            options={reasonOptions}
-            dropdown={draftDropdown}
-            onDropdown={setDraftDropdown}
-            notes={draftNotes}
-            onNotes={setDraftNotes}
-            notesPlaceholder="Describe what you changed and why"
-          />
-          <SaveFooter
-            tone="info"
-            canSave={canSaveEdit}
-            onBack={() => setMode('pick')}
-            onSave={saveEdit}
-          />
-        </div>
-      )}
     </div>
   );
 }
 
-/** One of the three big choices in the action picker. `active` marks the code's
+/** One of the two big choices in the action picker. `active` marks the code's
  * current committed decision so re-opening the picker shows what was chosen. */
 function ActionTile({
   tone,

@@ -2562,13 +2562,22 @@ async allocationHistory(id: number) {
     for (const d of dto.decisions) {
       const key = `${d.codeType}|${d.codeValue}`;
 
-      // ACCEPT / EDIT / REJECT all act on a specific AI suggestion and therefore
+      // EDIT (replacing the AI's code with a different one) was disabled
+      // 2026-07-21 — Accept/Reject/Add are the only actions now. Existing
+      // EDITED rows from before the change are untouched and still display,
+      // this only blocks NEW ones from being submitted.
+      if (d.decision === CodeReviewDecision.EDITED) {
+        throw new BadRequestException({
+          error: { code: 'invalid_argument', message: `Editing a code's value is disabled; use Accept, Reject, or Add instead (${key}).` },
+        });
+      }
+
+      // ACCEPT / REJECT both act on a specific AI suggestion and therefore
       // require its predicted_code_id. Without it the gateway can't
       // attribute the decision to a code, so we'd silently lose it. ADDED has
       // no AI suggestion to point at and is exempt.
       const needsPredictedCodeId =
         d.decision === CodeReviewDecision.ACCEPTED ||
-        d.decision === CodeReviewDecision.EDITED ||
         d.decision === CodeReviewDecision.REJECTED;
       if (needsPredictedCodeId && !(d.predictedCodeId ?? '').trim()) {
         throw new BadRequestException({
@@ -2579,9 +2588,7 @@ async allocationHistory(id: number) {
         });
       }
 
-      const requiresReason =
-        d.decision === CodeReviewDecision.REJECTED || d.decision === CodeReviewDecision.EDITED;
-      if (requiresReason) {
+      if (d.decision === CodeReviewDecision.REJECTED) {
         const text = (d.reasonText ?? '').trim();
         const dropdown = (d.reasonDropdown ?? '').trim();
         if (text.length < 20) {
@@ -2594,14 +2601,12 @@ async allocationHistory(id: number) {
             error: { code: 'invalid_argument', message: `reasonDropdown is required for ${key}.` },
           });
         }
-        const action =
-          d.decision === CodeReviewDecision.REJECTED ? CodeReviewAction.REJECT : CodeReviewAction.EDIT;
         const match = await this.codeReviewReasons.findOne({
           where: {
             clientId: Number(clientId),
             locationId: Number(locationId),
             codeType: d.codeType,
-            action,
+            action: CodeReviewAction.REJECT,
             text: dropdown,
             isActive: true,
           },
@@ -2610,20 +2615,13 @@ async allocationHistory(id: number) {
           throw new BadRequestException({
             error: {
               code: 'invalid_argument',
-              message: `reasonDropdown "${dropdown}" is not an active reason for ${d.codeType}/${action}.`,
+              message: `reasonDropdown "${dropdown}" is not an active reason for ${d.codeType}/${CodeReviewAction.REJECT}.`,
             },
           });
         }
       }
-      if (d.decision === CodeReviewDecision.EDITED) {
-        if (!(d.editedCode ?? '').trim()) {
-          throw new BadRequestException({
-            error: { code: 'invalid_argument', message: `editedCode is required when decision is EDITED for ${key}.` },
-          });
-        }
-      }
       // ADDED has no AI suggestion to compare against, no dropdown reason
-      // requirement (those are scoped to REJECT/EDIT in our config), but
+      // requirement (those are scoped to REJECT in our config), but
       // still demands a reason text per the gateway contract.
       if (d.decision === CodeReviewDecision.ADDED) {
         const text = (d.reasonText ?? '').trim();
