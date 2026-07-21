@@ -2529,6 +2529,22 @@ function CodeDisplay({ st }: { st: CodeState }) {
   );
 }
 
+/** "AI suggested X → coder changed it to Y" — shown wherever a decided code is
+ * displayed (coder's own summary, read-only/QA view, auditor's view) so the
+ * AI-vs-coder edit is visible everywhere, not just to the auditor. */
+function CoderEditComparison({ item, st }: { item: CodeItem; st: CodeState }) {
+  const coderEdited =
+    st.decision === 'edited' && normalizeCode(item.code) !== normalizeCode(st.editedCode);
+  if (!coderEdited) return null;
+  return (
+    <p className="mt-1.5 text-xs text-ink-muted">
+      AI suggested <span className="font-mono font-semibold text-ink">{item.code}</span>
+      {' → '}coder changed it to{' '}
+      <span className="font-mono font-semibold text-info">{st.editedCode}</span>
+    </p>
+  );
+}
+
 /** AI justification + confidence — shown for context in every mode. */
 function AiReasoning({ item }: { item: CodeItem }) {
   return (
@@ -2722,7 +2738,10 @@ function DecisionCard({
             </div>
           </div>
         ) : (
-          <CodeDisplay st={st} />
+          <>
+            <CodeDisplay st={st} />
+            <CoderEditComparison item={item} st={st} />
+          </>
         )}
       </div>
 
@@ -3095,6 +3114,7 @@ function ReadOnlyCard({ item, st }: { item: CodeItem; st: CodeState }) {
         {item.category}
       </p>
       <CodeDisplay st={st} />
+      <CoderEditComparison item={item} st={st} />
       <AiReasoning item={item} />
       <ReadOnlyVerdictRow decision={st.decision} />
       {hasReason && (
@@ -3181,8 +3201,6 @@ function AuditCard({
 }) {
   const hasReason =
     st.decision === 'rejected' || st.decision === 'edited' || st.decision === 'added';
-  const coderEdited =
-    st.decision === 'edited' && normalizeCode(item.code) !== normalizeCode(st.editedCode);
   const disagree = auditSt.verdict === 'disagree';
   const chars = auditSt.feedbackText.trim().length;
   const short = chars < AUDIT_FEEDBACK_MIN_CHARS;
@@ -3195,13 +3213,7 @@ function AuditCard({
           {item.category}
         </p>
         <CodeDisplay st={st} />
-        {coderEdited && (
-          <p className="mt-1.5 text-xs text-ink-muted">
-            AI suggested <span className="font-mono font-semibold text-ink">{item.code}</span>
-            {' → '}coder changed it to{' '}
-            <span className="font-mono font-semibold text-info">{st.editedCode}</span>
-          </p>
-        )}
+        <CoderEditComparison item={item} st={st} />
         <AiReasoning item={item} />
         <ReadOnlyVerdictRow decision={st.decision} />
         {hasReason && (
