@@ -439,8 +439,14 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
     return this.ds.transaction(async (manager) => {
       const cRepo = manager.getRepository(Chart);
 
+      // .withDeleted(): Chart has a @DeleteDateColumn, so TypeORM silently
+      // excludes soft-deleted rows from a plain createQueryBuilder() query.
+      // Deleted charts keep their serial_no as a permanent gap (still occupying
+      // the (worklist_id, serial_no) unique key) — without this, MAX() undercounts
+      // and the next insert collides with a soft-deleted row's serial.
       const maxRow = await cRepo
         .createQueryBuilder('c')
+        .withDeleted()
         .select('COALESCE(MAX(c.serial_no), 0)', 'max')
         .where('c.worklist_id = :w', { w: worklistId })
         .getRawOne<{ max: string | number }>();
@@ -533,8 +539,12 @@ export class WorklistBulkService implements OnModuleInit, OnModuleDestroy {
       const cRepo = manager.getRepository(Chart);
       const wRepo = manager.getRepository(Worklist);
 
+      // .withDeleted(): see the identical comment in import() above — deleted
+      // charts still occupy their serial_no in the unique key, so MAX() must
+      // see them too or the next insert collides with a soft-deleted row.
       const maxRow = await cRepo
         .createQueryBuilder('c')
+        .withDeleted()
         .select('COALESCE(MAX(c.serial_no), 0)', 'max')
         .where('c.worklist_id = :w', { w: worklistId })
         .getRawOne<{ max: string | number }>();
