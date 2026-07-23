@@ -262,10 +262,11 @@ const FIELDS: FieldDef[] = [
   // auditor-report (2026-03-20 → 4, 2026-06-15 → 3). Blank once CLOSED (mirrors
   // Audit Done Date, which reads milestone_changed_at only while at AUDIT_DONE).
   { key: 'auditedWeek',      label: 'Audited Week',          sql: `CASE WHEN c.milestone = 'AUDIT_DONE' THEN FLOOR((EXTRACT(DAY FROM c.milestone_changed_at) + EXTRACT(ISODOW FROM date_trunc('month', c.milestone_changed_at)) - 2) / 7)::int + 1 END`, filterable: true, sortable: true, type: 'number', filterKind: 'text' },
-  // Comment Log — the full chart conversation from chart_feedback (each row is one
-  // comment; `auditor_id` is really the author's user id — coders, auditors, TLs),
-  // formatted "Name (Role) [MM/DD/YYYY HH:MI:SS +00]: text", one entry per line.
-  { key: 'commentLog',       label: 'Comment Log',           sql: `(SELECT string_agg(u2.full_name || ' (' || initcap(lower(u2.role::text)) || ') [' || to_char(cf.created_at AT TIME ZONE 'UTC', 'MM/DD/YYYY HH24:MI:SS') || ' +00]: ' || cf.comments, E'\\n' ORDER BY cf.created_at) FROM chart_feedback cf JOIN users u2 ON u2.id = cf.auditor_id WHERE cf.chart_id = c.id)`, filterable: false, sortable: false },
+  // Conversation Logs — the full chart conversation from chart_feedback (each row
+  // is one comment; `auditor_id` is really the author's user id — coders,
+  // auditors, TLs), formatted "Name (Role) [MM/DD/YYYY HH:MI:SS +00]: text", one
+  // entry per line. Same data/key as the chart-detail "Conversation Log" sidebar.
+  { key: 'commentLog',       label: 'Conversation Logs',     sql: `(SELECT string_agg(u2.full_name || ' (' || initcap(lower(u2.role::text)) || ') [' || to_char(cf.created_at AT TIME ZONE 'UTC', 'MM/DD/YYYY HH24:MI:SS') || ' +00]: ' || cf.comments, E'\\n' ORDER BY cf.created_at) FROM chart_feedback cf JOIN users u2 ON u2.id = cf.auditor_id WHERE cf.chart_id = c.id)`, filterable: false, sortable: false },
   // Per-area Audit Information columns (Total / Correct / Feedback Category × 7 areas).
   ...auditAreaFields(),
 ];
