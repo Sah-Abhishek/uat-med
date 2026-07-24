@@ -470,11 +470,28 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       return { ...c, decisionState: 'accepted', ...flag };
     };
     const buckets: Record<string, AnnotatedCode[]> = { PRIMARY: [], SECONDARY: [], PROCEDURE: [] };
+    // Codes the coder ADDED (submitted or drafted) — including the "add" half
+    // of a recategorize. Once such an ADD is forwarded to the AI gateway, the
+    // gateway starts echoing it back as a live predicted code (its own
+    // minted id, status ACCEPTED) on the NEXT fetch of this encounter's
+    // codes — so `aiCodes` can now contain an entry that is really just the
+    // coder's own addition, not an independent AI prediction. Exclude those
+    // from the AI-reconciliation pass below (Pass 1/2) so they don't fall
+    // through as "untouched"; addedFor() renders them correctly from the
+    // decision/draft record itself, which is unaffected by what the gateway
+    // echoes back.
+    const addedKeys = new Set<string>();
+    for (const d of decisions) {
+      if (d.decision === 'ADDED') addedKeys.add(`${d.codeType}|${norm(d.editedCode ?? d.codeValue)}`);
+    }
+    for (const a of draftAdded) {
+      addedKeys.add(`${a.category}|${norm(a.code)}`);
+    }
     const aiAll = [
       ...aiCodes.primary.map((c) => ({ c, orig: 'PRIMARY' })),
       ...aiCodes.secondary.map((c) => ({ c, orig: 'SECONDARY' })),
       ...aiCodes.procedures.map((c) => ({ c, orig: 'PROCEDURE' })),
-    ];
+    ].filter(({ c, orig }) => !addedKeys.has(`${orig}|${norm(c.code)}`));
     // Pass 1 — exact (category|code): codes that stayed in their AI category
     // (a dual-category code matches in BOTH its buckets). Mark each consumed.
     const consumed = new Set<string>();
