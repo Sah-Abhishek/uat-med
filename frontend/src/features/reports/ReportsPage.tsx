@@ -209,8 +209,8 @@ export function ReportsPage() {
         onNew={newReport}
       />
 
-      {/* ── Auditor quick monthly export ──────────────────── */}
-      {currentUser?.role === 'AUDITOR' && (
+      {/* ── Quick monthly export ────────────────────────────── */}
+      {(currentUser?.role === 'AUDITOR' || currentUser?.role === 'TEAMLEAD' || currentUser?.role === 'MANAGER') && (
         <AuditorMonthlyExport onError={setDownloadError} />
       )}
 
@@ -455,14 +455,15 @@ function SavedTemplatesSection({
   );
 }
 
-/* ── Auditor quick monthly export ───────────────────────── */
+/* ── Quick monthly export ────────────────────────────────── */
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
- * Auditor-only shortcut: pick a saved template, then a month, and the report
- * downloads immediately — filtered to that month's Received Date range
- * (1st … last day, inclusive) using the template's own columns/sort. No filter
- * values are carried over; the month range is the only filter applied.
+ * Shortcut for Auditor/Team Lead/Manager: pick a saved template, then a
+ * month, and the report downloads immediately — filtered to that month's
+ * Received Date range (1st … last day, inclusive) using the template's own
+ * columns/sort. No filter values are carried over; the month range is the
+ * only filter applied.
  */
 function AuditorMonthlyExport({ onError }: { onError: (msg: string | null) => void }) {
   const templatesQ = useQuery({
