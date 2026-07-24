@@ -65,6 +65,7 @@ function LiveCard({
             <VerdictCount label="rejected" n={s.rejected} tone="text-danger" />
             <VerdictCount label="edited" n={s.edited} tone="text-warn" />
             <VerdictCount label="added" n={s.added} tone="text-info" />
+            <VerdictCount label="recategorizing" n={s.moved} tone="text-warn" />
           </>
         )}
       </div>

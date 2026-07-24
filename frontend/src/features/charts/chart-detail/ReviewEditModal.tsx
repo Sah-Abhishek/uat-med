@@ -93,7 +93,7 @@ interface Props {
   audit?: boolean;
 }
 
-type Decision = 'pending' | 'accepted' | 'rejected' | 'edited' | 'added';
+type Decision = 'pending' | 'accepted' | 'rejected' | 'edited' | 'added' | 'moved';
 // 'ADMIT CODE' kept in the type for now — the section is currently disabled
 // in buildItems() because admit code and primary diagnosis are the same
 // thing. Re-enable by uncommenting the admit lines below.
@@ -156,16 +156,25 @@ interface CodeItem {
   /** Orchestrator UUID — only present when the items were sourced from
    * /charts/:id/predicted-codes. Required for the orchestrator forward. */
   predictedCodeId?: string;
+  /** Set only while `category` has been changed via the dropdown — the
+   * category this item started in (AI-predicted or originally added under).
+   * Lets buildPayload know what to reject the code out of. */
+  originalCategory?: Category;
 }
 
 interface CodeState {
   decision: Decision;
   editedCode: string;
   editedDescription: string;
-  /** Free-text reason; required (≥20 chars) on Reject/Edit. */
+  /** Free-text reason; required (≥20 chars) on Reject/Edit, and on the
+   * "remove from old category" half of a Recategorize (decision='moved'). */
   rejectReason: string;
-  /** Dropdown reason; required on Reject/Edit. Picked from Settings. */
+  /** Dropdown reason; required on Reject/Edit, and on the "remove from old
+   * category" half of a Recategorize. Picked from Settings. */
   reasonDropdown: string;
+  /** Free-text reason for the "add to new category" half of a Recategorize
+   * (decision='moved'); required (≥20 chars). Unused otherwise. */
+  moveReasonText: string;
 }
 
 /** Auditor's per-code judgment of a coder decision (audit mode only). */
@@ -209,6 +218,7 @@ const LEGEND: { d: Decision; label: string; cls: string }[] = [
   { d: 'rejected', label: 'Rejected', cls: 'bg-danger' },
   { d: 'edited', label: 'Edited', cls: 'bg-info' },
   { d: 'added', label: 'Added', cls: 'bg-violet-500' },
+  { d: 'moved', label: 'Recategorizing', cls: 'bg-warn' },
   { d: 'pending', label: 'Pending', cls: 'bg-ink-subtle' },
 ];
 
@@ -369,7 +379,9 @@ export function ReviewEditModal({
     () =>
       [...aiItems, ...addedItems].map((it) => {
         const moved = categoryOverrides[it.key];
-        return moved && moved !== it.category ? { ...it, category: moved } : it;
+        return moved && moved !== it.category
+          ? { ...it, category: moved, originalCategory: it.category }
+          : it;
       }),
     [aiItems, addedItems, categoryOverrides],
   );
@@ -406,6 +418,7 @@ export function ReviewEditModal({
           editedDescription: it.description,
           rejectReason: '',
           reasonDropdown: '',
+          moveReasonText: '',
         };
       }
       return next;
@@ -536,6 +549,7 @@ export function ReviewEditModal({
           editedDescription: match.editedDescription ?? it.description,
           rejectReason: match.reasonText ?? '',
           reasonDropdown: match.reasonDropdown ?? '',
+          moveReasonText: '',
         };
       }
       // Added items: seed their 'added' state. The items-merge effect keys off
@@ -551,6 +565,7 @@ export function ReviewEditModal({
           editedDescription: it.description,
           rejectReason: match?.reasonText ?? '',
           reasonDropdown: match?.reasonDropdown ?? '',
+          moveReasonText: '',
         };
       }
       return next;
@@ -743,6 +758,7 @@ export function ReviewEditModal({
         editedDescription: st.editedDescription,
         rejectReason: st.rejectReason,
         reasonDropdown: st.reasonDropdown,
+        moveReasonText: st.moveReasonText,
       });
     }
     return {
@@ -837,6 +853,7 @@ export function ReviewEditModal({
           editedDescription: d.editedDescription || it.description,
           rejectReason: d.rejectReason,
           reasonDropdown: d.reasonDropdown,
+          moveReasonText: d.moveReasonText ?? '',
         };
       }
       return next;
@@ -1047,27 +1064,83 @@ export function ReviewEditModal({
     goToNextAfterSave();
   };
 
-  // Move a code to a different category in place. Reason dropdowns are
-  // code-type-specific, so a stale dropdown reason may not belong to the new
-  // category's list — clear it so the coder re-picks (the free-text note stays).
+  // Move a code to a different category. This is no longer a silent in-place
+  // move: the code is rejected out of its original category and re-added
+  // fresh under the new one, so the audit trail shows both halves instead of
+  // one row quietly disappearing and another appearing. The item's decision
+  // flips to 'moved' and the card switches to RecategorizeCard, which
+  // collects a reject reason (for AI-suggested codes — coder-added codes have
+  // no predictedCodeId to reject, so only the add-side reason is required)
+  // and an add reason before the item counts as reviewed. Moving back to the
+  // code's original category cancels the recategorize and resets to pending.
   const setItemCategory = (key: string, category: Category) => {
-    setCategoryOverrides((prev) => ({ ...prev, [key]: category }));
-    setState((prev) =>
-      prev[key]?.reasonDropdown
-        ? { ...prev, [key]: { ...prev[key], reasonDropdown: '' } }
-        : prev,
-    );
+    const base = [...aiItems, ...addedItems].find((it) => it.key === key);
+    const original = base?.category;
+    setCategoryOverrides((prev) => {
+      if (category === original) {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: category };
+    });
+    setState((prev) => {
+      const st = prev[key];
+      if (!st) return prev;
+      if (category === original) {
+        return {
+          ...prev,
+          [key]: { ...st, decision: 'pending', reasonDropdown: '', rejectReason: '', moveReasonText: '' },
+        };
+      }
+      return {
+        ...prev,
+        [key]: { ...st, decision: 'moved', reasonDropdown: '', rejectReason: '', moveReasonText: '' },
+      };
+    });
   };
 
   // Build the API payload, dropping ADMIT CODE rows (UI mirror of the
-  // first PRIMARY) and rows still pending.
+  // first PRIMARY) and rows still pending. A 'moved' item emits up to two
+  // entries: REJECTED in its original category (only when it has a
+  // predictedCodeId — an AI suggestion to reject) and ADDED in its new one.
   const buildPayload = (): CodeDecisionInput[] => {
     const out: CodeDecisionInput[] = [];
     for (const it of items) {
-      const codeType = categoryToCodeType(it.category);
-      if (!codeType) continue;
       const st = state[it.key];
       if (!st || st.decision === 'pending') continue;
+
+      if (st.decision === 'moved') {
+        const toType = categoryToCodeType(it.category);
+        if (!toType) continue;
+        const fromCategory = it.originalCategory ?? it.category;
+        const fromType = categoryToCodeType(fromCategory);
+        if (fromType && it.predictedCodeId) {
+          out.push({
+            codeType: fromType,
+            codeValue: it.code,
+            predictedCodeId: it.predictedCodeId,
+            originalDescription: it.description,
+            decision: 'REJECTED',
+            reasonDropdown: st.reasonDropdown.trim(),
+            reasonText: st.rejectReason.trim(),
+          });
+        }
+        out.push({
+          codeType: toType,
+          codeValue: it.code,
+          originalDescription: it.description,
+          decision: 'ADDED',
+          editedCode: st.editedCode,
+          editedDescription: st.editedDescription,
+          reasonText: st.moveReasonText.trim(),
+        });
+        continue;
+      }
+
+      const codeType = categoryToCodeType(it.category);
+      if (!codeType) continue;
       const verdict =
         st.decision === 'accepted' ? 'ACCEPTED' :
         st.decision === 'rejected' ? 'REJECTED' :
@@ -1095,11 +1168,18 @@ export function ReviewEditModal({
     .map((it) => {
       const st = state[it.key];
       if (!st) return null;
+      if (!categoryToCodeType(it.category)) return null;
+      if (st.decision === 'moved') {
+        const needsRejectReason = !!it.predictedCodeId;
+        const dropdownOk = needsRejectReason ? st.reasonDropdown.trim().length > 0 : true;
+        const rejectTextOk = needsRejectReason ? st.rejectReason.trim().length >= REASON_MIN_CHARS : true;
+        const addTextOk = st.moveReasonText.trim().length >= REASON_MIN_CHARS;
+        return dropdownOk && rejectTextOk && addTextOk ? null : it.code;
+      }
       const isReject = st.decision === 'rejected';
       const isEdit = st.decision === 'edited';
       const isAdd = st.decision === 'added';
       if (!isReject && !isEdit && !isAdd) return null;
-      if (!categoryToCodeType(it.category)) return null;
       const dropdownOk = (isReject || isEdit) ? st.reasonDropdown.trim().length > 0 : true;
       const textOk = st.rejectReason.trim().length >= REASON_MIN_CHARS;
       if (dropdownOk && textOk) return null;
@@ -1520,6 +1600,7 @@ export function ReviewEditModal({
                 editedDescription: item.description,
                 rejectReason: reason,
                 reasonDropdown: '',
+                moveReasonText: '',
               },
             }));
             setAddedItems((prev) => [...prev, item]);
@@ -2410,6 +2491,8 @@ function decisionChip(d: Decision) {
       return 'border-info/40 bg-info-soft/50 text-info hover:bg-info-soft';
     case 'added':
       return 'border-violet-400/40 bg-violet-100/60 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-300';
+    case 'moved':
+      return 'border-warn/40 bg-warn-soft/50 text-warn hover:bg-warn-soft';
     default:
       return 'border-line bg-surface text-ink hover:bg-surface-2';
   }
@@ -2504,6 +2587,20 @@ function SelectedCard(props: SelectedCardProps) {
           st={props.st}
           update={props.update}
           onRemove={props.onRemove}
+        />
+        {auditFeedback}
+      </div>
+    );
+  }
+  if (props.st.decision === 'moved') {
+    return (
+      <div className="space-y-4">
+        <RecategorizeCard
+          item={props.item}
+          st={props.st}
+          update={props.update}
+          onChangeCategory={props.onChangeCategory}
+          reasonRows={props.reasonRows}
         />
         {auditFeedback}
       </div>
@@ -3263,6 +3360,111 @@ function AddedCard({
             className={cn('text-[11px] font-mono shrink-0', short ? 'text-danger' : 'text-success')}
           >
             {chars} / {REASON_MIN_CHARS}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Shown while a code's category has been changed via the dropdown
+ * (decision='moved'). Recategorizing is recorded as two decisions on submit
+ * — REJECTED in the old category and ADDED in the new one — rather than a
+ * silent move, so both halves need their own justification here. The
+ * "remove from" reason only applies to AI-suggested codes (they carry a
+ * predictedCodeId to reject against); a coder-added code moving categories
+ * only needs the "add to" reason. */
+function RecategorizeCard({
+  item,
+  st,
+  update,
+  onChangeCategory,
+  reasonRows,
+}: {
+  item: CodeItem;
+  st: CodeState;
+  update: (patch: Partial<CodeState>) => void;
+  onChangeCategory: (category: Category) => void;
+  reasonRows: CodeReviewReasonRow[];
+}) {
+  const fromCategory = item.originalCategory ?? item.category;
+  const fromType = categoryToCodeType(fromCategory);
+  const hasAiOrigin = !!item.predictedCodeId;
+
+  const reasonOptions =
+    hasAiOrigin && fromType
+      ? reasonRows
+          .filter((r) => r.codeType === fromType && r.action === 'REJECT' && r.isActive)
+          .sort((a, b) => a.displayOrder - b.displayOrder || a.text.localeCompare(b.text))
+      : [];
+
+  const addChars = st.moveReasonText.trim().length;
+  const addShort = addChars < REASON_MIN_CHARS;
+
+  return (
+    <div className={CARD_SHELL}>
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted">
+          Category
+        </label>
+      </div>
+      <FancySelect
+        value={CATEGORY_ORDER.includes(item.category) ? item.category : 'PRIMARY'}
+        onChange={(v) => onChangeCategory(v as Category)}
+        options={CATEGORY_ORDER.map((c) => ({
+          value: c,
+          label: ADD_CODE_CATEGORY_LABEL[c as AddCodeCategory],
+        }))}
+      />
+
+      <div className="mt-3">
+        <CodeDisplay st={st} />
+      </div>
+
+      <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-warn/30 bg-warn-soft/40 p-3">
+        <RotateCw className="w-4 h-4 text-warn mt-0.5 shrink-0" />
+        <p className="text-xs text-ink leading-relaxed">
+          Recategorizing from <span className="font-semibold">{fromCategory}</span> to{' '}
+          <span className="font-semibold">{item.category}</span> rejects the code from{' '}
+          {fromCategory} and adds it fresh under {item.category}. Both need a reason.
+        </p>
+      </div>
+
+      {hasAiOrigin && (
+        <div className="mt-4">
+          <ReasonFields
+            tone="danger"
+            label={`Reason for removing from ${fromCategory}`}
+            options={reasonOptions}
+            dropdown={st.reasonDropdown}
+            onDropdown={(v) => update({ reasonDropdown: v })}
+            notes={st.rejectReason}
+            onNotes={(v) => update({ rejectReason: v })}
+            notesPlaceholder="Describe why this code no longer belongs here"
+          />
+        </div>
+      )}
+
+      <div className="mt-4">
+        <label className="text-[10px] uppercase tracking-wide font-semibold text-ink-muted block mb-1">
+          Reason for adding to {item.category} <span className="text-danger normal-case">*</span>
+        </label>
+        <Textarea
+          placeholder={`Describe why this code belongs here (min ${REASON_MIN_CHARS} characters)…`}
+          value={st.moveReasonText}
+          onChange={(e) => update({ moveReasonText: e.target.value })}
+          rows={3}
+          error={addShort ? `Minimum ${REASON_MIN_CHARS} characters.` : undefined}
+        />
+        <div className="flex items-center justify-between mt-1">
+          <div className="flex-1 h-1 bg-surface-sunken rounded-full overflow-hidden mr-3">
+            <div
+              className={cn('h-full transition-all', addShort ? 'bg-danger/70' : 'bg-success')}
+              style={{ width: `${Math.min(100, (addChars / REASON_MIN_CHARS) * 100)}%` }}
+            />
+          </div>
+          <span className={cn('text-[11px] font-mono shrink-0', addShort ? 'text-danger' : 'text-success')}>
+            {addChars} / {REASON_MIN_CHARS}
           </span>
         </div>
       </div>

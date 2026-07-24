@@ -371,11 +371,14 @@ export type CodeDraftCategory = 'PRIMARY' | 'SECONDARY' | 'PROCEDURE';
 export interface CodeDecisionDraftEntry {
   category: CodeDraftCategory;
   code: string;
-  decision: 'accepted' | 'rejected' | 'edited' | 'added';
+  decision: 'accepted' | 'rejected' | 'edited' | 'added' | 'moved';
   editedCode: string;
   editedDescription: string;
   rejectReason: string;
   reasonDropdown: string;
+  /** Reason for the "add to new category" half of a recategorize
+   * (decision='moved'). Absent on older drafts predating this field. */
+  moveReasonText?: string;
 }
 
 /** Codes the user added that the AI didn't suggest — they have no predicted

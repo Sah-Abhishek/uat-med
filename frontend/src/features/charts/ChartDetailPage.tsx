@@ -431,7 +431,14 @@ function ChartDetailBody({ chart }: { chart: Chart }) {
       });
     }
     for (const d of draftDecisions) {
-      if (d.decision === 'added') continue;
+      // 'added' has no AI-original slot to annotate here (see addedFor below).
+      // 'moved' (an in-progress recategorize) is skipped too: it isn't a
+      // simple same-decision category move the Pass-2 reconciliation below
+      // can follow — it becomes two independent decisions (REJECTED in the
+      // old category, ADDED in the new) only once actually submitted, at
+      // which point they hydrate normally as ordinary decisions/added-items.
+      // Until then the code just shows as untouched in its original bucket.
+      if (d.decision === 'added' || d.decision === 'moved') continue;
       effByKey.set(`${d.category}|${d.code}`, {
         code: d.code,
         category: d.category,

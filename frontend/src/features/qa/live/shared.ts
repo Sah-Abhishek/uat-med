@@ -12,6 +12,7 @@ export const DECISION_VARIANT: Record<LiveDecision, LiveVariant> = {
   rejected: 'danger',
   edited: 'warn',
   added: 'info',
+  moved: 'warn',
 };
 
 /** Past-tense verb for "{name} {verb} {code}" toast lines. */
@@ -20,6 +21,7 @@ export const DECISION_VERB: Record<LiveDecision, string> = {
   rejected: 'rejected',
   edited: 'edited',
   added: 'added',
+  moved: 'recategorized',
 };
 
 /** Stable identity for one coder's board on one chart — the card key and the
@@ -40,10 +42,11 @@ export interface DecisionSummary {
   rejected: number;
   edited: number;
   added: number;
+  moved: number;
 }
 
 export function summarize(entries: CodeDecisionDraftEntry[]): DecisionSummary {
-  const s: DecisionSummary = { total: entries.length, accepted: 0, rejected: 0, edited: 0, added: 0 };
+  const s: DecisionSummary = { total: entries.length, accepted: 0, rejected: 0, edited: 0, added: 0, moved: 0 };
   for (const e of entries) s[e.decision] += 1;
   return s;
 }
