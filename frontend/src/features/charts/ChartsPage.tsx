@@ -7,6 +7,7 @@ import {
   getChartsSummary,
   bulkModifyCharts,
   selfAllocateCharts,
+  bulkDeleteCharts,
   retryAiErroredCharts,
   getActiveTimer,
   type AllocationAction,
@@ -72,6 +73,7 @@ import {
   Pause,
   ChevronRight,
   RotateCcw,
+  Trash2,
   X,
 } from 'lucide-react';
 
@@ -502,6 +504,8 @@ export function ChartsPage() {
   // Auditor / admin can pull charts to themselves; coders are assigned charts
   // by a TL/Manager and no longer self-allocate.
   const canSelfAllocate = can(user, 'chart.selfAllocate');
+  // Bulk delete (soft) is limited to Team Lead / Manager, same as bulk modify.
+  const canDelete = can(user, 'chart.bulkDelete');
   // Anyone who can run a timer sees the active-timer card (coders included) —
   // this is independent of self-allocate, which coders no longer have.
   const canTime =
@@ -548,6 +552,7 @@ export function ChartsPage() {
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [modifyOpen, setModifyOpen] = useState(false);
   const [selfAllocateOpen, setSelfAllocateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [retryOpen, setRetryOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
     loadVisibleColumns(user.role === 'AUDITOR'),
@@ -909,6 +914,16 @@ export function ChartsPage() {
                 Self Allocate
               </Button>
             )}
+            {canDelete && (
+              <Button
+                variant="soft-danger"
+                disabled={!someSelected}
+                leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                onClick={() => setDeleteOpen(true)}
+              >
+                Delete Charts
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1028,6 +1043,12 @@ export function ChartsPage() {
         onClose={() => setSelfAllocateOpen(false)}
         selectedIds={Array.from(selected)}
         onComplete={() => { setSelected(new Set()); setSelfAllocateOpen(false); }}
+      />
+      <DeleteChartsConfirm
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        selectedIds={Array.from(selected)}
+        onComplete={() => { setSelected(new Set()); setDeleteOpen(false); }}
       />
       <ConfirmModal
         open={retryOpen}
@@ -1901,6 +1922,59 @@ function SelfAllocateConfirm({
           onComplete();
         }}
       />
+    </>
+  );
+}
+
+/* ── Delete charts confirmation ─────────────────────────── */
+function DeleteChartsConfirm({
+  open,
+  onClose,
+  selectedIds,
+  onComplete,
+}: {
+  open: boolean;
+  onClose: () => void;
+  selectedIds: string[];
+  onComplete: () => void;
+}) {
+  const qc = useQueryClient();
+  const [toast, setToast] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: () => bulkDeleteCharts(selectedIds.map(Number)),
+    onSuccess: (res) => {
+      const n = res?.deleted ?? selectedIds.length;
+      // Deletion is a soft-delete (deleted_at), so docs/decisions/AI history
+      // are kept — but every surface that reads chart counts needs a refresh.
+      qc.invalidateQueries({ queryKey: ['charts'] });
+      qc.invalidateQueries({ queryKey: ['worklists'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      setToast(`Deleted ${n} chart${n === 1 ? '' : 's'}.`);
+      onComplete();
+    },
+    onError: (err) => {
+      setError(
+        (err as unknown as ApiErrorShape)?.message ?? 'Failed to delete the selected charts.',
+      );
+      onClose();
+    },
+  });
+
+  return (
+    <>
+      <ConfirmModal
+        open={open}
+        onClose={onClose}
+        onConfirm={() => mutation.mutate()}
+        message={`Delete ${selectedIds.length} chart${selectedIds.length === 1 ? '' : 's'}? This soft-deletes the charts — their documents, decisions, and AI history are kept, but they'll disappear from every list and count.`}
+        variant="danger"
+        confirmLabel="Delete charts"
+        cancelLabel="Cancel"
+        loading={mutation.isPending}
+      />
+      <Toast open={!!toast} message={toast ?? ''} variant="success" onClose={() => setToast(null)} />
+      <Toast open={!!error} message={error ?? ''} variant="danger" onClose={() => setError(null)} />
     </>
   );
 }
