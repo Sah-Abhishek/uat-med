@@ -109,7 +109,7 @@ export function LoginPage() {
       {/* ── LEFT ─────────────────────────── */}
       <aside className="relative flex flex-col justify-between p-10 lg:p-14 overflow-hidden">
         <div>
-          <ValerionLogoDark />
+          <img src="/valerion-logo-D.png" alt="Valerion Health" className="h-9 w-auto" />
           <h1 className="mt-16 text-3xl font-bold">Welcome to Valerion</h1>
           <p className="mt-2 text-sm text-white/70 font-medium">
             Efficient coding for better healthcare outcomes
@@ -215,25 +215,6 @@ export function LoginPage() {
           )}
         </div>
       </main>
-    </div>
-  );
-}
-
-function ValerionLogoDark() {
-  return (
-    <div className="flex items-center gap-2">
-      <svg viewBox="0 0 48 48" className="w-12 h-12" aria-hidden>
-        <path d="M12 14 L24 34 L36 14" stroke="#FFFFFF" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-        <path d="M16 10 L24 24 L32 10" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.6" />
-      </svg>
-      <div className="flex flex-col leading-none">
-        <div className="flex items-baseline">
-          <span className="text-2xl font-extrabold text-white tracking-tightish">V</span>
-          <span className="text-2xl font-extrabold text-primary tracking-tightish">alerion</span>
-          <sup className="text-primary text-sm ml-0.5">++</sup>
-        </div>
-        <span className="text-[11px] text-white/50 tracking-[0.3em] font-medium self-end mt-0.5">Health</span>
-      </div>
     </div>
   );
 }
