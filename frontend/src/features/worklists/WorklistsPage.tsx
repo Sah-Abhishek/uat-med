@@ -31,7 +31,7 @@ import { SortableHeader } from '@/components/ui/SortableHeader';
 import { useCan } from '@/hooks/useCan';
 import { useScope } from '@/scope/store';
 import { useTableSort, sortRows } from '@/hooks/useTableSort';
-import { cn, formatDate, formatNumber, todayISO } from '@/lib/utils';
+import { cn, formatDate, formatNumber, todayISO, tomorrowISO } from '@/lib/utils';
 import {
   Plus,
   Filter as FilterIcon,
@@ -844,7 +844,7 @@ function AddVolumeModal({ open, onClose }: { open: boolean; onClose: () => void 
               value={watch('receivedDate')}
               onChange={(v) => setValue('receivedDate', v, { shouldValidate: true })}
               placeholder="Select received date"
-              max={todayISO()}
+              max={tomorrowISO()}
             />
             {errors.receivedDate && (
               <p className="mt-1 text-xs text-danger">{errors.receivedDate.message}</p>

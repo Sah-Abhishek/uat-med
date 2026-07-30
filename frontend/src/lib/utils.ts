@@ -43,6 +43,15 @@ export function todayISO(): string {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
+/** Tomorrow's date as a LOCAL YYYY-MM-DD string; see todayISO. */
+export function tomorrowISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 export function initials(name: string | null | undefined): string {
   if (!name) return '—';
   const parts = name.trim().split(/\s+/);
